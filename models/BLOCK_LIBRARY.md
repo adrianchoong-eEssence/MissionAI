@@ -1,0 +1,533 @@
+# Programme Block Library
+
+Version: 1.0
+
+---
+
+# Purpose
+
+Every eEssence programme is built from reusable Programme Blocks.
+
+A Programme Block is the smallest meaningful experience within a learning journey.
+
+Mission AI does not understand "team building".
+
+Mission AI understands Programme Blocks.
+
+Every programme is simply a sequence of Programme Blocks.
+
+---
+
+# Programme Flow
+
+A programme is assembled using one or more blocks.
+
+Example
+
+Arrival
+
+↓
+
+Registration
+
+↓
+
+Opening
+
+↓
+
+Energizer
+
+↓
+
+Group Formation
+
+↓
+
+Challenge
+
+↓
+
+Debrief
+
+↓
+
+Break
+
+↓
+
+Challenge
+
+↓
+
+Debrief
+
+↓
+
+Reflection
+
+↓
+
+Celebration
+
+↓
+
+Closing
+
+---
+
+# Standard Block Template
+
+Every Programme Block must define the following.
+
+---
+
+## Block Name
+
+Official name of the block.
+
+---
+
+## Purpose
+
+Why this block exists.
+
+---
+
+## Facilitator Objective
+
+What the facilitator wants to achieve.
+
+---
+
+## Participant Objective
+
+What participants should experience.
+
+---
+
+## AI Companion Behaviour
+
+How AURA behaves during this block.
+
+---
+
+## Mission Control Behaviour
+
+What appears on the projector.
+
+---
+
+## Participant Screen
+
+What participants see on their phones.
+
+---
+
+## Facilitator Remote
+
+What controls are available.
+
+---
+
+## Inputs
+
+Information required before the block begins.
+
+---
+
+## Outputs
+
+Information produced when the block ends.
+
+---
+
+## Completion Criteria
+
+How Mission AI knows the block has finished.
+
+---
+
+## Learning Outcome
+
+How this block contributes to learning.
+
+---
+
+# Programme Blocks
+
+## 1 Arrival
+
+Purpose
+
+Welcome participants into the experience before registration begins.
+
+Participant Emotion
+
+Curiosity
+
+Facilitator Goal
+
+Create anticipation.
+
+AI Behaviour
+
+Friendly welcome.
+
+Mission Control
+
+Welcome screen.
+
+---
+
+## 2 Registration
+
+Purpose
+
+Register participants quickly.
+
+Participant Emotion
+
+Confidence.
+
+AI Behaviour
+
+Guide participants through joining.
+
+Mission Control
+
+Participant count.
+
+Completion
+
+Participant successfully joins.
+
+---
+
+## 3 Opening
+
+Purpose
+
+Set expectations.
+
+Participant Emotion
+
+Psychological safety.
+
+AI Behaviour
+
+Reinforce programme objectives.
+
+Mission Control
+
+Opening message.
+
+---
+
+## 4 Energizer
+
+Purpose
+
+Increase energy.
+
+Participant Emotion
+
+Fun.
+
+AI Behaviour
+
+Encourage participation.
+
+Mission Control
+
+Instructions.
+
+Completion
+
+Activity completed.
+
+---
+
+## 5 Group Formation
+
+Purpose
+
+Create balanced teams.
+
+Participant Emotion
+
+Excitement.
+
+AI Behaviour
+
+Reveal teams.
+
+Encourage interaction.
+
+Mission Control
+
+Reveal countdown.
+
+Facilitator Remote
+
+Reveal Teams
+
+Re-shuffle
+
+Completion
+
+All participants assigned.
+
+---
+
+## 6 Challenge
+
+Purpose
+
+Deliver experiential learning activity.
+
+Participant Emotion
+
+Engagement.
+
+AI Behaviour
+
+Mission briefing.
+
+Hints.
+
+Encouragement.
+
+Mission Control
+
+Timer.
+
+Objectives.
+
+Leaderboard.
+
+Completion
+
+Challenge completed.
+
+---
+
+## 7 Debrief
+
+Purpose
+
+Convert experience into learning.
+
+Participant Emotion
+
+Reflection.
+
+AI Behaviour
+
+Ask reflection questions.
+
+Mission Control
+
+Debrief prompts.
+
+Completion
+
+Reflection complete.
+
+---
+
+## 8 Break
+
+Purpose
+
+Allow recovery.
+
+Participant Emotion
+
+Relaxation.
+
+AI Behaviour
+
+Encourage networking.
+
+Mission Control
+
+Countdown.
+
+---
+
+## 9 Reflection
+
+Purpose
+
+Personal learning.
+
+Participant Emotion
+
+Insight.
+
+AI Behaviour
+
+Guide reflection.
+
+Mission Control
+
+Reflection prompts.
+
+Completion
+
+Reflection submitted.
+
+---
+
+## 10 Celebration
+
+Purpose
+
+Celebrate achievement.
+
+Participant Emotion
+
+Pride.
+
+AI Behaviour
+
+Celebrate contribution.
+
+Mission Control
+
+Leaderboard.
+
+Photos.
+
+Awards.
+
+---
+
+## 11 Closing
+
+Purpose
+
+End the programme positively.
+
+Participant Emotion
+
+Motivation.
+
+AI Behaviour
+
+Final message.
+
+Mission Control
+
+Closing slide.
+
+Completion
+
+Programme complete.
+
+---
+
+# Future Blocks
+
+Mission AI supports unlimited Programme Blocks.
+
+Examples
+
+CSR
+
+Community Engagement
+
+Road Rally Checkpoint
+
+Amazing Race Checkpoint
+
+Coaching
+
+Simulation
+
+Case Study
+
+Innovation Lab
+
+Presentation
+
+Hackathon
+
+Outdoor Expedition
+
+Assessment
+
+Certification
+
+Networking
+
+Wellness
+
+Icebreaker
+
+Awards
+
+Virtual Reality
+
+Escape Room
+
+Service Learning
+
+---
+
+# Golden Rule
+
+Mission AI never delivers activities.
+
+Mission AI delivers Programme Blocks.
+
+Activities are simply content placed inside a Challenge Block.
+
+This separation allows every activity to be reused across every programme.
+
+---
+
+# Example
+
+Challenge Block
+
+↓
+
+Activity
+
+↓
+
+Roller Coaster Challenge
+
+or
+
+Catalyst Challenge
+
+or
+
+Corporate Warriors
+
+or
+
+Mission AI
+
+The Programme Block never changes.
+
+Only the activity changes.
+
+---
+
+# Future Vision
+
+Every eEssence programme can be generated by arranging Programme Blocks.
+
+Mission AI understands the flow.
+
+Proposal OS designs the flow.
+
+Facilitator Hub delivers the flow.
+
+AURA supports the flow.
+
+Together they form the eEssence Experiential Learning OS.
