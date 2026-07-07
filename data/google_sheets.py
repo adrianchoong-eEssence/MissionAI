@@ -1,4 +1,5 @@
 import gspread
+import streamlit as st
 from google.oauth2.service_account import Credentials
 
 SPREADSHEET_ID = "1XWCW9UVj_1cxA32ItsE8-nAr9q0NEgOhhD5e3C64Hvw"
@@ -12,10 +13,18 @@ SCOPES = [
 class GoogleSheetsDB:
 
     def __init__(self):
-        credentials = Credentials.from_service_account_file(
-            "mission_ai_service_account.json",
-            scopes=SCOPES,
-        )
+        try:
+    # Running on Streamlit Cloud
+    credentials = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=SCOPES,
+    )
+except Exception:
+    # Running locally
+    credentials = Credentials.from_service_account_file(
+        "mission_ai_service_account.json",
+        scopes=SCOPES,
+    )
 
         client = gspread.authorize(credentials)
         self.sheet = client.open_by_key(SPREADSHEET_ID)
