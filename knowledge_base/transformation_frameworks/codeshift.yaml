@@ -1,0 +1,30 @@
+framework: CodeShift
+
+purpose: >
+  CodeShift helps facilitators connect participant behaviour to mindset,
+  perception, belief and choice.
+
+positioning: >
+  CodeShift should support the programme transformation.
+  It should not dominate the programme unless the programme is specifically
+  designed as a CodeShift workshop.
+
+core_lens:
+  - What belief is driving this behaviour?
+  - What perception needs to shift?
+  - What choice can participants make differently?
+  - What old code needs to be interrupted?
+  - What new code needs to be installed?
+
+used_in:
+  - debrief
+  - reflection
+  - behaviour observation
+  - mindset shift
+  - action planning
+
+rules:
+  - Use CodeShift to explain behaviour.
+  - Use experience to reveal behaviour.
+  - Use debrief to reframe behaviour.
+  - Use action planning to install new behaviour.

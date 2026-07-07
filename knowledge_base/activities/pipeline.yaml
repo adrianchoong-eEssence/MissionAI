@@ -1,0 +1,139 @@
+name: Pipeline Challenge
+
+version: 1.0
+
+category: Collaboration
+
+type: Team Building
+
+difficulty: 3
+
+energy_level: 4
+
+physical_intensity: 2
+
+mental_intensity: 3
+
+ideal_duration: 30
+
+participants:
+
+  minimum: 8
+
+  maximum: 500
+
+venue:
+
+  indoor: true
+
+  outdoor: true
+
+learning_objectives:
+
+  - Communication
+
+  - Collaboration
+
+  - Planning
+
+  - Leadership
+
+  - Systems Thinking
+
+best_programme_stage:
+
+  - Morning
+
+  - Early Programme
+
+works_well_after:
+
+  - Icebreaker
+
+  - Team Formation
+
+works_well_before:
+
+  - Catalyst
+
+  - Roller Coaster
+
+participant_experience:
+
+  participants usually focus on speed before accuracy.
+
+  frustration increases after repeated mistakes.
+
+  successful teams naturally slow down and communicate.
+
+common_behaviours:
+
+  - Talking over each other
+
+  - One dominant leader
+
+  - Lack of planning
+
+  - Trial and error
+
+facilitator_observations:
+
+  allow teams to struggle.
+
+  avoid giving solutions too early.
+
+  observe communication patterns.
+
+intervention_triggers:
+
+  no progress for 5 minutes
+
+  complete silence
+
+  unsafe behaviour
+
+debrief_questions:
+
+  - What caused your biggest breakthrough?
+
+  - What assumptions slowed you down?
+
+  - What changed when communication improved?
+
+  - Where does this happen at work?
+
+codeshift_connections:
+
+  - Listening
+
+  - Decision Making
+
+  - Trust
+
+  - Alignment
+
+experience_tags:
+
+  - Fun
+
+  - Fast
+
+  - Communication
+
+  - Leadership
+
+  - Teamwork
+
+equipment:
+
+  - Pipeline tubes
+
+  - Golf balls
+
+estimated_setup_time: 10
+
+estimated_reset_time: 5
+
+weather_dependency: false
+
+risk_level: Low

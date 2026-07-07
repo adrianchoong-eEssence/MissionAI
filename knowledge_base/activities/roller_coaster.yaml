@@ -1,0 +1,125 @@
+activity:
+  id: roller_coaster
+  name: Roller Coaster Challenge
+
+summary: >
+  Teams build individual sections of a roller coaster.
+  Every team succeeds only when all sections integrate into
+  one continuous working system.
+
+category:
+  - Collaboration
+  - Systems Thinking
+  - Innovation
+
+duration:
+  minimum: 60
+  recommended: 90
+  maximum: 120
+
+venue:
+  indoor: true
+  outdoor: true
+
+group_size:
+  minimum: 20
+  maximum: 500
+
+energy_level: High
+
+difficulty: Medium
+
+materials:
+  - PVC pipes
+  - Tubes
+  - Cable ties
+  - Connectors
+  - Balls
+
+learning_objectives:
+
+  - Cross functional collaboration
+
+  - Systems thinking
+
+  - Communication
+
+  - Planning
+
+  - Continuous improvement
+
+participant_behaviour:
+
+  before:
+    - Teams work independently
+    - Protect their own ideas
+    - Limited communication
+
+  during:
+    - Realise dependencies
+    - Discover bottlenecks
+    - Negotiate changes
+    - Adapt designs
+
+  after:
+    - Appreciate integration
+    - Understand shared ownership
+    - Focus on organisational success
+
+facilitator_observations:
+
+  watch_for:
+
+    - Leaders dominating
+
+    - Quiet participants
+
+    - Information silos
+
+    - Teams blaming others
+
+    - Lack of testing
+
+intervention_triggers:
+
+  - Ask teams to test earlier
+
+  - Encourage cross-team visits
+
+  - Challenge assumptions
+
+  - Introduce changing requirements
+
+debrief_questions:
+
+  - What happened when every team focused only on itself?
+
+  - What changed once everyone worked together?
+
+  - Where do we experience this in the workplace?
+
+  - What delayed success?
+
+  - What accelerated success?
+
+codeshift_links:
+
+  - Systems Thinking
+
+  - Shared Identity
+
+  - Collaboration
+
+  - Continuous Adaptation
+
+experience_tags:
+
+  - Team Building
+
+  - Leadership
+
+  - Change
+
+  - Collaboration
+
+  - Communication

@@ -1,0 +1,38 @@
+programme_intents:
+
+  Reward:
+    purpose: Celebrate and appreciate people.
+    outcome:
+      - Fun
+      - Enjoyment
+      - Recognition
+      - Team Bonding
+
+  Reconnect:
+    purpose: Rebuild relationships and trust.
+    outcome:
+      - Trust
+      - Communication
+      - Collaboration
+
+  Restore:
+    purpose: Re-energise and reduce stress.
+    outcome:
+      - Motivation
+      - Engagement
+      - Wellbeing
+
+  Transform:
+    purpose: Change mindset and behaviour.
+    outcome:
+      - Ownership
+      - Adaptability
+      - Accountability
+
+  Develop:
+    purpose: Build capability and competence.
+    outcome:
+      - Leadership
+      - Communication
+      - Problem Solving
+      - Decision Making

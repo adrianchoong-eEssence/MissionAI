@@ -1,0 +1,21 @@
+purpose: >
+  CodeShift is used inside Mission AI as a transformation lens.
+  It helps facilitators understand what mindset, belief or behavioural pattern
+  may be blocking the desired programme outcome.
+
+used_for:
+  - reframing participant behaviour
+  - guiding debrief questions
+  - connecting activities to mindset shifts
+  - helping facilitators move from activity to transformation
+
+core_questions:
+  - What belief is driving this behaviour?
+  - What perception needs to shift?
+  - What choice can participants make differently?
+  - What new code needs to be installed?
+  - What old code needs to be interrupted?
+
+application_rule:
+  CodeShift should support the transformation.
+  It should not dominate the programme flow.
