@@ -14,17 +14,15 @@ class GoogleSheetsDB:
 
     def __init__(self):
         try:
-    # Running on Streamlit Cloud
-    credentials = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=SCOPES,
-    )
-except Exception:
-    # Running locally
-    credentials = Credentials.from_service_account_file(
-        "mission_ai_service_account.json",
-        scopes=SCOPES,
-    )
+            credentials = Credentials.from_service_account_info(
+                st.secrets["gcp_service_account"],
+                scopes=SCOPES,
+            )
+        except Exception:
+            credentials = Credentials.from_service_account_file(
+                "mission_ai_service_account.json",
+                scopes=SCOPES,
+            )
 
         client = gspread.authorize(credentials)
         self.sheet = client.open_by_key(SPREADSHEET_ID)
