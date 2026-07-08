@@ -1,5 +1,6 @@
 import streamlit as st
 from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
 
 from data.google_sheets import GoogleSheetsDB
 from ai.facilitator import ask_facilitator
@@ -20,6 +21,11 @@ def reset_session():
 
 
 def show_participant():
+
+    # Refresh every 5 seconds once participant has joined
+    if "participant_event_id" in st.session_state:
+        st_autorefresh(interval=5000, key="participant_refresh")
+
     st.title("📱 Mission App")
     st.caption("Powered by EXOS")
 
@@ -62,8 +68,6 @@ def show_participant():
     st.success(f"Welcome {st.session_state['participant_name']}!")
     st.caption(st.session_state["participant_event_name"])
 
-    st.divider()
-
     col1, col2 = st.columns(2)
 
     with col1:
@@ -74,39 +78,38 @@ def show_participant():
 
     st.divider()
 
-    st.subheader("Your AI Facilitator")
-    st.markdown(f"## 🧠 {st.session_state['ai_name']}")
+    st.subheader("🎯 Current Mission")
+
+    mission = db.get_current_mission(
+        st.session_state["participant_event_id"]
+    )
+
+    if mission:
+
+        st.success(mission.get("Title", "Mission"))
+
+        st.write(mission.get("Description", ""))
+
+        if mission.get("Clue"):
+            st.info("💡 " + mission["Clue"])
+
+        st.button("🤖 Ask Atlas", disabled=True)
+
+        st.button("📸 Submit Photo", disabled=True)
+
+    else:
+
+        st.info("Waiting for facilitator to launch a mission...")
+
+    st.divider()
+
+    st.subheader(f"🧠 {st.session_state['ai_name']}")
 
     if st.session_state.get("ai_personality"):
         st.caption(st.session_state["ai_personality"])
 
     if st.session_state.get("ai_greeting"):
         st.info(st.session_state["ai_greeting"])
-    else:
-        st.info(
-            f"Hello {st.session_state['participant_team']}.\n\n"
-            f"I'm {st.session_state['ai_name']}.\n\n"
-            "I'm here to help your team think, not to give you answers."
-        )
-
-    st.divider()
-
-    st.subheader("🎯 Current Mission")
-
-    mission = db.get_current_mission(st.session_state["participant_event_id"])
-
-    if mission:
-        st.success(mission.get("Title", "Mission"))
-        st.write(mission.get("Description", ""))
-
-        if mission.get("Clue"):
-            st.info(mission.get("Clue"))
-    else:
-        st.info("Waiting for facilitator to launch a mission...")
-
-    st.divider()
-
-    st.subheader(f"💬 Talk to {st.session_state['ai_name']}")
 
     conversation = db.get_conversation(
         st.session_state["participant_event_id"],
@@ -114,19 +117,19 @@ def show_participant():
     )
 
     for message in conversation:
-        role = str(message.get("Role", "")).lower()
 
-        if role == "user":
-            streamlit_role = "user"
-        else:
-            streamlit_role = "assistant"
+        role = "assistant"
 
-        with st.chat_message(streamlit_role):
+        if str(message.get("Role", "")).lower() == "user":
+            role = "user"
+
+        with st.chat_message(role):
             st.markdown(message.get("Message", ""))
 
     prompt = st.chat_input(f"Message {st.session_state['ai_name']}...")
 
     if prompt:
+
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         db.save_conversation(
@@ -138,20 +141,13 @@ def show_participant():
             timestamp=timestamp,
         )
 
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-            with st.spinner(f"{st.session_state['ai_name']} is thinking..."):
-                reply = ask_facilitator(
-                    facilitator_name=st.session_state["ai_name"],
-                    personality=st.session_state["ai_personality"],
-                    greeting=st.session_state["ai_greeting"],
-                    mission=mission,
-                    user_message=prompt,
-                )
-
-            st.markdown(reply)
+        reply = ask_facilitator(
+            facilitator_name=st.session_state["ai_name"],
+            personality=st.session_state["ai_personality"],
+            greeting=st.session_state["ai_greeting"],
+            mission=mission,
+            user_message=prompt,
+        )
 
         db.save_conversation(
             event_id=st.session_state["participant_event_id"],
