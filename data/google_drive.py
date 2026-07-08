@@ -121,4 +121,15 @@ def upload_photo(event_id, mission_id, team_name, participant_name, uploaded_fil
         "file_id": file_id,
         "url": file.get("webViewLink", ""),
         "filename": filename,
-    }
+    }    def get_team_submission(self, event_id, mission_id, team_name):
+        rows = self.submissions.get_all_records()
+
+        for row in rows:
+            if (
+                row.get("EventID") == event_id
+                and row.get("MissionID") == mission_id
+                and row.get("TeamName") == team_name
+            ):
+                return row
+
+        return None

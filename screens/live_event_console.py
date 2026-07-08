@@ -112,6 +112,45 @@ def show_live_event_console():
         st.write(mission.get("Description", ""))
     else:
         st.info("No live mission yet.")
+    st.divider()
 
+    st.subheader("📸 Mission Submissions")
+
+    submissions = db.get_submissions(event_id)
+
+    if not submissions:
+
+        st.info("No submissions received yet.")
+
+    else:
+
+        for submission in submissions:
+
+            with st.container():
+
+                col1, col2 = st.columns([3, 1])
+
+                with col1:
+
+                    st.markdown(
+                        f"""
+**{submission['TeamName']}**
+- Participant: {submission['ParticipantName']}
+- Mission: {submission['MissionID']}
+- Submitted: {submission['SubmittedAt']}
+"""
+                    )
+
+                with col2:
+
+                    if submission["ImageURL"]:
+
+                        st.link_button(
+                            "📷 View Photo",
+                            submission["ImageURL"],
+                            use_container_width=True,
+                        )
+
+                st.divider()
     if st.button("🔄 Refresh Now"):
         st.rerun()
