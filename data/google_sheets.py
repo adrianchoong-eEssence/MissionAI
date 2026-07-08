@@ -9,6 +9,21 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+@st.cache_resource
+def get_google_sheet():
+    try:
+        credentials = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=SCOPES,
+        )
+    except Exception:
+        credentials = Credentials.from_service_account_file(
+            "mission_ai_service_account.json",
+            scopes=SCOPES,
+        )
+
+    client = gspread.authorize(credentials)
+    return client.open_by_key(SPREADSHEET_ID)
 
 class GoogleSheetsDB:
 
