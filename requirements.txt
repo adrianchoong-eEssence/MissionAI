@@ -5,3 +5,4 @@ openai
 PyYAML
 pandas
 streamlit-autorefresh
+google-api-python-client
