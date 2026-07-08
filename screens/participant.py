@@ -24,7 +24,7 @@ def show_participant():
 
     # Refresh every 5 seconds once participant has joined
     if "participant_event_id" in st.session_state:
-        st_autorefresh(interval=5000, key="participant_refresh")
+        st_autorefresh(interval=30000, key="participant_refresh")
 
     st.title("📱 Mission App")
     st.caption("Powered by EXOS")
