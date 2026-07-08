@@ -25,22 +25,12 @@ def get_google_sheet():
     client = gspread.authorize(credentials)
     return client.open_by_key(SPREADSHEET_ID)
 
+
 class GoogleSheetsDB:
 
     def __init__(self):
-        try:
-            credentials = Credentials.from_service_account_info(
-                st.secrets["gcp_service_account"],
-                scopes=SCOPES,
-            )
-        except Exception:
-            credentials = Credentials.from_service_account_file(
-                "mission_ai_service_account.json",
-                scopes=SCOPES,
-            )
 
-        client = gspread.authorize(credentials)
-        self.sheet = client.open_by_key(SPREADSHEET_ID)
+        self.sheet = get_google_sheet()
 
         self.participants = self.sheet.worksheet("Participants")
         self.events = self.sheet.worksheet("Events")
@@ -48,7 +38,6 @@ class GoogleSheetsDB:
         self.teams = self.sheet.worksheet("Teams")
         self.ai_facilitators = self.sheet.worksheet("AIFacilitators")
         self.conversations = self.sheet.worksheet("Conversations")
-
     # Events
 
     def create_event(
