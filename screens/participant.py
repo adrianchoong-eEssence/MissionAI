@@ -172,7 +172,7 @@ def show_participant():
         # Duplicate Submission Check
         # --------------------------------------------
 
-        existing_submission = db.get_team_submission(
+        existing_submission = None
             st.session_state["participant_event_id"],
             mission["MissionID"],
             st.session_state["participant_team"],
