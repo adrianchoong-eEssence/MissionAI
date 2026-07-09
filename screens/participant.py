@@ -173,10 +173,6 @@ def show_participant():
         # --------------------------------------------
 
         existing_submission = None
-            st.session_state["participant_event_id"],
-            mission["MissionID"],
-            st.session_state["participant_team"],
-        )
 
         st.divider()
 
