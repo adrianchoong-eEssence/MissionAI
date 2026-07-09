@@ -6,6 +6,7 @@ from screens.leaderboard_display import show_leaderboard_display
 from screens.live_event_console import show_live_event_console
 from screens.participant import show_participant
 from screens.programme_builder import show_programme_builder
+from screens.show_control import show_show_control
 
 st.set_page_config(
     page_title="EXOS",
@@ -19,22 +20,20 @@ page = st.sidebar.radio(
     "Navigation",
     [
         "🏠 Dashboard",
+        "🎬 Show Control",
+        "📺 Live Display",
+        "🎮 Live Event Console",
+        "📱 Mission App",
+        "🗓 Events",
         "📚 Experience Library",
         "🛠 Programme Builder",
-        "🗓 Events",
-        "🎮 Live Event Console",
-        "🏆 Display Engine",
-        "📱 Mission App",
         "⚙ Settings",
     ],
 )
 
 if page == "🏠 Dashboard":
-
     st.title("🚀 eEssence Experience OS")
-
     st.subheader("Experiential Learning Operating System")
-
     st.success("System Status: Online")
 
     st.markdown("---")
@@ -52,62 +51,51 @@ if page == "🏠 Dashboard":
 
     st.markdown("---")
 
-    st.subheader("Modules")
+    st.subheader("Saturday Priority Modules")
 
     st.markdown(
         """
-✅ Experience Library
+✅ Participant Registration
 
-✅ Programme Builder
+✅ Round Robin Team Assignment
 
-✅ Event Management
+✅ Mission Launch
 
-✅ Mission AI
+✅ Submission Capture
 
-✅ AI Facilitator
+✅ Facilitator Scoring
 
-✅ Live Event Console
+✅ Live Leaderboard
 
-✅ Display Engine
+✅ Live Display
 
-🚧 Registration Dashboard
-
-🚧 Analytics
-
-🚧 QR Missions
-
-🚧 VoicePrint Integration
+✅ Show Control
 """
     )
 
-elif page == "📚 Experience Library":
+elif page == "🎬 Show Control":
+    show_show_control()
 
+elif page == "📺 Live Display":
+    show_leaderboard_display()
+
+elif page == "🎮 Live Event Console":
+    show_live_event_console()
+
+elif page == "📱 Mission App":
+    show_participant()
+
+elif page == "🗓 Events":
+    show_event_manager()
+
+elif page == "📚 Experience Library":
     show_experience_library()
 
 elif page == "🛠 Programme Builder":
-
     show_programme_builder()
 
-elif page == "🗓 Events":
-
-    show_event_manager()
-
-elif page == "🎮 Live Event Console":
-
-    show_live_event_console()
-
-elif page == "🏆 Display Engine":
-
-    show_leaderboard_display()
-
-elif page == "📱 Mission App":
-
-    show_participant()
-
 elif page == "⚙ Settings":
-
     st.title("⚙ Settings")
-
     st.info(
         "Global settings will eventually control event defaults, display themes, AI behaviour and organisation preferences."
     )
