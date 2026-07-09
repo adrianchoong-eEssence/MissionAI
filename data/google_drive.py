@@ -29,8 +29,10 @@ def get_drive_service():
 def get_or_create_folder(folder_name, parent_id):
     service = get_drive_service()
 
+    safe_folder_name = str(folder_name).replace("'", "").strip()
+
     query = (
-        f"name='{folder_name}' "
+        f"name='{safe_folder_name}' "
         f"and mimeType='application/vnd.google-apps.folder' "
         f"and '{parent_id}' in parents "
         f"and trashed=false"
@@ -48,7 +50,7 @@ def get_or_create_folder(folder_name, parent_id):
         return folders[0]["id"]
 
     metadata = {
-        "name": folder_name,
+        "name": safe_folder_name,
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [parent_id],
     }
@@ -83,10 +85,12 @@ def upload_photo(event_id, mission_id, team_name, participant_name, uploaded_fil
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    safe_team = team_name.replace(" ", "_")
-    safe_name = participant_name.replace(" ", "_")
+    safe_event = str(event_id).replace(" ", "_")
+    safe_mission = str(mission_id).replace(" ", "_")
+    safe_team = str(team_name).replace(" ", "_")
+    safe_name = str(participant_name).replace(" ", "_")
 
-    filename = f"{event_id}_{mission_id}_{safe_team}_{safe_name}_{timestamp}.jpg"
+    filename = f"{safe_event}_{safe_mission}_{safe_team}_{safe_name}_{timestamp}.jpg"
 
     file_bytes = uploaded_file.getvalue()
 
@@ -121,16 +125,4 @@ def upload_photo(event_id, mission_id, team_name, participant_name, uploaded_fil
         "file_id": file_id,
         "url": file.get("webViewLink", ""),
         "filename": filename,
-                 }
-    def get_team_submission(self, event_id, mission_id, team_name):
-        rows = self.submissions.get_all_records()
-
-        for row in rows:
-            if (
-                row.get("EventID") == event_id
-                and row.get("MissionID") == mission_id
-                and row.get("TeamName") == team_name
-            ):
-                return row
-
-        return None
+    }
