@@ -9,6 +9,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+
 @st.cache_resource
 def get_google_sheet():
     try:
@@ -27,9 +28,7 @@ def get_google_sheet():
 
 
 class GoogleSheetsDB:
-
     def __init__(self):
-
         self.sheet = get_google_sheet()
 
         self.participants = self.sheet.worksheet("Participants")
@@ -38,7 +37,11 @@ class GoogleSheetsDB:
         self.teams = self.sheet.worksheet("Teams")
         self.ai_facilitators = self.sheet.worksheet("AIFacilitators")
         self.conversations = self.sheet.worksheet("Conversations")
+        self.submissions = self.sheet.worksheet("Submissions")
+
+    # -------------------------
     # Events
+    # -------------------------
 
     def create_event(
         self,
@@ -75,7 +78,9 @@ class GoogleSheetsDB:
                 return event
         return None
 
+    # -------------------------
     # Teams
+    # -------------------------
 
     def create_teams(self, event_id, number_of_teams):
         records = self.teams.get_all_records()
@@ -106,7 +111,9 @@ class GoogleSheetsDB:
             if team.get("EventID") == event_id
         ]
 
+    # -------------------------
     # Participants
+    # -------------------------
 
     def join_player(self, event_id, name):
         teams = self.get_teams(event_id)
@@ -148,7 +155,9 @@ class GoogleSheetsDB:
                 return player
         return None
 
+    # -------------------------
     # Dashboard
+    # -------------------------
 
     def get_participant_count(self, event_id):
         return len([
@@ -159,7 +168,9 @@ class GoogleSheetsDB:
     def get_team_count(self, event_id):
         return len(self.get_teams(event_id))
 
+    # -------------------------
     # AI Facilitators
+    # -------------------------
 
     def get_ai_facilitators(self):
         return self.ai_facilitators.get_all_records()
@@ -173,7 +184,9 @@ class GoogleSheetsDB:
         index = abs(hash(team_name)) % len(facilitators)
         return facilitators[index]
 
+    # -------------------------
     # Conversations
+    # -------------------------
 
     def save_conversation(
         self,
@@ -203,7 +216,9 @@ class GoogleSheetsDB:
             and row.get("Team") == team
         ]
 
+    # -------------------------
     # Missions
+    # -------------------------
 
     def send_mission(
         self,
@@ -250,3 +265,98 @@ class GoogleSheetsDB:
             return None
 
         return live_missions[-1]
+
+    # -------------------------
+    # Submissions
+    # -------------------------
+
+    def save_submission(
+        self,
+        submission_id,
+        event_id,
+        mission_id,
+        team_name,
+        participant_name,
+        image_url,
+        drive_file_id,
+        submitted_at,
+        score="",
+        judged="No",
+        remarks="",
+    ):
+        self.submissions.append_row([
+            submission_id,
+            event_id,
+            mission_id,
+            team_name,
+            participant_name,
+            image_url,
+            drive_file_id,
+            score,
+            judged,
+            remarks,
+            submitted_at,
+        ])
+
+        return {
+            "SubmissionID": submission_id,
+            "EventID": event_id,
+            "MissionID": mission_id,
+            "TeamName": team_name,
+            "ParticipantName": participant_name,
+            "ImageURL": image_url,
+            "DriveFileID": drive_file_id,
+            "Score": score,
+            "Judged": judged,
+            "Remarks": remarks,
+            "SubmittedAt": submitted_at,
+        }
+
+    def get_team_submission(self, event_id, mission_id, team_name):
+        rows = self.submissions.get_all_records()
+
+        for row in rows:
+            if (
+                str(row.get("EventID", "")) == str(event_id)
+                and str(row.get("MissionID", "")) == str(mission_id)
+                and str(row.get("TeamName", "")) == str(team_name)
+            ):
+                return row
+
+        return None
+
+    def get_event_submissions(self, event_id):
+        rows = self.submissions.get_all_records()
+
+        return [
+            row
+            for row in rows
+            if str(row.get("EventID", "")) == str(event_id)
+        ]
+
+    def get_pending_submissions(self, event_id):
+        rows = self.get_event_submissions(event_id)
+
+        return [
+            row
+            for row in rows
+            if str(row.get("Judged", "")).lower() not in ["yes", "true", "approved"]
+        ]
+
+    def update_submission_score(
+        self,
+        submission_id,
+        score,
+        remarks="",
+        judged="Yes",
+    ):
+        rows = self.submissions.get_all_records()
+
+        for index, row in enumerate(rows, start=2):
+            if str(row.get("SubmissionID", "")) == str(submission_id):
+                self.submissions.update_cell(index, 8, score)
+                self.submissions.update_cell(index, 9, judged)
+                self.submissions.update_cell(index, 10, remarks)
+                return True
+
+        return False
