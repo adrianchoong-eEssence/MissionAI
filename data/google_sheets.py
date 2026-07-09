@@ -194,6 +194,18 @@ class GoogleSheetsDB:
     # -------------------------
 
     def join_player(self, event_id, name):
+        clean_name = str(name).strip()
+
+        existing_player = self.get_player(event_id, clean_name)
+        if existing_player:
+            return {
+                "EventID": existing_player.get("EventID", event_id),
+                "Name": existing_player.get("Name", clean_name),
+                "Team": existing_player.get("Team", ""),
+                "Points": existing_player.get("Points", 0),
+                "Status": existing_player.get("Status", "Waiting"),
+            }
+
         teams = self.get_teams(event_id)
         participants = [
             p
@@ -206,12 +218,12 @@ class GoogleSheetsDB:
         else:
             team = ""
 
-        self.participants.append_row([event_id, name, team, 0, "Waiting"])
+        self.participants.append_row([event_id, clean_name, team, 0, "Waiting"])
         self.clear_cache()
 
         return {
             "EventID": event_id,
-            "Name": name,
+            "Name": clean_name,
             "Team": team,
             "Points": 0,
             "Status": "Waiting",
@@ -224,7 +236,7 @@ class GoogleSheetsDB:
         for player in self.get_players():
             if (
                 str(player.get("EventID", "")) == str(event_id)
-                and str(player.get("Name", "")).lower() == str(name).lower()
+                and str(player.get("Name", "")).strip().lower() == str(name).strip().lower()
             ):
                 return player
         return None
