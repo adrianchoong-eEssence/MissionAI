@@ -332,6 +332,9 @@ class GoogleSheetsDB:
             if str(row.get("EventID", "")) == str(event_id)
         ]
 
+    def get_submissions(self, event_id):
+        return self.get_event_submissions(event_id)
+
     def get_pending_submissions(self, event_id):
         return [
             row
