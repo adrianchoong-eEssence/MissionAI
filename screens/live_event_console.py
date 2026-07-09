@@ -116,7 +116,7 @@ def show_live_event_console():
 
     st.subheader("📸 Mission Submissions")
 
-    submissions = db.get_submissions(event_id)
+    submissions = db.get_event_submissions(event_id)
 
     if not submissions:
 
@@ -146,9 +146,8 @@ def show_live_event_console():
                     if submission["ImageURL"]:
 
                         st.link_button(
-                            "📷 View Photo",
                             submission["ImageURL"],
-                            use_container_width=True,
+                            width="stretch",
                         )
 
                 st.divider()
