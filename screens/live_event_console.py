@@ -17,6 +17,31 @@ def auto_refresh(seconds=5):
     )
 
 
+def calculate_leaderboard(submissions):
+    leaderboard = {}
+
+    for submission in submissions:
+        team = submission.get("TeamName", "Unknown Team")
+        judged = str(submission.get("Judged", "")).lower()
+        score_raw = submission.get("Score", 0)
+
+        if judged not in ["yes", "true", "approved"]:
+            continue
+
+        try:
+            score = int(score_raw)
+        except Exception:
+            score = 0
+
+        leaderboard[team] = leaderboard.get(team, 0) + score
+
+    return sorted(
+        leaderboard.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+
 def show_live_event_console():
     st.title("🎮 Live Event Console")
 
@@ -56,6 +81,21 @@ def show_live_event_console():
 
     with col3:
         st.metric("Teams", db.get_team_count(event_id))
+
+    submissions = db.get_submissions(event_id)
+
+    st.divider()
+
+    st.subheader("🏆 Live Leaderboard")
+
+    leaderboard = calculate_leaderboard(submissions)
+
+    if not leaderboard:
+        st.info("No approved scores yet.")
+    else:
+        for index, (team, score) in enumerate(leaderboard, start=1):
+            medal = "🥇" if index == 1 else "🥈" if index == 2 else "🥉" if index == 3 else "⭐"
+            st.metric(f"{medal} {index}. {team}", f"{score} pts")
 
     st.divider()
 
@@ -117,8 +157,6 @@ def show_live_event_console():
     st.divider()
 
     st.subheader("📸 Mission Submissions")
-
-    submissions = db.get_submissions(event_id)
 
     if not submissions:
         st.info("No submissions received yet.")
