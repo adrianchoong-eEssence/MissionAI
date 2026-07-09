@@ -36,13 +36,6 @@ def reset_session():
             del st.session_state[key]
 
 
-def safe_int(value, default=0):
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
 def normalise_submission_type(mission):
     raw_type = str(mission.get("SubmissionType", "") or "").strip().upper()
     title = str(mission.get("Title", "") or "").strip().upper()
@@ -61,11 +54,17 @@ def normalise_submission_type(mission):
     if "CATALYST" in combined:
         return "CATALYST"
 
+    if "NASI" in combined or "REFLECTION" in combined:
+        return "NASI"
+
     if raw_type in ["PHOTO", "IMAGE"]:
         return "PHOTO"
 
-    if raw_type in ["TEXT", "REFLECTION", "NASI"]:
+    if raw_type in ["TEXT", "REFLECTION"]:
         return "TEXT"
+
+    if raw_type in ["NONE", "NO SUBMISSION"]:
+        return "NONE"
 
     return raw_type or "PHOTO"
 
@@ -118,10 +117,8 @@ def render_existing_submission(existing_submission):
 
 
 def save_text_submission(db, mission, payload):
-    submission_id = str(uuid.uuid4())
-
     db.save_submission(
-        submission_id=submission_id,
+        submission_id=str(uuid.uuid4()),
         event_id=st.session_state["participant_event_id"],
         mission_id=mission["MissionID"],
         team_name=st.session_state["participant_team"],
@@ -134,7 +131,7 @@ def save_text_submission(db, mission, payload):
 
 def render_pipeline_form(db, mission):
     st.subheader("📊 Customer Journey Results")
-    st.write("Submit your team's result after the run.")
+    st.write("Submit your team's result after the official run.")
 
     delivered = st.number_input(
         "Customers Delivered / Closed Cases",
@@ -150,20 +147,16 @@ def render_pipeline_form(db, mission):
         step=1,
     )
 
-    notes = st.text_area(
-        "Optional Notes",
-        placeholder="What helped or blocked the customer journey?",
-    )
-
     if st.button("📤 Submit Pipeline Results", width="stretch"):
         payload = (
             "PIPELINE RESULTS\n"
             f"Team: {st.session_state['participant_team']}\n"
             f"Delivered Customers: {delivered}\n"
-            f"Lost Customers: {lost}\n"
-            f"Notes: {notes or '-'}"
+            f"Lost Customers: {lost}"
         )
+
         save_text_submission(db, mission, payload)
+
         st.success("✅ Pipeline results submitted.")
         st.balloons()
         st.rerun()
@@ -171,7 +164,7 @@ def render_pipeline_form(db, mission):
 
 def render_helium_form(db, mission):
     st.subheader("🪄 Taking Ownership Together")
-    st.write("Submit your team's completion status after the activity.")
+    st.write("Submit your team's completion status after Helium Stick.")
 
     completed = st.radio(
         "Did your team complete the Helium Stick challenge?",
@@ -179,104 +172,164 @@ def render_helium_form(db, mission):
         horizontal=True,
     )
 
-    ownership_note = st.text_area(
-        "One ownership lesson from your team",
-        placeholder="Example: We stopped blaming and adjusted our own actions.",
-    )
-
     if st.button("📤 Submit Helium Stick Result", width="stretch"):
         payload = (
             "HELIUM STICK RESULT\n"
             f"Team: {st.session_state['participant_team']}\n"
-            f"Completed: {completed}\n"
-            f"Ownership Lesson: {ownership_note or '-'}"
+            f"Completed: {completed}"
         )
+
         save_text_submission(db, mission, payload)
+
         st.success("✅ Helium Stick result submitted.")
         st.balloons()
         st.rerun()
 
 
 def render_keypunch_form(db, mission):
-    st.subheader("⚡ Speed, Accuracy & Compliance")
-    st.write("Submit your team's best Key Punch result.")
-
-    completed = st.radio(
-        "Did your team complete all 30 numbers?",
-        ["Yes", "No"],
-        horizontal=True,
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        minutes = st.number_input("Minutes", min_value=0, value=0, step=1)
-
-    with col2:
-        seconds = st.number_input("Seconds", min_value=0, max_value=59, value=0, step=1)
+    st.subheader("⚡ Key Punch")
+    st.write("Submit your team's OFFICIAL attempt.")
 
     highest_number = st.number_input(
-        "Highest number reached if incomplete",
+        "Highest Number Reached Within 60 Seconds",
         min_value=0,
         max_value=30,
-        value=30 if completed == "Yes" else 0,
+        value=0,
         step=1,
-    )
-
-    strategy_note = st.text_area(
-        "What strategy helped your team?",
-        placeholder="Example: We divided the number zones and rotated roles.",
     )
 
     if st.button("📤 Submit Key Punch Result", width="stretch"):
         payload = (
             "KEY PUNCH RESULT\n"
             f"Team: {st.session_state['participant_team']}\n"
-            f"Completed All 30: {completed}\n"
-            f"Time: {safe_int(minutes):02d}:{safe_int(seconds):02d}\n"
-            f"Highest Number Reached: {highest_number}\n"
-            f"Strategy Note: {strategy_note or '-'}"
+            f"Highest Number Reached: {highest_number}"
         )
+
         save_text_submission(db, mission, payload)
-        st.success("✅ Key Punch result submitted.")
+
+        st.success("✅ Key Punch submitted.")
         st.balloons()
         st.rerun()
 
 
 def render_catalyst_form(db, mission):
-    st.subheader("⚙️ Enterprise Integration")
-    st.write("Submit your team's Catalyst station status.")
+    st.subheader("⚙️ Creating Enterprise Success")
+    st.write("Submit your team's Catalyst Challenge status.")
 
-    status = st.radio(
-        "Station Status",
-        ["Completed", "In Progress", "Blocked"],
-        horizontal=False,
+    completed = st.radio(
+        "Did your section complete?",
+        ["Yes", "No"],
+        horizontal=True,
     )
 
-    integration_note = st.text_area(
-        "Integration note",
-        placeholder="What must the next team know to connect with your station?",
+    uploaded_image = st.file_uploader(
+        "Optional Final Structure Photo",
+        type=["jpg", "jpeg", "png"],
     )
+
+    if uploaded_image is not None:
+        st.image(uploaded_image, width="stretch")
 
     if st.button("📤 Submit Catalyst Status", width="stretch"):
-        payload = (
-            "CATALYST STATUS\n"
-            f"Team: {st.session_state['participant_team']}\n"
-            f"Status: {status}\n"
-            f"Integration Note: {integration_note or '-'}"
+        if uploaded_image is not None:
+            drive = upload_photo(
+                event_id=st.session_state["participant_event_id"],
+                mission_id=mission["MissionID"],
+                team_name=st.session_state["participant_team"],
+                participant_name=st.session_state["participant_name"],
+                uploaded_file=uploaded_image,
+            )
+
+            payload = (
+                "CATALYST STATUS\n"
+                f"Team: {st.session_state['participant_team']}\n"
+                f"Completed: {completed}\n"
+                f"Photo: {drive['url']}"
+            )
+
+            drive_file_id = drive["file_id"]
+        else:
+            payload = (
+                "CATALYST STATUS\n"
+                f"Team: {st.session_state['participant_team']}\n"
+                f"Completed: {completed}\n"
+                "Photo: Not submitted"
+            )
+
+            drive_file_id = "TEXT-SUBMISSION"
+
+        db.save_submission(
+            submission_id=str(uuid.uuid4()),
+            event_id=st.session_state["participant_event_id"],
+            mission_id=mission["MissionID"],
+            team_name=st.session_state["participant_team"],
+            participant_name=st.session_state["participant_name"],
+            image_url=payload,
+            drive_file_id=drive_file_id,
+            submitted_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
-        save_text_submission(db, mission, payload)
+
         st.success("✅ Catalyst status submitted.")
         st.balloons()
         st.rerun()
 
 
+def render_nasi_form(db, mission):
+    st.subheader("📝 NASI Reflection")
+    st.write("Submit your team's final reflection.")
+
+    new_ideas = st.text_area(
+        "N — New Ideas",
+        placeholder="What new ideas did your team discover?",
+    )
+
+    areas = st.text_area(
+        "A — Areas for Improvement",
+        placeholder="What should the enterprise improve?",
+    )
+
+    strengths = st.text_area(
+        "S — Strengths",
+        placeholder="What strengths should the team protect and continue?",
+    )
+
+    implementation = st.text_area(
+        "I — Implementation",
+        placeholder="What is one action your team will implement next?",
+    )
+
+    if st.button("📤 Submit NASI Reflection", width="stretch"):
+        if not any([
+            new_ideas.strip(),
+            areas.strip(),
+            strengths.strip(),
+            implementation.strip(),
+        ]):
+            st.warning("Please enter at least one reflection before submitting.")
+            st.stop()
+
+        payload = (
+            "NASI REFLECTION\n"
+            f"Team: {st.session_state['participant_team']}\n\n"
+            f"N - New Ideas:\n{new_ideas.strip() or '-'}\n\n"
+            f"A - Areas for Improvement:\n{areas.strip() or '-'}\n\n"
+            f"S - Strengths:\n{strengths.strip() or '-'}\n\n"
+            f"I - Implementation:\n{implementation.strip() or '-'}"
+        )
+
+        save_text_submission(db, mission, payload)
+
+        st.success("✅ NASI reflection submitted.")
+        st.balloons()
+        st.rerun()
+
+
 def render_text_form(db, mission):
-    st.subheader("📝 Team Reflection")
+    st.subheader("📝 Team Response")
 
     response = st.text_area(
         "Submit your team's response",
-        placeholder="Type your team's key takeaway here.",
+        placeholder="Type your team's response here.",
     )
 
     if st.button("📤 Submit Response", width="stretch"):
@@ -289,7 +342,9 @@ def render_text_form(db, mission):
             f"Team: {st.session_state['participant_team']}\n"
             f"Response: {response.strip()}"
         )
+
         save_text_submission(db, mission, payload)
+
         st.success("✅ Response submitted.")
         st.balloons()
         st.rerun()
@@ -343,9 +398,11 @@ def render_submission_form(db, mission):
         render_keypunch_form(db, mission)
     elif submission_type == "CATALYST":
         render_catalyst_form(db, mission)
+    elif submission_type == "NASI":
+        render_nasi_form(db, mission)
     elif submission_type == "TEXT":
         render_text_form(db, mission)
-    elif submission_type in ["NONE", "NO SUBMISSION"]:
+    elif submission_type == "NONE":
         st.info("No participant submission is required for this mission.")
     else:
         render_photo_form(db, mission)
