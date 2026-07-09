@@ -68,7 +68,7 @@ def show_live_event_console():
 
     submission_type = st.selectbox(
         "Submission Type",
-        ["Photo", "Text", "QR", "None"]
+        ["Photo", "Text", "QR", "None"],
     )
 
     clue = st.text_area("Clue", value="")
@@ -80,10 +80,10 @@ def show_live_event_console():
 
     ai_help_enabled = st.selectbox(
         "AI Help Enabled",
-        ["Yes", "No"]
+        ["Yes", "No"],
     )
 
-    if st.button("🚀 Launch Mission"):
+    if st.button("🚀 Launch Mission", width="stretch"):
         db.send_mission(
             event_id=event_id,
             mission_id=mission_id,
@@ -96,10 +96,11 @@ def show_live_event_console():
             hint1=hint1,
             hint2=hint2,
             hint3=hint3,
-            ai_help_enabled=ai_help_enabled
+            ai_help_enabled=ai_help_enabled,
         )
 
         st.success("Mission launched.")
+        st.rerun()
 
     st.divider()
 
@@ -112,44 +113,73 @@ def show_live_event_console():
         st.write(mission.get("Description", ""))
     else:
         st.info("No live mission yet.")
+
     st.divider()
 
     st.subheader("📸 Mission Submissions")
 
-    submissions = db.get_event_submissions(event_id)
+    submissions = db.get_submissions(event_id)
 
     if not submissions:
-
         st.info("No submissions received yet.")
-
     else:
-
         for submission in submissions:
-
             with st.container():
+                st.markdown(
+                    f"""
+**{submission.get('TeamName', '')}**
 
-                col1, col2 = st.columns([3, 1])
-
-                with col1:
-
-                    st.markdown(
-                        f"""
-**{submission['TeamName']}**
-- Participant: {submission['ParticipantName']}
-- Mission: {submission['MissionID']}
-- Submitted: {submission['SubmittedAt']}
+- Participant: {submission.get('ParticipantName', '')}
+- Mission: {submission.get('MissionID', '')}
+- Submitted: {submission.get('SubmittedAt', '')}
+- Judged: {submission.get('Judged', 'No')}
+- Score: {submission.get('Score', '')}
 """
-                    )
+                )
 
-                with col2:
+                image_url = submission.get("ImageURL", "")
 
-                    if submission["ImageURL"]:
-
-                        st.link_button(
-                            submission["ImageURL"],
+                if image_url:
+                    try:
+                        st.image(
+                            image_url,
+                            caption="Mission Submission",
                             width="stretch",
                         )
+                    except Exception:
+                        st.warning("Submission image could not be displayed.")
+
+                score = st.number_input(
+                    "Score",
+                    min_value=0,
+                    max_value=1000,
+                    value=int(submission.get("Score") or 0),
+                    step=10,
+                    key=f"score_{submission.get('SubmissionID')}",
+                )
+
+                remarks = st.text_area(
+                    "Remarks",
+                    value=submission.get("Remarks", ""),
+                    key=f"remarks_{submission.get('SubmissionID')}",
+                )
+
+                if st.button(
+                    "✅ Approve / Update Score",
+                    key=f"approve_{submission.get('SubmissionID')}",
+                    width="stretch",
+                ):
+                    db.update_submission_score(
+                        submission_id=submission.get("SubmissionID"),
+                        score=score,
+                        remarks=remarks,
+                        judged="Yes",
+                    )
+
+                    st.success("Submission updated.")
+                    st.rerun()
 
                 st.divider()
-    if st.button("🔄 Refresh Now"):
+
+    if st.button("🔄 Refresh Now", width="stretch"):
         st.rerun()
