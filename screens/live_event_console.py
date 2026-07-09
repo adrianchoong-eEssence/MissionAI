@@ -42,6 +42,89 @@ def calculate_leaderboard(submissions):
     )
 
 
+def mission_defaults(submission_type):
+    mission_map = {
+        "PIPELINE": {
+            "mission_id": "M01",
+            "title": "Customer Journey: Pipeline Challenge",
+            "description": (
+                "Every marble represents a customer. Your task is to move customers safely "
+                "through the enterprise process and minimise lost clients. Await Adrian's briefing."
+            ),
+            "points": 100,
+            "clue": "Focus on flow, handover, ownership and customer protection.",
+        },
+        "HELIUM": {
+            "mission_id": "M02",
+            "title": "Taking Ownership Together: Helium Stick",
+            "description": (
+                "Lower the stick together. The moment we blame and point fingers, the issue escalates. "
+                "Your mission is to take ownership of your own action."
+            ),
+            "points": 100,
+            "clue": "Less blaming. More ownership. Small adjustments matter.",
+        },
+        "KEYPUNCH": {
+            "mission_id": "M03",
+            "title": "Balancing Speed, Accuracy and Compliance: Key Punch",
+            "description": (
+                "Complete the sequence with speed and accuracy. One person cannot do everything alone. "
+                "Strategy and coordination determine execution."
+            ),
+            "points": 100,
+            "clue": "If you want to go fast, go alone. If you want to go far, go together.",
+        },
+        "CATALYST": {
+            "mission_id": "M04",
+            "title": "Creating Enterprise Success: Catalyst Challenge",
+            "description": (
+                "Each team builds one part of the enterprise system. Your station must integrate with others "
+                "until the final trigger completes the full chain."
+            ),
+            "points": 100,
+            "clue": "Integration requires communication before execution begins.",
+        },
+        "TEXT": {
+            "mission_id": "M05",
+            "title": "Mission Reflection",
+            "description": "Submit your team's key takeaway, improvement idea or implementation commitment.",
+            "points": 50,
+            "clue": "Turn the activity into action.",
+        },
+        "PHOTO": {
+            "mission_id": "M06",
+            "title": "Photo Evidence Mission",
+            "description": "Upload one photo as evidence of mission completion.",
+            "points": 100,
+            "clue": "One submission per team is enough.",
+        },
+    }
+
+    return mission_map.get(submission_type, mission_map["PHOTO"])
+
+
+def render_submission_payload(payload):
+    if not payload:
+        return
+
+    if str(payload).startswith("data:image"):
+        try:
+            st.image(
+                payload,
+                caption="Mission Submission",
+                width="stretch",
+            )
+        except Exception:
+            st.warning("Submission image could not be displayed.")
+    else:
+        st.text_area(
+            "Submission Details",
+            value=str(payload),
+            height=180,
+            disabled=True,
+        )
+
+
 def show_live_event_console():
     st.title("🎮 Live Event Console")
 
@@ -101,19 +184,19 @@ def show_live_event_console():
 
     st.subheader("🚀 Launch Mission")
 
-    mission_id = st.text_input("Mission ID", value="M01")
-    title = st.text_input("Mission Title", value="Checkpoint 1")
-    description = st.text_area("Mission Instructions", value="Complete the challenge.")
-    points = st.number_input("Points", min_value=0, value=100, step=10)
-
     submission_type = st.selectbox(
-        "Submission Type",
-        ["Photo", "Text", "QR", "None"],
+        "Mission Type",
+        ["PIPELINE", "HELIUM", "KEYPUNCH", "CATALYST", "TEXT", "PHOTO", "NONE"],
     )
 
-    clue = st.text_area("Clue", value="")
-    answer = st.text_input("Answer", value="")
+    defaults = mission_defaults(submission_type)
 
+    mission_id = st.text_input("Mission ID", value=defaults["mission_id"])
+    title = st.text_input("Mission Title", value=defaults["title"])
+    description = st.text_area("Mission Instructions", value=defaults["description"])
+    points = st.number_input("Points", min_value=0, value=defaults["points"], step=10)
+    clue = st.text_area("Clue", value=defaults["clue"])
+    answer = st.text_input("Answer", value="")
     hint1 = st.text_input("Hint 1", value="")
     hint2 = st.text_input("Hint 2", value="")
     hint3 = st.text_input("Hint 3", value="")
@@ -151,12 +234,13 @@ def show_live_event_console():
     if mission:
         st.success(mission.get("Title", "Mission"))
         st.write(mission.get("Description", ""))
+        st.caption(f"Submission Type: {mission.get('SubmissionType', '')}")
     else:
         st.info("No live mission yet.")
 
     st.divider()
 
-    st.subheader("📸 Mission Submissions")
+    st.subheader("📥 Mission Submissions")
 
     if not submissions:
         st.info("No submissions received yet.")
@@ -175,17 +259,7 @@ def show_live_event_console():
 """
                 )
 
-                image_url = submission.get("ImageURL", "")
-
-                if image_url:
-                    try:
-                        st.image(
-                            image_url,
-                            caption="Mission Submission",
-                            width="stretch",
-                        )
-                    except Exception:
-                        st.warning("Submission image could not be displayed.")
+                render_submission_payload(submission.get("ImageURL", ""))
 
                 score = st.number_input(
                     "Score",
