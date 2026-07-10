@@ -1,19 +1,13 @@
 import streamlit as st
-import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 
 from data.google_sheets import GoogleSheetsDB
 
 
 def auto_refresh(seconds=5):
-    components.html(
-        f"""
-        <script>
-            setTimeout(function() {{
-                window.parent.location.reload();
-            }}, {seconds * 1000});
-        </script>
-        """,
-        height=0,
+    st_autorefresh(
+        interval=seconds * 1000,
+        key="leaderboard_display_refresh",
     )
 
 
@@ -331,12 +325,6 @@ def display_winner(leaderboard):
 
 
 def show_leaderboard_display():
-    st.set_page_config(
-        page_title="EXOS Display",
-        page_icon="🏆",
-        layout="wide",
-    )
-
     st.markdown(
         """
         <style>
@@ -377,6 +365,7 @@ def show_leaderboard_display():
         selected_label = st.selectbox(
             "Event",
             list(event_options.keys()),
+            key="live_display_event",
         )
 
         mode = st.selectbox(
@@ -390,12 +379,14 @@ def show_leaderboard_display():
                 "Winner",
             ],
             index=2,
+            key="live_display_mode",
         )
 
         refresh_seconds = st.selectbox(
             "Auto Refresh",
             [5, 10, 15, 30],
             index=1,
+            key="live_display_refresh_seconds",
         )
 
         st.caption("Use browser fullscreen mode for projector display.")

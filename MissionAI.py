@@ -28,16 +28,11 @@ pages = [
     "⚙ Settings",
 ]
 
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "🏠 Dashboard"
-
 page = st.sidebar.radio(
     "Navigation",
     pages,
-    index=pages.index(st.session_state.current_page),
+    key="main_navigation",
 )
-
-st.session_state.current_page = page
 
 if page == "🏠 Dashboard":
     st.title("🚀 eEssence Experience OS")
