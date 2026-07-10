@@ -556,7 +556,6 @@ def show_participant():
 
     if "participant_event_id" in st.session_state:
         persist_session_in_query_params()
-        st_autorefresh(interval=5000, key="participant_refresh")
 
     if "participant_event_id" not in st.session_state:
         st.markdown(
@@ -612,6 +611,7 @@ def show_participant():
 
     if mission is None:
         st.info("Waiting for facilitator to launch a mission...")
+        st_autorefresh(interval=5000, key="waiting_for_mission_refresh")
     else:
         st.success(mission.get("Title", "Mission"))
         st.write(mission.get("Description", ""))
@@ -629,7 +629,18 @@ def show_participant():
         st.divider()
         if existing_submission:
             render_existing_submission(existing_submission)
+            st_autorefresh(interval=5000, key="submitted_mission_refresh")
         else:
+            st.caption(
+                "Auto-refresh pauses while you enter results so your values are not reset."
+            )
+            if st.button(
+                "🔄 Check for New Mission",
+                width="stretch",
+                key=f"check_mission_{mission.get('MissionID', 'current')}",
+            ):
+                st.rerun()
+
             render_submission_form(db, mission, submission_type)
 
     st.divider()
