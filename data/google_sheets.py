@@ -26,7 +26,8 @@ REQUIRED_WORKSHEETS = {
     "Conversations": ["EventID", "Team", "AI", "Role", "Message", "Timestamp"],
     "Submissions": [
         "SubmissionID", "EventID", "MissionID", "TeamName", "ParticipantName",
-        "ImageURL", "DriveFileID", "Score", "Judged", "Remarks", "SubmittedAt",
+        "ImageURL", "DriveFileID", "SubmissionType", "Metric1", "Metric2",
+        "Metric3", "Score", "Status", "Judged", "Remarks", "SubmittedAt",
     ],
     "ProgrammeStages": [
         "EventID", "StageNo", "StageName", "StageType", "MissionID",
@@ -308,28 +309,22 @@ class GoogleSheetsDB:
             ):
                 self.missions.update_cell(index, 6, "CLOSED")
 
-        # Reuse a preloaded mission row when EventID + MissionID already exists.
-        for index, row in enumerate(rows, start=2):
-            if (
-                str(row.get("EventID", "")) == str(event_id)
-                and str(row.get("MissionID", "")) == str(mission_id)
-            ):
-                payload = [[
-                    event_id, mission_id, title, description, points, "LIVE",
-                    submission_type, clue, answer, hint1, hint2, hint3,
-                    ai_help_enabled,
-                ]]
-                self.missions.update(f"A{index}:M{index}", payload)
-                self.clear_cache()
-                return True
-
         self.missions.append_row([
-            event_id, mission_id, title, description, points, "LIVE",
-            submission_type, clue, answer, hint1, hint2, hint3,
+            event_id,
+            mission_id,
+            title,
+            description,
+            points,
+            "LIVE",
+            submission_type,
+            clue,
+            answer,
+            hint1,
+            hint2,
+            hint3,
             ai_help_enabled,
         ])
         self.clear_cache()
-        return True
 
     def get_current_mission(self, event_id):
         state = self.get_event_state(event_id)
@@ -366,13 +361,23 @@ class GoogleSheetsDB:
         mission_id,
         team_name,
         participant_name,
-        image_url,
-        drive_file_id,
-        submitted_at,
+        image_url="",
+        drive_file_id="",
+        submitted_at="",
         score="",
         judged="No",
         remarks="",
+        submission_type="",
+        metric1="",
+        metric2="",
+        metric3="",
+        status="PENDING",
     ):
+        """Save a submission using the universal EXOS submission schema.
+
+        The optional defaults preserve compatibility with older screens while
+        allowing new mission forms to save structured metrics.
+        """
         self.submissions.append_row([
             submission_id,
             event_id,
@@ -381,7 +386,12 @@ class GoogleSheetsDB:
             participant_name,
             image_url,
             drive_file_id,
+            submission_type,
+            metric1,
+            metric2,
+            metric3,
             score,
+            status,
             judged,
             remarks,
             submitted_at,
@@ -395,7 +405,12 @@ class GoogleSheetsDB:
             "ParticipantName": participant_name,
             "ImageURL": image_url,
             "DriveFileID": drive_file_id,
+            "SubmissionType": submission_type,
+            "Metric1": metric1,
+            "Metric2": metric2,
+            "Metric3": metric3,
             "Score": score,
+            "Status": status,
             "Judged": judged,
             "Remarks": remarks,
             "SubmittedAt": submitted_at,
@@ -421,47 +436,61 @@ class GoogleSheetsDB:
     def get_submissions(self, event_id):
         return self.get_event_submissions(event_id)
 
-    def get_pending_submissions(self, event_id):
+    def get_pending_submissions(self, event_id, mission_id=None):
+        rows = self.get_event_submissions(event_id)
+        if mission_id is not None:
+            rows = [
+                row for row in rows
+                if str(row.get("MissionID", "")) == str(mission_id)
+            ]
         return [
-            row
-            for row in self.get_event_submissions(event_id)
-            if str(row.get("Judged", "")).lower() not in ["yes", "true", "approved"]
+            row for row in rows
+            if str(row.get("Status", "PENDING")).upper() == "PENDING"
+            or str(row.get("Judged", "No")).lower() not in ["yes", "true", "approved"]
         ]
 
-    def update_submission_score(self, submission_id, score, remarks="", judged="Yes"):
+    def update_submission_score(
+        self,
+        submission_id,
+        score,
+        remarks="",
+        judged="Yes",
+        status="APPROVED",
+    ):
         rows = get_sheet_records("Submissions")
         for index, row in enumerate(rows, start=2):
             if str(row.get("SubmissionID", "")) == str(submission_id):
-                self.submissions.update_cell(index, 8, score)
-                self.submissions.update_cell(index, 9, judged)
-                self.submissions.update_cell(index, 10, remarks)
+                self.submissions.update(f"L{index}:O{index}", [[
+                    score,
+                    status,
+                    judged,
+                    remarks,
+                ]])
                 self.clear_cache()
                 return True
         return False
 
-    def approve_all_pending(self, event_id, mission_id=None, default_score=0, remarks="Bulk approved"):
-        rows = get_sheet_records("Submissions")
-        updates = []
-
-        for index, row in enumerate(rows, start=2):
-            if str(row.get("EventID", "")) != str(event_id):
-                continue
-            if mission_id and str(row.get("MissionID", "")) != str(mission_id):
-                continue
-            if str(row.get("Judged", "")).lower() in ["yes", "true", "approved"]:
-                continue
-
-            updates.extend([
-                {"range": f"H{index}", "values": [[default_score]]},
-                {"range": f"I{index}", "values": [["Yes"]]},
-                {"range": f"J{index}", "values": [[remarks]]},
-            ])
-
-        if updates:
-            self.submissions.batch_update(updates)
-            self.clear_cache()
-
-        return len(updates) // 3
+    def approve_all_pending(
+        self,
+        event_id,
+        mission_id=None,
+        default_score="",
+        remarks="Bulk approved",
+    ):
+        pending = self.get_pending_submissions(event_id, mission_id)
+        approved_count = 0
+        for row in pending:
+            current_score = row.get("Score", "")
+            score = current_score if current_score != "" else default_score
+            if self.update_submission_score(
+                submission_id=row.get("SubmissionID"),
+                score=score,
+                remarks=remarks,
+                judged="Yes",
+                status="APPROVED",
+            ):
+                approved_count += 1
+        return approved_count
 
     # -------------------------
     # Programme Stages / Show Control
