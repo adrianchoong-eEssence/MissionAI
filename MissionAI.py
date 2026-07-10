@@ -38,7 +38,6 @@ page = st.sidebar.radio(
 )
 
 st.session_state.current_page = page
-)
 
 if page == "🏠 Dashboard":
     st.title("🚀 eEssence Experience OS")
