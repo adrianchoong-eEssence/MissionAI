@@ -1,4 +1,3 @@
-import re
 import uuid
 from datetime import datetime
 
@@ -40,20 +39,57 @@ def calculate_leaderboard(submissions):
     leaderboard = {}
 
     for submission in submissions:
-        team = str(submission.get("TeamName", "Unknown Team") or "Unknown Team")
-        judged = str(submission.get("Judged", "")).lower()
-
-        if judged not in APPROVED_VALUES:
+        if str(submission.get("Status", "")).upper() != "APPROVED":
             continue
 
+        submission_type = str(submission.get("SubmissionType", "")).upper()
+        if submission_type in {"NASI", "PIPELINE_ENTERPRISE"}:
+            continue
+
+        team = str(submission.get("TeamName", "Unknown Team") or "Unknown Team")
         score = safe_float(submission.get("Score", 0))
         leaderboard[team] = leaderboard.get(team, 0.0) + score
 
     return sorted(leaderboard.items(), key=lambda item: item[1], reverse=True)
 
 
+def calculate_score(submission):
+    submission_type = str(submission.get("SubmissionType", "")).upper().strip()
+    metric1 = submission.get("Metric1", "")
+    metric2 = submission.get("Metric2", "")
+    metric3 = submission.get("Metric3", "")
+
+    if submission_type in {"PIPELINE", "PIPELINE_ENTERPRISE"}:
+        target = safe_float(metric1)
+        achieved = safe_float(metric2)
+        lost = safe_float(metric3)
+
+        if target <= 0:
+            return 0.0, "Target must be greater than zero."
+
+        score = ((achieved - lost) / target) * 100
+        return round(max(score, 0), 1), "(Achieved - Lost Clients) ÷ Target × 100"
+
+    if submission_type == "HELIUM":
+        completed = str(metric1).upper() == "YES"
+        return (100.0 if completed else 0.0), "Completed = 100; Not completed = 0"
+
+    if submission_type == "KEYPUNCH":
+        highest = min(max(safe_float(metric1), 0), 30)
+        return round((highest / 30) * 100, 1), "Highest Number ÷ 30 × 100"
+
+    if submission_type == "CATALYST":
+        completed = str(metric1).upper() == "YES"
+        return (100.0 if completed else 0.0), "Completed = 100; Not completed = 0"
+
+    if submission_type == "NASI":
+        return 0.0, "Reflection only — no score"
+
+    return safe_float(submission.get("Score", 0)), "Manual score"
+
+
 def mission_defaults(submission_type):
-    mission_map = {
+    defaults = {
         "PIPELINE": {
             "mission_id": "P02",
             "title": "Customer Journey: Pipeline Challenge",
@@ -65,7 +101,7 @@ def mission_defaults(submission_type):
             "mission_id": "P03",
             "title": "Enterprise Collaboration: Pipeline Challenge",
             "description": "All six groups operate as one enterprise. The facilitator records one collective result.",
-            "points": 100,
+            "points": 0,
             "clue": "One enterprise. One target. One collective result.",
         },
         "HELIUM": {
@@ -94,7 +130,7 @@ def mission_defaults(submission_type):
             "title": "NASI",
             "description": "New Ideas, Areas for Improvement, Strengths and Implementation.",
             "points": 0,
-            "clue": "Reflection only. No points awarded.",
+            "clue": "Individual reflection. No points awarded.",
         },
         "PHOTO": {
             "mission_id": "M01",
@@ -111,97 +147,45 @@ def mission_defaults(submission_type):
             "clue": "Await facilitator instruction.",
         },
     }
-    return mission_map.get(submission_type, mission_map["PHOTO"])
+    return defaults.get(submission_type, defaults["PHOTO"])
 
 
-def parse_payload(payload):
-    text = str(payload or "")
-    values = {}
+def render_submission_details(submission):
+    submission_type = str(submission.get("SubmissionType", "")).upper()
+    metric1 = submission.get("Metric1", "")
+    metric2 = submission.get("Metric2", "")
+    metric3 = submission.get("Metric3", "")
+    remarks = submission.get("Remarks", "")
+    image_url = submission.get("ImageURL", "")
 
-    patterns = {
-        "target": r"(?:Target|Enterprise Target)\s*:\s*([-+]?\d+(?:\.\d+)?)",
-        "achieved": r"(?:Achieved|Actual Achievement|Delivered Customers|Enterprise Achieved)\s*:\s*([-+]?\d+(?:\.\d+)?)",
-        "lost": r"(?:Lost Clients|Lost Customers|Dropped Marbles|Enterprise Lost Clients)\s*:\s*([-+]?\d+(?:\.\d+)?)",
-        "highest": r"Highest Number(?: Reached)?\s*:\s*([-+]?\d+(?:\.\d+)?)",
-        "completed": r"Completed\s*:\s*(Yes|No)",
-    }
+    if submission_type in {"PIPELINE", "PIPELINE_ENTERPRISE"}:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Target", metric1)
+        with col2:
+            st.metric("Achieved", metric2)
+        with col3:
+            st.metric("Lost Clients", metric3)
+    elif submission_type == "KEYPUNCH":
+        st.metric("Highest Number Reached", metric1)
+    elif submission_type in {"HELIUM", "CATALYST"}:
+        st.metric("Completed", metric1)
+    elif submission_type == "NASI":
+        st.markdown("### NASI Reflection")
+        st.info(remarks or "No reflection text recorded.")
+    elif remarks:
+        st.info(remarks)
 
-    for key, pattern in patterns.items():
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            values[key] = match.group(1)
-
-    return values
-
-
-def submission_type_for(db, submission):
-    mission = db.get_mission(submission.get("EventID"), submission.get("MissionID")) or {}
-    raw_type = str(mission.get("SubmissionType", "") or "").upper().strip()
-    title = str(mission.get("Title", "") or "").upper()
-
-    if "ENTERPRISE" in raw_type or "ENTERPRISE" in title:
-        return "PIPELINE_ENTERPRISE"
-    if "PIPELINE" in raw_type or "PIPELINE" in title:
-        return "PIPELINE"
-    if "HELIUM" in raw_type or "HELIUM" in title:
-        return "HELIUM"
-    if "KEY" in raw_type and "PUNCH" in raw_type or "KEY PUNCH" in title:
-        return "KEYPUNCH"
-    if "CATALYST" in raw_type or "CATALYST" in title:
-        return "CATALYST"
-    if "NASI" in raw_type or "NASI" in title or raw_type == "TEXT":
-        return "NASI"
-    return raw_type or "PHOTO"
-
-
-def suggested_score(db, submission):
-    mission_type = submission_type_for(db, submission)
-    values = parse_payload(submission.get("ImageURL", ""))
-
-    if mission_type in {"PIPELINE", "PIPELINE_ENTERPRISE"}:
-        target = safe_float(values.get("target"))
-        achieved = safe_float(values.get("achieved"))
-        lost = safe_float(values.get("lost"))
-        if target <= 0:
-            return 0.0, "Target must be greater than zero."
-        score = ((achieved - lost) / target) * 100
-        return round(max(score, 0), 1), "(Achieved - Lost Clients) ÷ Target × 100"
-
-    if mission_type == "HELIUM":
-        completed = str(values.get("completed", "")).lower() == "yes"
-        return (100.0 if completed else 0.0), "Completed = 100; not completed = 0"
-
-    if mission_type == "KEYPUNCH":
-        highest = min(max(safe_float(values.get("highest")), 0), 30)
-        return round((highest / 30) * 100, 1), "Highest Number ÷ 30 × 100"
-
-    if mission_type == "CATALYST":
-        completed = str(values.get("completed", "")).lower() == "yes"
-        return (100.0 if completed else 0.0), "Completed = 100; not completed = 0"
-
-    if mission_type == "NASI":
-        return 0.0, "Reflection only — no points"
-
-    return safe_float(submission.get("Score", 0)), "Manual score"
-
-
-def render_submission_payload(payload):
-    if not payload:
-        return
-
-    if str(payload).startswith("data:image"):
-        st.image(payload, caption="Mission Submission", width="stretch")
-    else:
-        st.text_area("Submission Details", value=str(payload), height=190, disabled=True)
+    if image_url and str(image_url).startswith("data:image"):
+        st.image(image_url, caption="Mission Submission", width="stretch")
 
 
 def render_enterprise_pipeline_form(db, event_id, mission):
     if not mission:
         return
 
-    mission_type = str(mission.get("SubmissionType", "") or "").upper()
-    title = str(mission.get("Title", "") or "").upper()
-    if "PIPELINE_ENTERPRISE" not in mission_type and "ENTERPRISE" not in title:
+    mission_type = str(mission.get("SubmissionType", "")).upper()
+    if mission_type != "PIPELINE_ENTERPRISE":
         return
 
     st.divider()
@@ -210,9 +194,9 @@ def render_enterprise_pipeline_form(db, event_id, mission):
 
     existing = db.get_team_submission(event_id, mission.get("MissionID"), "ENTERPRISE")
     if existing:
-        render_submission_payload(existing.get("ImageURL", ""))
-        score, formula = suggested_score(db, existing)
-        st.success(f"Collective score: {format_score(score)}%")
+        render_submission_details(existing)
+        score, formula = calculate_score(existing)
+        st.success(f"Collective enterprise score: {format_score(score)}%")
         st.caption(formula)
         return
 
@@ -224,29 +208,27 @@ def render_enterprise_pipeline_form(db, event_id, mission):
     with col3:
         lost = st.number_input("Enterprise Lost Clients", min_value=0, value=0, step=1)
 
-    calculated = max(((achieved - lost) / target) * 100, 0)
-    st.metric("Calculated Enterprise Score", f"{format_score(calculated)}%")
+    score = max(((achieved - lost) / target) * 100, 0)
+    st.metric("Calculated Enterprise Score", f"{format_score(score)}%")
 
-    if st.button("✅ Save & Approve Enterprise Result", width="stretch"):
-        payload = (
-            "PIPELINE ENTERPRISE RESULT\n"
-            f"Enterprise Target: {target}\n"
-            f"Enterprise Achieved: {achieved}\n"
-            f"Enterprise Lost Clients: {lost}"
-        )
-        submission_id = str(uuid.uuid4())
+    if st.button("✅ Save Enterprise Result", width="stretch"):
         db.save_submission(
-            submission_id=submission_id,
+            submission_id=str(uuid.uuid4()),
             event_id=event_id,
             mission_id=mission.get("MissionID"),
             team_name="ENTERPRISE",
             participant_name="Facilitator",
-            image_url=payload,
+            image_url="",
             drive_file_id="FACILITATOR-ENTRY",
             submitted_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            score=round(calculated, 1),
+            score=round(score, 1),
             judged="Yes",
             remarks="Collective enterprise result",
+            submission_type="PIPELINE_ENTERPRISE",
+            metric1=target,
+            metric2=achieved,
+            metric3=lost,
+            status="APPROVED",
         )
         st.success("Enterprise result saved.")
         st.rerun()
@@ -257,6 +239,7 @@ def show_live_event_console():
 
     db = GoogleSheetsDB()
     events = db.get_events()
+
     if not events:
         st.warning("No events found. Create an event first.")
         return
@@ -265,6 +248,7 @@ def show_live_event_console():
         f"{event.get('EventID')} — {event.get('EventName')}": event
         for event in events
     }
+
     selected_label = st.selectbox("Select Event", list(event_options.keys()))
     event = event_options[selected_label]
     event_id = event.get("EventID")
@@ -289,20 +273,41 @@ def show_live_event_console():
 
     st.divider()
     st.subheader("🏆 Live Leaderboard")
+
     leaderboard = calculate_leaderboard(submissions)
     if not leaderboard:
-        st.info("No approved scores yet.")
+        st.info("No approved team scores yet.")
     else:
         for index, (team, score) in enumerate(leaderboard, start=1):
             medal = "🥇" if index == 1 else "🥈" if index == 2 else "🥉" if index == 3 else "⭐"
             st.metric(f"{medal} {index}. {team}", f"{format_score(score)} pts")
+
+    enterprise_results = [
+        s for s in submissions
+        if str(s.get("SubmissionType", "")).upper() == "PIPELINE_ENTERPRISE"
+        and str(s.get("Status", "")).upper() == "APPROVED"
+    ]
+    if enterprise_results:
+        latest_enterprise = enterprise_results[-1]
+        st.success(
+            f"🤝 Enterprise Pipeline Score: {format_score(latest_enterprise.get('Score', 0))}%"
+        )
 
     st.divider()
     st.subheader("🚀 Launch Mission")
 
     submission_type = st.selectbox(
         "Mission Type",
-        ["PIPELINE", "PIPELINE_ENTERPRISE", "HELIUM", "KEYPUNCH", "CATALYST", "NASI", "PHOTO", "NONE"],
+        [
+            "PIPELINE",
+            "PIPELINE_ENTERPRISE",
+            "HELIUM",
+            "KEYPUNCH",
+            "CATALYST",
+            "NASI",
+            "PHOTO",
+            "NONE",
+        ],
     )
     defaults = mission_defaults(submission_type)
 
@@ -337,6 +342,7 @@ def show_live_event_console():
 
     st.divider()
     st.subheader("Current Mission")
+
     mission = db.get_current_mission(event_id)
     if mission:
         st.success(mission.get("Title", "Mission"))
@@ -353,23 +359,38 @@ def show_live_event_console():
     current_mission_id = mission.get("MissionID") if mission else None
     current_submissions = [
         row for row in submissions
-        if not current_mission_id or str(row.get("MissionID")) == str(current_mission_id)
+        if not current_mission_id
+        or str(row.get("MissionID", "")) == str(current_mission_id)
     ]
 
     pending_current = [
         row for row in current_submissions
-        if str(row.get("Judged", "")).lower() not in APPROVED_VALUES
+        if str(row.get("Status", "")).upper() == "PENDING"
     ]
 
-    if pending_current and mission and str(mission.get("SubmissionType", "")).upper() in {"NASI", "TEXT"}:
-        if st.button("✅ Approve All Pending NASI", width="stretch"):
-            count = db.approve_all_pending(
-                event_id=event_id,
-                mission_id=current_mission_id,
-                default_score=0,
-                remarks="NASI reflection bulk approved",
-            )
-            st.success(f"Approved {count} reflection(s).")
+    if pending_current:
+        mission_type = str(mission.get("SubmissionType", "") if mission else "").upper()
+        bulk_score = 0 if mission_type == "NASI" else None
+
+        if st.button(
+            f"✅ Approve All Pending ({len(pending_current)})",
+            width="stretch",
+        ):
+            count = 0
+            for submission in pending_current:
+                calculated_score, _ = calculate_score(submission)
+                final_score = bulk_score if bulk_score is not None else calculated_score
+                updated = db.update_submission_score(
+                    submission_id=submission.get("SubmissionID"),
+                    score=round(final_score, 1),
+                    remarks=submission.get("Remarks", ""),
+                    judged="Yes",
+                    status="APPROVED",
+                )
+                if updated:
+                    count += 1
+
+            st.success(f"Approved {count} submission(s).")
             st.rerun()
 
     if not current_submissions:
@@ -377,8 +398,8 @@ def show_live_event_console():
     else:
         for submission in current_submissions:
             submission_id = submission.get("SubmissionID")
-            auto_score, formula = suggested_score(db, submission)
-            already_approved = str(submission.get("Judged", "")).lower() in APPROVED_VALUES
+            suggested, formula = calculate_score(submission)
+            approved = str(submission.get("Status", "")).upper() == "APPROVED"
 
             with st.container():
                 st.markdown(
@@ -387,27 +408,29 @@ def show_live_event_console():
 
 - Participant: {submission.get('ParticipantName', '')}
 - Mission: {submission.get('MissionID', '')}
+- Type: {submission.get('SubmissionType', '')}
 - Submitted: {submission.get('SubmittedAt', '')}
-- Judged: {submission.get('Judged', 'No')}
+- Status: {submission.get('Status', 'PENDING')}
 - Saved Score: {submission.get('Score', '')}
 """
                 )
-                render_submission_payload(submission.get("ImageURL", ""))
 
-                st.info(f"Suggested score: **{format_score(auto_score)}** — {formula}")
+                render_submission_details(submission)
+                st.info(f"Calculated score: **{format_score(suggested)}** — {formula}")
 
                 override = st.checkbox(
                     "Override calculated score",
                     value=False,
                     key=f"override_{submission_id}",
                 )
-                score = auto_score
+
+                final_score = suggested
                 if override:
-                    score = st.number_input(
+                    final_score = st.number_input(
                         "Override Score",
                         min_value=0.0,
                         max_value=1000.0,
-                        value=float(auto_score),
+                        value=float(suggested),
                         step=1.0,
                         key=f"score_{submission_id}",
                     )
@@ -418,13 +441,18 @@ def show_live_event_console():
                     key=f"remarks_{submission_id}",
                 )
 
-                button_label = "🔄 Update Score" if already_approved else "✅ Approve Submission"
-                if st.button(button_label, key=f"approve_{submission_id}", width="stretch"):
+                button_label = "🔄 Update Score" if approved else "✅ Approve Submission"
+                if st.button(
+                    button_label,
+                    key=f"approve_{submission_id}",
+                    width="stretch",
+                ):
                     db.update_submission_score(
                         submission_id=submission_id,
-                        score=round(score, 1),
+                        score=round(final_score, 1),
                         remarks=remarks,
                         judged="Yes",
+                        status="APPROVED",
                     )
                     st.success("Submission updated.")
                     st.rerun()
