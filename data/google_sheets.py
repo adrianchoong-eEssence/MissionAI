@@ -299,22 +299,37 @@ class GoogleSheetsDB:
         hint3="",
         ai_help_enabled="Yes",
     ):
+        # Only one mission may be LIVE for an event.
+        rows = get_sheet_records("Missions")
+        for index, row in enumerate(rows, start=2):
+            if (
+                str(row.get("EventID", "")) == str(event_id)
+                and str(row.get("Status", "")).upper() == "LIVE"
+            ):
+                self.missions.update_cell(index, 6, "CLOSED")
+
+        # Reuse a preloaded mission row when EventID + MissionID already exists.
+        for index, row in enumerate(rows, start=2):
+            if (
+                str(row.get("EventID", "")) == str(event_id)
+                and str(row.get("MissionID", "")) == str(mission_id)
+            ):
+                payload = [[
+                    event_id, mission_id, title, description, points, "LIVE",
+                    submission_type, clue, answer, hint1, hint2, hint3,
+                    ai_help_enabled,
+                ]]
+                self.missions.update(f"A{index}:M{index}", payload)
+                self.clear_cache()
+                return True
+
         self.missions.append_row([
-            event_id,
-            mission_id,
-            title,
-            description,
-            points,
-            "LIVE",
-            submission_type,
-            clue,
-            answer,
-            hint1,
-            hint2,
-            hint3,
+            event_id, mission_id, title, description, points, "LIVE",
+            submission_type, clue, answer, hint1, hint2, hint3,
             ai_help_enabled,
         ])
         self.clear_cache()
+        return True
 
     def get_current_mission(self, event_id):
         state = self.get_event_state(event_id)
@@ -423,6 +438,30 @@ class GoogleSheetsDB:
                 self.clear_cache()
                 return True
         return False
+
+    def approve_all_pending(self, event_id, mission_id=None, default_score=0, remarks="Bulk approved"):
+        rows = get_sheet_records("Submissions")
+        updates = []
+
+        for index, row in enumerate(rows, start=2):
+            if str(row.get("EventID", "")) != str(event_id):
+                continue
+            if mission_id and str(row.get("MissionID", "")) != str(mission_id):
+                continue
+            if str(row.get("Judged", "")).lower() in ["yes", "true", "approved"]:
+                continue
+
+            updates.extend([
+                {"range": f"H{index}", "values": [[default_score]]},
+                {"range": f"I{index}", "values": [["Yes"]]},
+                {"range": f"J{index}", "values": [[remarks]]},
+            ])
+
+        if updates:
+            self.submissions.batch_update(updates)
+            self.clear_cache()
+
+        return len(updates) // 3
 
     # -------------------------
     # Programme Stages / Show Control
