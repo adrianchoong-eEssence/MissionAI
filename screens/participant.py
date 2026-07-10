@@ -131,34 +131,40 @@ def save_text_submission(db, mission, payload):
 
 def render_pipeline_form(db, mission):
     st.subheader("📊 Customer Journey Results")
-    st.write("Submit your team's result after the official run.")
 
-    delivered = st.number_input(
-        "Customers Delivered / Closed Cases",
+    target = st.number_input(
+        "Target",
+        min_value=0,
+        value=0,
+        step=1,
+    )
+
+    achieved = st.number_input(
+        "Achieved",
         min_value=0,
         value=0,
         step=1,
     )
 
     lost = st.number_input(
-        "Lost Customers / Dropped Marbles",
+        "Lost Clients",
         min_value=0,
         value=0,
         step=1,
     )
 
     if st.button("📤 Submit Pipeline Results", width="stretch"):
+
         payload = (
-            "PIPELINE RESULTS\n"
-            f"Team: {st.session_state['participant_team']}\n"
-            f"Delivered Customers: {delivered}\n"
-            f"Lost Customers: {lost}"
+            f"PIPELINE\n"
+            f"TARGET={target}\n"
+            f"ACHIEVED={achieved}\n"
+            f"LOST={lost}"
         )
 
         save_text_submission(db, mission, payload)
 
-        st.success("✅ Pipeline results submitted.")
-        st.balloons()
+        st.success("Pipeline submitted.")
         st.rerun()
 
 
