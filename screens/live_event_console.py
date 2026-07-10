@@ -23,6 +23,21 @@ def auto_refresh(seconds=5):
     )
 
 
+
+
+def get_value(record, field_name, default=""):
+    """Read a Google Sheets record safely, even if a header has spaces/case differences."""
+    if not isinstance(record, dict):
+        return default
+
+    wanted = str(field_name).strip().lower()
+    for key, value in record.items():
+        if str(key).strip().lower() == wanted:
+            return value
+
+    return default
+
+
 def safe_float(value, default=0.0):
     try:
         return float(value)
@@ -54,10 +69,10 @@ def calculate_leaderboard(submissions):
 
 
 def calculate_score(submission):
-    submission_type = str(submission.get("SubmissionType", "")).upper().strip()
-    metric1 = submission.get("Metric1", "")
-    metric2 = submission.get("Metric2", "")
-    metric3 = submission.get("Metric3", "")
+    submission_type = str(get_value(submission, "SubmissionType", "")).upper().strip()
+    metric1 = get_value(submission, "Metric1", "")
+    metric2 = get_value(submission, "Metric2", "")
+    metric3 = get_value(submission, "Metric3", "")
 
     if submission_type in {"PIPELINE", "PIPELINE_ENTERPRISE"}:
         target = safe_float(metric1)
@@ -65,13 +80,16 @@ def calculate_score(submission):
         lost = safe_float(metric3)
 
         if target <= 0:
-            return 0.0, "Target must be greater than zero."
+            return 0.0, (
+                f"Target must be greater than zero. "
+                f"Received Target={metric1!r}, Achieved={metric2!r}, Lost={metric3!r}."
+            )
 
         score = ((achieved - lost) / target) * 100
         return round(max(score, 0), 1), "(Achieved - Lost Clients) ÷ Target × 100"
 
     if submission_type == "HELIUM":
-        completed = str(metric1).upper() == "YES"
+        completed = str(metric1).strip().upper() == "YES"
         return (100.0 if completed else 0.0), "Completed = 100; Not completed = 0"
 
     if submission_type == "KEYPUNCH":
@@ -79,13 +97,13 @@ def calculate_score(submission):
         return round((highest / 30) * 100, 1), "Highest Number ÷ 30 × 100"
 
     if submission_type == "CATALYST":
-        completed = str(metric1).upper() == "YES"
+        completed = str(metric1).strip().upper() == "YES"
         return (100.0 if completed else 0.0), "Completed = 100; Not completed = 0"
 
     if submission_type == "NASI":
         return 0.0, "Reflection only — no score"
 
-    return safe_float(submission.get("Score", 0)), "Manual score"
+    return safe_float(get_value(submission, "Score", 0)), "Manual score"
 
 
 def mission_defaults(submission_type):
@@ -151,12 +169,12 @@ def mission_defaults(submission_type):
 
 
 def render_submission_details(submission):
-    submission_type = str(submission.get("SubmissionType", "")).upper()
-    metric1 = submission.get("Metric1", "")
-    metric2 = submission.get("Metric2", "")
-    metric3 = submission.get("Metric3", "")
-    remarks = submission.get("Remarks", "")
-    image_url = submission.get("ImageURL", "")
+    submission_type = str(get_value(submission, "SubmissionType", "")).upper().strip()
+    metric1 = get_value(submission, "Metric1", "")
+    metric2 = get_value(submission, "Metric2", "")
+    metric3 = get_value(submission, "Metric3", "")
+    remarks = get_value(submission, "Remarks", "")
+    image_url = get_value(submission, "ImageURL", "")
 
     if submission_type in {"PIPELINE", "PIPELINE_ENTERPRISE"}:
         col1, col2, col3 = st.columns(3)
@@ -408,10 +426,10 @@ def show_live_event_console():
 
 - Participant: {submission.get('ParticipantName', '')}
 - Mission: {submission.get('MissionID', '')}
-- Type: {submission.get('SubmissionType', '')}
+- Type: {get_value(submission, 'SubmissionType', '')}
 - Submitted: {submission.get('SubmittedAt', '')}
-- Status: {submission.get('Status', 'PENDING')}
-- Saved Score: {submission.get('Score', '')}
+- Status: {get_value(submission, 'Status', 'PENDING')}
+- Saved Score: {get_value(submission, 'Score', '')}
 """
                 )
 
@@ -437,7 +455,7 @@ def show_live_event_console():
 
                 remarks = st.text_area(
                     "Remarks",
-                    value=submission.get("Remarks", ""),
+                    value=get_value(submission, "Remarks", ""),
                     key=f"remarks_{submission_id}",
                 )
 
