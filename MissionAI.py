@@ -16,19 +16,28 @@ st.set_page_config(
 
 st.sidebar.title("🚀 EXOS")
 
+pages = [
+    "🏠 Dashboard",
+    "🎬 Show Control",
+    "📺 Live Display",
+    "🎮 Live Event Console",
+    "📱 Mission App",
+    "🗓 Events",
+    "📚 Experience Library",
+    "🛠 Programme Builder",
+    "⚙ Settings",
+]
+
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "🏠 Dashboard"
+
 page = st.sidebar.radio(
     "Navigation",
-    [
-        "🏠 Dashboard",
-        "🎬 Show Control",
-        "📺 Live Display",
-        "🎮 Live Event Console",
-        "📱 Mission App",
-        "🗓 Events",
-        "📚 Experience Library",
-        "🛠 Programme Builder",
-        "⚙ Settings",
-    ],
+    pages,
+    index=pages.index(st.session_state.current_page),
+)
+
+st.session_state.current_page = page
 )
 
 if page == "🏠 Dashboard":
