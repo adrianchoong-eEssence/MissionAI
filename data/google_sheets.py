@@ -2,6 +2,9 @@ import gspread
 import streamlit as st
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+import random
+import re
+import string
 
 SPREADSHEET_ID = "1XWCW9UVj_1cxA32ItsE8-nAr9q0NEgOhhD5e3C64Hvw"
 
@@ -15,6 +18,7 @@ REQUIRED_WORKSHEETS = {
     "Events": [
         "EventID", "Client", "Department", "EventName", "EventDate", "Venue",
         "Notes", "Status", "ProgrammeType", "JoinCode", "NumberOfTeams",
+        "NextTeamIndex",
     ],
     "Missions": [
         "EventID", "MissionID", "Title", "Description", "Points", "Status",
@@ -68,6 +72,14 @@ def ensure_worksheet(workbook, name, headers):
     existing = worksheet.row_values(1)
     if not existing:
         worksheet.append_row(headers)
+        return worksheet
+
+    missing_headers = [header for header in headers if header not in existing]
+    if missing_headers:
+        worksheet.update(
+            f"{gspread.utils.rowcol_to_a1(1, len(existing) + 1)}:{gspread.utils.rowcol_to_a1(1, len(existing) + len(missing_headers))}",
+            [missing_headers],
+        )
 
     return worksheet
 
@@ -131,6 +143,7 @@ class GoogleSheetsDB:
             programme_type,
             join_code,
             number_of_teams,
+            0,
         ])
         self.clear_cache()
 
@@ -142,6 +155,145 @@ class GoogleSheetsDB:
             if str(event.get("JoinCode", "")).upper() == str(join_code).upper():
                 return event
         return None
+
+    def get_event(self, event_id):
+        for event in self.get_events():
+            if str(event.get("EventID", "")) == str(event_id):
+                return event
+        return None
+
+    def generate_next_event_id(self):
+        highest_number = 0
+        for event in self.get_events():
+            event_id = str(event.get("EventID", "")).strip()
+            match = re.search(r"(\d+)$", event_id)
+            if match:
+                highest_number = max(highest_number, int(match.group(1)))
+        return f"EVT-{highest_number + 1:04d}"
+
+    def create_new_join_code(self, length=6):
+        existing_codes = {
+            str(event.get("JoinCode", "")).strip().upper()
+            for event in self.get_events()
+        }
+        characters = string.ascii_uppercase + string.digits
+        while True:
+            join_code = "".join(random.choice(characters) for _ in range(length))
+            if join_code not in existing_codes:
+                return join_code
+
+    @staticmethod
+    def _append_record(worksheet, record, overrides=None):
+        payload = dict(record)
+        if overrides:
+            payload.update(overrides)
+        headers = worksheet.row_values(1)
+        worksheet.append_row([payload.get(header, "") for header in headers])
+
+    def copy_teams(self, source_event_id, new_event_id):
+        source_rows = self.get_teams(source_event_id)
+        for row in source_rows:
+            self._append_record(
+                self.teams,
+                row,
+                {
+                    "EventID": new_event_id,
+                    "Score": 0,
+                    "Status": "Active",
+                },
+            )
+        return len(source_rows)
+
+    def copy_missions(self, source_event_id, new_event_id):
+        source_rows = [
+            row for row in get_sheet_records("Missions")
+            if str(row.get("EventID", "")) == str(source_event_id)
+        ]
+        for row in source_rows:
+            self._append_record(
+                self.missions,
+                row,
+                {
+                    "EventID": new_event_id,
+                    "Status": "DRAFT",
+                },
+            )
+        return len(source_rows)
+
+    def copy_programme_stages(self, source_event_id, new_event_id):
+        source_rows = [
+            row for row in get_sheet_records("ProgrammeStages")
+            if str(row.get("EventID", "")) == str(source_event_id)
+        ]
+        source_rows = sorted(
+            source_rows,
+            key=lambda row: int(row.get("StageNo") or 0),
+        )
+        for row in source_rows:
+            self._append_record(
+                self.programme_stages,
+                row,
+                {"EventID": new_event_id},
+            )
+        return source_rows
+
+    def duplicate_event(self, source_event_id, new_event_name):
+        source_event = self.get_event(source_event_id)
+        if not source_event:
+            raise ValueError(f"Event {source_event_id} was not found.")
+
+        clean_event_name = str(new_event_name).strip()
+        if not clean_event_name:
+            raise ValueError("New event name is required.")
+
+        new_event_id = self.generate_next_event_id()
+        new_join_code = self.create_new_join_code()
+
+        self._append_record(
+            self.events,
+            source_event,
+            {
+                "EventID": new_event_id,
+                "EventName": clean_event_name,
+                "Status": "Draft",
+                "JoinCode": new_join_code,
+                "NextTeamIndex": 0,
+            },
+        )
+
+        teams_copied = self.copy_teams(source_event_id, new_event_id)
+        missions_copied = self.copy_missions(source_event_id, new_event_id)
+        stages = self.copy_programme_stages(source_event_id, new_event_id)
+
+        if stages:
+            first_stage = stages[0]
+            self.set_event_state(
+                event_id=new_event_id,
+                current_stage_no=first_stage.get("StageNo", 1),
+                state="Draft",
+                stage_name=first_stage.get("StageName", ""),
+                mission_id=first_stage.get("MissionID", ""),
+                display_mode=first_stage.get("DisplayMode", "Hybrid"),
+            )
+        else:
+            self.set_event_state(
+                event_id=new_event_id,
+                current_stage_no=0,
+                state="Draft",
+                stage_name="",
+                mission_id="",
+                display_mode="Hybrid",
+            )
+
+        self.clear_cache()
+        return {
+            "EventID": new_event_id,
+            "JoinCode": new_join_code,
+            "EventName": clean_event_name,
+            "TeamsCopied": teams_copied,
+            "MissionsCopied": missions_copied,
+            "StagesCopied": len(stages),
+        }
 
     # -------------------------
     # Teams
@@ -197,6 +349,7 @@ class GoogleSheetsDB:
     def join_player(self, event_id, name):
         clean_name = str(name).strip()
 
+        # Existing participant rejoins
         existing_player = self.get_player(event_id, clean_name)
         if existing_player:
             return {
@@ -208,18 +361,65 @@ class GoogleSheetsDB:
             }
 
         teams = self.get_teams(event_id)
-        participants = [
-            p
-            for p in self.get_players()
-            if str(p.get("EventID", "")) == str(event_id)
-        ]
 
-        if teams:
-            team = teams[len(participants) % len(teams)]["TeamName"]
-        else:
-            team = ""
+        if not teams:
+            self.participants.append_row(
+                [event_id, clean_name, "", 0, "Waiting"]
+            )
+            self.clear_cache()
 
-        self.participants.append_row([event_id, clean_name, team, 0, "Waiting"])
+            return {
+                "EventID": event_id,
+                "Name": clean_name,
+                "Team": "",
+                "Points": 0,
+                "Status": "Waiting",
+            }
+
+        # ---------- Read Event ----------
+        events = self.events.get_all_records()
+
+        event_row = None
+        next_team_index = 0
+
+        for idx, event in enumerate(events, start=2):
+            if str(event.get("EventID")) == str(event_id):
+                event_row = idx
+                try:
+                    next_team_index = int(event.get("NextTeamIndex", 0))
+                except Exception:
+                    next_team_index = 0
+                break
+
+        if event_row is None:
+            next_team_index = 0
+
+        # ---------- Assign Team ----------
+        team = teams[next_team_index % len(teams)]["TeamName"]
+
+        # ---------- Update Pointer ----------
+        new_index = (next_team_index + 1) % len(teams)
+
+        if event_row:
+            event_headers = self.events.row_values(1)
+            if "NextTeamIndex" in event_headers:
+                self.events.update_cell(
+                    event_row,
+                    event_headers.index("NextTeamIndex") + 1,
+                    new_index,
+                )
+
+        # ---------- Save Participant ----------
+        self.participants.append_row(
+            [
+                event_id,
+                clean_name,
+                team,
+                0,
+                "Waiting",
+            ]
+        )
+
         self.clear_cache()
 
         return {
