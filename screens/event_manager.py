@@ -58,11 +58,24 @@ def show_event_manager():
 
             db.create_teams(event_id, int(number_of_teams))
 
+            runtime_message = ""
+            if db.runtime_status()["PublishReady"]:
+                try:
+                    db.publish_event_to_runtime(
+                        event_id,
+                        reset_registration=True,
+                    )
+                    runtime_message = "Transactional registration published."
+                except Exception as error:
+                    runtime_message = f"Runtime publish needs attention: {error}"
+
             st.success("Event Created Successfully!")
             col1, col2, col3 = st.columns(3)
             col1.metric("Event ID", event_id)
             col2.metric("Join Code", join_code)
             col3.metric("Teams Created", int(number_of_teams))
+            if runtime_message:
+                st.info(runtime_message)
 
     st.divider()
     st.subheader("Duplicate Project")
@@ -111,8 +124,81 @@ def show_event_manager():
                     "Participants, submissions, scores, and leaderboard data were not copied. "
                     "The duplicated event is in Draft status."
                 )
+                if result.get("RuntimePublished"):
+                    st.success("Transactional registration was published for the duplicate.")
+                elif result.get("RuntimeError"):
+                    st.warning(
+                        "The project was duplicated, but runtime publishing needs attention: "
+                        + result["RuntimeError"]
+                    )
     else:
         st.info("Create an event before duplicating a project.")
+
+    st.divider()
+    st.subheader("Live Registration Runtime")
+
+    runtime_status = db.runtime_status()
+    if runtime_status["PublishReady"]:
+        st.success(runtime_status["Message"])
+
+        runtime_events = db.get_events()
+        runtime_options = {
+            f"{event.get('EventID', '')} | {event.get('EventName', '')}": event
+            for event in runtime_events
+        }
+
+        if runtime_options:
+            selected_runtime_label = st.selectbox(
+                "Event to Publish",
+                list(runtime_options.keys()),
+                key="runtime_publish_event",
+            )
+            selected_runtime_event = runtime_options[selected_runtime_label]
+
+            with st.form("runtime_publish_form"):
+                reset_registration = st.checkbox(
+                    "Clear runtime participants and restart team allocation",
+                    value=False,
+                )
+                runtime_submitted = st.form_submit_button(
+                    "🚀 Publish Registration Runtime"
+                )
+
+            if runtime_submitted:
+                try:
+                    result = db.publish_event_to_runtime(
+                        selected_runtime_event.get("EventID", ""),
+                        reset_registration=reset_registration,
+                    )
+                except Exception as error:
+                    st.error(f"Runtime publish failed: {error}")
+                else:
+                    st.success(
+                        f"Published {result.get('TeamsPublished', 0)} teams. "
+                        f"Join code: {result.get('JoinCode', '')}"
+                    )
+
+            if st.button(
+                "📥 Sync Runtime Participants to Google Sheets",
+                key="sync_runtime_participants",
+            ):
+                try:
+                    sync_result = db.sync_runtime_participants_to_sheet(
+                        selected_runtime_event.get("EventID", "")
+                    )
+                except Exception as error:
+                    st.error(f"Participant sync failed: {error}")
+                else:
+                    st.success(
+                        f"{sync_result.get('RowsAdded', 0)} new participant rows added. "
+                        f"Runtime total: {sync_result.get('RuntimeParticipants', 0)}."
+                    )
+    else:
+        st.warning(runtime_status["Message"])
+        st.caption(
+            "The existing Google Sheets join remains available, but it is not intended "
+            "for large simultaneous registrations."
+        )
 
     st.divider()
     st.subheader("Existing Events")
@@ -120,6 +206,6 @@ def show_event_manager():
     events = db.get_events()
 
     if events:
-        st.dataframe(events, use_container_width=True)
+        st.dataframe(events, width="stretch")
     else:
         st.info("No events created yet.")

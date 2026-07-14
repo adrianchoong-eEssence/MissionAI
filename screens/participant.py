@@ -7,6 +7,7 @@ from streamlit_autorefresh import st_autorefresh
 from ai.facilitator import ask_facilitator
 from data.google_drive import upload_photo
 from data.google_sheets import GoogleSheetsDB
+from data.runtime_database import RuntimeDatabaseError
 
 
 COUNTRY_LANGUAGE_PROMPTS = {
@@ -24,6 +25,7 @@ SESSION_KEYS = [
     "participant_team",
     "participant_points",
     "participant_event_name",
+    "participant_session_token",
     "ai_name",
     "ai_personality",
     "ai_greeting",
@@ -39,6 +41,7 @@ def reset_session():
         "participant_name",
         "participant_team",
         "event_name",
+        "session_token",
     ]:
         if key in st.query_params:
             del st.query_params[key]
@@ -50,6 +53,33 @@ def restore_session_from_query_params(db):
 
     event_id = str(st.query_params.get("event_id", "")).strip()
     participant_name = str(st.query_params.get("participant_name", "")).strip()
+    session_token = str(st.query_params.get("session_token", "")).strip()
+
+    if session_token:
+        try:
+            runtime_player = db.get_player_by_session_token(session_token)
+        except RuntimeDatabaseError:
+            runtime_player = None
+
+        if runtime_player:
+            team_name = str(runtime_player.get("Team", ""))
+            ai = db.assign_ai_facilitator(team_name) or {}
+            st.session_state["participant_event_id"] = runtime_player.get(
+                "EventID", ""
+            )
+            st.session_state["participant_name"] = runtime_player.get("Name", "")
+            st.session_state["participant_team"] = team_name
+            st.session_state["participant_points"] = runtime_player.get("Points", 0)
+            st.session_state["participant_event_name"] = runtime_player.get(
+                "EventName", "EXOS Event"
+            )
+            st.session_state["participant_session_token"] = runtime_player.get(
+                "SessionToken", session_token
+            )
+            st.session_state["ai_name"] = ai.get("Name", "Atlas")
+            st.session_state["ai_personality"] = ai.get("Personality", "")
+            st.session_state["ai_greeting"] = ai.get("Greeting", "")
+            return
 
     if not event_id or not participant_name:
         return
@@ -81,6 +111,7 @@ def restore_session_from_query_params(db):
         "EventName",
         str(st.query_params.get("event_name", "EXOS Event")),
     )
+    st.session_state["participant_session_token"] = ""
     st.session_state["ai_name"] = ai.get("Name", "Atlas")
     st.session_state["ai_personality"] = ai.get("Personality", "")
     st.session_state["ai_greeting"] = ai.get("Greeting", "")
@@ -91,6 +122,9 @@ def persist_session_in_query_params():
     st.query_params["participant_name"] = st.session_state["participant_name"]
     st.query_params["participant_team"] = st.session_state["participant_team"]
     st.query_params["event_name"] = st.session_state["participant_event_name"]
+    session_token = st.session_state.get("participant_session_token", "")
+    if session_token:
+        st.query_params["session_token"] = session_token
 
 
 def normalise_submission_type(mission):
@@ -580,19 +614,34 @@ def show_participant():
                 st.warning("Enter your name")
                 st.stop()
 
-            event = db.get_event_by_join_code(join_code)
-            if event is None:
-                st.error("Invalid Join Code")
+            try:
+                player = db.join_player_by_code(
+                    join_code,
+                    participant_name.strip(),
+                )
+            except RuntimeDatabaseError as error:
+                st.error(
+                    "Registration is temporarily busy. Your team has not been changed. "
+                    "Please wait a few seconds and press Join Event again."
+                )
+                st.caption(str(error))
+                st.stop()
+            except ValueError as error:
+                st.error(str(error))
                 st.stop()
 
-            player = db.join_player(event["EventID"], participant_name.strip())
             ai = db.assign_ai_facilitator(player["Team"]) or {}
 
             st.session_state["participant_event_id"] = player["EventID"]
             st.session_state["participant_name"] = player["Name"]
             st.session_state["participant_team"] = player["Team"]
             st.session_state["participant_points"] = player.get("Points", 0)
-            st.session_state["participant_event_name"] = event["EventName"]
+            st.session_state["participant_event_name"] = player.get(
+                "EventName", "EXOS Event"
+            )
+            st.session_state["participant_session_token"] = player.get(
+                "SessionToken", ""
+            )
             st.session_state["ai_name"] = ai.get("Name", "Atlas")
             st.session_state["ai_personality"] = ai.get("Personality", "")
             st.session_state["ai_greeting"] = ai.get("Greeting", "")

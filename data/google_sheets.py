@@ -6,6 +6,8 @@ import random
 import re
 import string
 
+from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+
 SPREADSHEET_ID = "1XWCW9UVj_1cxA32ItsE8-nAr9q0NEgOhhD5e3C64Hvw"
 
 SCOPES = [
@@ -102,6 +104,7 @@ def get_sheet_records(sheet_name):
 class GoogleSheetsDB:
     def __init__(self):
         worksheets = get_worksheets()
+        self.runtime = get_runtime_database()
         self.participants = worksheets["Participants"]
         self.events = worksheets["Events"]
         self.missions = worksheets["Missions"]
@@ -151,10 +154,90 @@ class GoogleSheetsDB:
         return get_sheet_records("Events")
 
     def get_event_by_join_code(self, join_code):
+        if self.runtime.is_configured:
+            runtime_event = self.runtime.get_event_by_join_code(join_code)
+            if runtime_event:
+                return runtime_event
+
         for event in self.get_events():
             if str(event.get("JoinCode", "")).upper() == str(join_code).upper():
                 return event
         return None
+
+    def runtime_status(self):
+        if not self.runtime.is_configured:
+            return {
+                "Configured": False,
+                "PublishReady": False,
+                "Message": "Supabase runtime keys have not been added.",
+            }
+        if not self.runtime.can_publish:
+            return {
+                "Configured": True,
+                "PublishReady": False,
+                "Message": "Runtime joins are configured, but publishing needs the secret key.",
+            }
+        return {
+            "Configured": True,
+            "PublishReady": True,
+            "Message": "Transactional runtime is ready.",
+        }
+
+    def publish_event_to_runtime(self, event_id, reset_registration=False):
+        event = self.get_event(event_id)
+        if not event:
+            raise ValueError(f"Event {event_id} was not found.")
+
+        teams = self.get_teams(event_id)
+        if not teams:
+            raise ValueError("Create at least one team before publishing the event.")
+
+        return self.runtime.publish_event(
+            event=event,
+            teams=teams,
+            reset_registration=reset_registration,
+        )
+
+    def sync_runtime_participants_to_sheet(self, event_id):
+        if not self.runtime.can_publish:
+            raise RuntimeDatabaseError(
+                "Runtime participant export requires the secret key."
+            )
+
+        runtime_players = self.runtime.get_players(event_id)
+        existing_keys = {
+            (
+                str(player.get("EventID", "")),
+                str(player.get("Name", "")).strip().lower(),
+            )
+            for player in get_sheet_records("Participants")
+        }
+
+        new_rows = []
+        for player in runtime_players:
+            key = (
+                str(player.get("EventID", "")),
+                str(player.get("Name", "")).strip().lower(),
+            )
+            if key in existing_keys:
+                continue
+            new_rows.append([
+                player.get("EventID", ""),
+                player.get("Name", ""),
+                player.get("Team", ""),
+                player.get("Points", 0),
+                player.get("Status", "Waiting"),
+            ])
+            existing_keys.add(key)
+
+        if new_rows:
+            self.participants.append_rows(new_rows, value_input_option="RAW")
+            self.clear_cache()
+
+        return {
+            "RuntimeParticipants": len(runtime_players),
+            "RowsAdded": len(new_rows),
+        }
 
     def get_event(self, event_id):
         for event in self.get_events():
@@ -285,6 +368,18 @@ class GoogleSheetsDB:
                 display_mode="Hybrid",
             )
 
+        runtime_published = False
+        runtime_error = ""
+        if self.runtime.can_publish:
+            try:
+                self.publish_event_to_runtime(
+                    new_event_id,
+                    reset_registration=True,
+                )
+                runtime_published = True
+            except Exception as error:
+                runtime_error = str(error)
+
         self.clear_cache()
         return {
             "EventID": new_event_id,
@@ -293,6 +388,8 @@ class GoogleSheetsDB:
             "TeamsCopied": teams_copied,
             "MissionsCopied": missions_copied,
             "StagesCopied": len(stages),
+            "RuntimePublished": runtime_published,
+            "RuntimeError": runtime_error,
         }
 
     # -------------------------
@@ -345,6 +442,24 @@ class GoogleSheetsDB:
     # -------------------------
     # Participants
     # -------------------------
+
+    def join_player_by_code(self, join_code, name):
+        if self.runtime.is_configured:
+            return self.runtime.join_player(join_code, name)
+
+        event = self.get_event_by_join_code(join_code)
+        if event is None:
+            raise ValueError("Invalid Join Code")
+
+        player = self.join_player(event["EventID"], name)
+        player["EventName"] = event.get("EventName", "EXOS Event")
+        player["SessionToken"] = ""
+        return player
+
+    def get_player_by_session_token(self, session_token):
+        if not self.runtime.is_configured:
+            return None
+        return self.runtime.get_player_by_token(session_token)
 
     def join_player(self, event_id, name):
         clean_name = str(name).strip()
@@ -431,7 +546,23 @@ class GoogleSheetsDB:
         }
 
     def get_players(self):
-        return get_sheet_records("Participants")
+        sheet_players = get_sheet_records("Participants")
+        if not self.runtime.can_publish:
+            return sheet_players
+
+        try:
+            runtime_players = self.runtime.get_players()
+        except RuntimeDatabaseError:
+            return sheet_players
+
+        merged = {}
+        for player in sheet_players + runtime_players:
+            key = (
+                str(player.get("EventID", "")),
+                str(player.get("Name", "")).strip().lower(),
+            )
+            merged[key] = player
+        return list(merged.values())
 
     def get_player(self, event_id, name):
         for player in self.get_players():
