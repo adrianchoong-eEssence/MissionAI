@@ -4,6 +4,7 @@ from screens.event_manager import show_event_manager
 from screens.experience_library import show_experience_library
 from screens.leaderboard_display import show_leaderboard_display
 from screens.live_event_console import show_live_event_console
+from screens.mission_setup import show_mission_setup
 from screens.participant import show_participant
 from screens.programme_builder import show_programme_builder
 from screens.show_control import show_show_control
@@ -23,6 +24,7 @@ pages = [
     "🎮 Live Event Console",
     "📱 Mission App",
     "🗓 Events",
+    "🧭 Mission Studio",
     "📚 Experience Library",
     "🛠 Programme Builder",
     "⚙ Settings",
@@ -90,6 +92,9 @@ elif page == "📱 Mission App":
 
 elif page == "🗓 Events":
     show_event_manager()
+
+elif page == "🧭 Mission Studio":
+    show_mission_setup()
 
 elif page == "📚 Experience Library":
     show_experience_library()

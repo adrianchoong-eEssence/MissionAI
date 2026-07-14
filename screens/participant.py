@@ -578,6 +578,46 @@ def render_submission_form(db, mission, submission_type):
         render_photo_form(db, mission)
 
 
+def render_mission_content(mission):
+    story = str(mission.get("Story", "") or "").strip()
+    instructions = str(
+        mission.get("ParticipantInstructions", "")
+        or mission.get("Description", "")
+        or ""
+    ).strip()
+    video_url = str(mission.get("VideoURL", "") or "").strip()
+    image_url = str(mission.get("ImageURL", "") or "").strip()
+    document_url = str(mission.get("DocumentURL", "") or "").strip()
+
+    if story:
+        st.markdown("#### Mission Story")
+        st.markdown(story)
+
+    if video_url:
+        try:
+            st.video(video_url)
+        except Exception:
+            st.warning("The mission video could not be displayed.")
+            st.link_button("▶️ Open Mission Video", video_url, width="stretch")
+
+    if image_url:
+        try:
+            st.image(image_url, width="stretch")
+        except Exception:
+            st.warning("The mission image could not be displayed.")
+
+    if instructions:
+        st.markdown("#### Instructions")
+        st.info(instructions)
+
+    if document_url:
+        st.link_button(
+            "📄 Open Mission Document",
+            document_url,
+            width="stretch",
+        )
+
+
 def show_participant():
     st.title("📱 EXOS Mission")
 
@@ -659,7 +699,7 @@ def show_participant():
         st_autorefresh(interval=5000, key="waiting_for_mission_refresh")
     else:
         st.success(mission.get("Title", "Mission"))
-        st.write(mission.get("Description", ""))
+        render_mission_content(mission)
 
         if mission.get("Clue"):
             st.info("💡 " + str(mission["Clue"]))

@@ -30,7 +30,7 @@ This file preserves the decisions imported from the earlier Mission AI developme
 
 ## Mission content model
 
-Every reusable mission should eventually contain:
+Mission Studio stores every reusable mission with:
 
 - title and story;
 - participant instructions;
@@ -41,10 +41,14 @@ Every reusable mission should eventually contain:
 - hints and debrief questions;
 - version and publication status.
 
+Mission Studio supports manual creation, CSV/Excel bulk import, reuse across
+events, and event-specific mission IDs. The Live Event Console launches an
+existing event mission. The Participant App renders story, instructions,
+video, image, and document links from the mission record.
+
 ## Delivery rules
 
 - Edit the repository directly.
 - Deliver complete files or complete matched file sets.
 - Compile and test before deployment.
 - Use test events for development; preserve completed production event data.
-

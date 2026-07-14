@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 import streamlit as st
-import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 
 from data.google_sheets import GoogleSheetsDB
 
@@ -11,15 +11,9 @@ APPROVED_VALUES = {"yes", "true", "approved"}
 
 
 def auto_refresh(seconds=5):
-    components.html(
-        f"""
-        <script>
-            setTimeout(function() {{
-                window.parent.location.reload();
-            }}, {seconds * 1000});
-        </script>
-        """,
-        height=0,
+    st_autorefresh(
+        interval=seconds * 1000,
+        key="live_event_console_refresh",
     )
 
 
@@ -314,49 +308,88 @@ def show_live_event_console():
     st.divider()
     st.subheader("🚀 Launch Mission")
 
-    submission_type = st.selectbox(
-        "Mission Type",
-        [
-            "PIPELINE",
-            "PIPELINE_ENTERPRISE",
-            "HELIUM",
-            "KEYPUNCH",
-            "CATALYST",
-            "NASI",
-            "PHOTO",
-            "NONE",
-        ],
-    )
-    defaults = mission_defaults(submission_type)
-
-    mission_id = st.text_input("Mission ID", value=defaults["mission_id"])
-    title = st.text_input("Mission Title", value=defaults["title"])
-    description = st.text_area("Mission Instructions", value=defaults["description"])
-    points = st.number_input("Points", min_value=0, value=defaults["points"], step=10)
-    clue = st.text_area("Clue", value=defaults["clue"])
-    answer = st.text_input("Answer", value="")
-    hint1 = st.text_input("Hint 1", value="")
-    hint2 = st.text_input("Hint 2", value="")
-    hint3 = st.text_input("Hint 3", value="")
-    ai_help_enabled = st.selectbox("AI Help Enabled", ["Yes", "No"])
-
-    if st.button("🚀 Launch Mission", width="stretch"):
-        db.send_mission(
-            event_id=event_id,
-            mission_id=mission_id,
-            title=title,
-            description=description,
-            points=points,
-            submission_type=submission_type,
-            clue=clue,
-            answer=answer,
-            hint1=hint1,
-            hint2=hint2,
-            hint3=hint3,
-            ai_help_enabled=ai_help_enabled,
+    event_missions = db.get_event_missions(event_id, include_closed=True)
+    if event_missions:
+        mission_options = {
+            f"{row.get('MissionID', '')} | {row.get('Title', '')} | {row.get('Status', '')}": row
+            for row in event_missions
+        }
+        mission_label = st.selectbox(
+            "Event Mission",
+            list(mission_options),
+            key="console_event_mission",
         )
-        st.success("Mission launched. Previous LIVE mission closed automatically.")
-        st.rerun()
+        selected_mission = mission_options[mission_label]
+        facilitator_instructions = str(
+            selected_mission.get("FacilitatorInstructions", "") or ""
+        ).strip()
+        if facilitator_instructions:
+            st.info("Facilitator: " + facilitator_instructions)
+        if st.button("🚀 Launch Selected Mission", width="stretch"):
+            db.launch_event_mission(
+                event_id,
+                selected_mission.get("MissionID", ""),
+            )
+            st.success("Mission launched. Previous LIVE mission closed automatically.")
+            st.rerun()
+    else:
+        st.info("No event missions yet. Add them in Mission Studio or use Quick Create.")
+
+    with st.expander("Quick Create Mission"):
+        submission_type = st.selectbox(
+            "Mission Type",
+            [
+                "PIPELINE",
+                "PIPELINE_ENTERPRISE",
+                "HELIUM",
+                "KEYPUNCH",
+                "CATALYST",
+                "NASI",
+                "PHOTO",
+                "TEXT",
+                "NONE",
+            ],
+            key="quick_mission_type",
+        )
+        defaults = mission_defaults(submission_type)
+
+        mission_id = st.text_input("Mission ID", value=defaults["mission_id"])
+        title = st.text_input("Mission Title", value=defaults["title"])
+        description = st.text_area("Mission Instructions", value=defaults["description"])
+        facilitator_instructions = st.text_area("Facilitator Instructions", value="")
+        points = st.number_input("Points", min_value=0, value=defaults["points"], step=10)
+        video_url = st.text_input("Video URL", value="")
+        image_url = st.text_input("Image URL", value="")
+        document_url = st.text_input("Document / PDF URL", value="")
+        clue = st.text_area("Clue", value=defaults["clue"])
+        answer = st.text_input("Answer", value="")
+        hint1 = st.text_input("Hint 1", value="")
+        hint2 = st.text_input("Hint 2", value="")
+        hint3 = st.text_input("Hint 3", value="")
+        ai_help_enabled = st.selectbox("AI Help Enabled", ["Yes", "No"])
+
+        if st.button("🚀 Create and Launch", width="stretch"):
+            db.send_mission(
+                event_id=event_id,
+                mission_id=mission_id,
+                title=title,
+                description=description,
+                points=points,
+                submission_type=submission_type,
+                clue=clue,
+                answer=answer,
+                hint1=hint1,
+                hint2=hint2,
+                hint3=hint3,
+                ai_help_enabled=ai_help_enabled,
+                participant_instructions=description,
+                facilitator_instructions=facilitator_instructions,
+                video_url=video_url,
+                image_url=image_url,
+                document_url=document_url,
+            )
+            st.success("Mission created and launched.")
+            st.rerun()
 
     st.divider()
     st.subheader("Current Mission")
@@ -364,7 +397,29 @@ def show_live_event_console():
     mission = db.get_current_mission(event_id)
     if mission:
         st.success(mission.get("Title", "Mission"))
-        st.write(mission.get("Description", ""))
+        participant_instructions = str(
+            mission.get("ParticipantInstructions", "")
+            or mission.get("Description", "")
+        ).strip()
+        facilitator_instructions = str(
+            mission.get("FacilitatorInstructions", "") or ""
+        ).strip()
+        if participant_instructions:
+            st.write(participant_instructions)
+        if facilitator_instructions:
+            st.info("Facilitator: " + facilitator_instructions)
+        if mission.get("VideoURL"):
+            st.video(str(mission.get("VideoURL")))
+        if mission.get("ImageURL"):
+            st.image(str(mission.get("ImageURL")), width="stretch")
+        if mission.get("DocumentURL"):
+            st.link_button(
+                "📄 Open Mission Document",
+                str(mission.get("DocumentURL")),
+            )
+        if mission.get("DebriefQuestions"):
+            with st.expander("Debrief Questions"):
+                st.markdown(str(mission.get("DebriefQuestions")))
         st.caption(f"Submission Type: {mission.get('SubmissionType', '')}")
     else:
         st.info("No live mission yet.")

@@ -25,7 +25,17 @@ REQUIRED_WORKSHEETS = {
     "Missions": [
         "EventID", "MissionID", "Title", "Description", "Points", "Status",
         "SubmissionType", "Clue", "Answer", "Hint1", "Hint2", "Hint3",
-        "AIHelpEnabled",
+        "AIHelpEnabled", "TemplateID", "Story", "ParticipantInstructions",
+        "FacilitatorInstructions", "LearningObjectives", "ScoringRule",
+        "VideoURL", "ImageURL", "DocumentURL", "DebriefQuestions", "Version",
+        "UpdatedAt",
+    ],
+    "MissionTemplates": [
+        "TemplateID", "Title", "Story", "ParticipantInstructions",
+        "FacilitatorInstructions", "LearningObjectives", "SubmissionType",
+        "ScoringRule", "Points", "VideoURL", "ImageURL", "DocumentURL",
+        "Clue", "Answer", "Hint1", "Hint2", "Hint3", "DebriefQuestions",
+        "AIHelpEnabled", "Status", "Version", "UpdatedAt",
     ],
     "Teams": ["EventID", "TeamID", "TeamName", "Country", "Language", "Score", "Status"],
     "AIFacilitators": ["Name", "Personality", "Greeting"],
@@ -79,8 +89,8 @@ def ensure_worksheet(workbook, name, headers):
     missing_headers = [header for header in headers if header not in existing]
     if missing_headers:
         worksheet.update(
-            f"{gspread.utils.rowcol_to_a1(1, len(existing) + 1)}:{gspread.utils.rowcol_to_a1(1, len(existing) + len(missing_headers))}",
-            [missing_headers],
+            values=[missing_headers],
+            range_name=f"{gspread.utils.rowcol_to_a1(1, len(existing) + 1)}:{gspread.utils.rowcol_to_a1(1, len(existing) + len(missing_headers))}",
         )
 
     return worksheet
@@ -108,6 +118,7 @@ class GoogleSheetsDB:
         self.participants = worksheets["Participants"]
         self.events = worksheets["Events"]
         self.missions = worksheets["Missions"]
+        self.mission_templates = worksheets["MissionTemplates"]
         self.teams = worksheets["Teams"]
         self.ai_facilitators = worksheets["AIFacilitators"]
         self.conversations = worksheets["Conversations"]
@@ -649,6 +660,305 @@ class GoogleSheetsDB:
     # Missions
     # -------------------------
 
+    @staticmethod
+    def _clean_record(record):
+        return {
+            re.sub(r"[^a-z0-9]", "", str(key).strip().lower()): value
+            for key, value in dict(record or {}).items()
+        }
+
+    def generate_next_template_id(self):
+        highest_number = 0
+        for template in self.get_mission_templates(include_archived=True):
+            template_id = str(template.get("TemplateID", "")).strip()
+            match = re.search(r"(\d+)$", template_id)
+            if match:
+                highest_number = max(highest_number, int(match.group(1)))
+        return f"MT-{highest_number + 1:04d}"
+
+    def get_mission_templates(self, include_archived=False):
+        templates = get_sheet_records("MissionTemplates")
+        if not include_archived:
+            templates = [
+                row for row in templates
+                if str(row.get("Status", "ACTIVE")).strip().upper() != "ARCHIVED"
+            ]
+        return sorted(
+            templates,
+            key=lambda row: (
+                str(row.get("Title", "")).strip().lower(),
+                str(row.get("TemplateID", "")).strip(),
+            ),
+        )
+
+    def get_mission_template(self, template_id):
+        wanted = str(template_id).strip()
+        for template in self.get_mission_templates(include_archived=True):
+            if str(template.get("TemplateID", "")).strip() == wanted:
+                return template
+        return None
+
+    def upsert_mission_template(self, record):
+        headers = self.mission_templates.row_values(1)
+        source = dict(record or {})
+        template_id = str(source.get("TemplateID", "")).strip().upper()
+        if not template_id:
+            template_id = self.generate_next_template_id()
+
+        title = str(source.get("Title", "")).strip()
+        if not title:
+            raise ValueError("Mission title is required.")
+
+        existing_rows = get_sheet_records("MissionTemplates")
+        existing = next(
+            (
+                row for row in existing_rows
+                if str(row.get("TemplateID", "")).strip() == template_id
+            ),
+            {},
+        )
+        payload = dict(existing)
+        payload.update(source)
+        payload.update({
+            "TemplateID": template_id,
+            "Title": title,
+            "Status": str(source.get("Status", existing.get("Status", "ACTIVE")) or "ACTIVE").upper(),
+            "Version": str(source.get("Version", existing.get("Version", "1.0")) or "1.0"),
+            "UpdatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+        values = [payload.get(header, "") for header in headers]
+        row_number = next(
+            (
+                index for index, row in enumerate(existing_rows, start=2)
+                if str(row.get("TemplateID", "")).strip() == template_id
+            ),
+            None,
+        )
+        if row_number:
+            end_cell = gspread.utils.rowcol_to_a1(row_number, len(headers))
+            self.mission_templates.update(
+                values=[values],
+                range_name=f"A{row_number}:{end_cell}",
+            )
+            action = "Updated"
+        else:
+            self.mission_templates.append_row(values, value_input_option="RAW")
+            action = "Created"
+
+        self.clear_cache()
+        return {"TemplateID": template_id, "Action": action}
+
+    def import_mission_templates(self, records):
+        aliases = {
+            re.sub(r"[^a-z0-9]", "", header.lower()): header
+            for header in REQUIRED_WORKSHEETS["MissionTemplates"]
+        }
+        headers = self.mission_templates.row_values(1)
+        existing_rows = get_sheet_records("MissionTemplates")
+        existing_by_id = {
+            str(row.get("TemplateID", "")).strip().upper(): (index, row)
+            for index, row in enumerate(existing_rows, start=2)
+            if str(row.get("TemplateID", "")).strip()
+        }
+        highest_number = 0
+        for template_id in existing_by_id:
+            match = re.search(r"(\d+)$", template_id)
+            if match:
+                highest_number = max(highest_number, int(match.group(1)))
+
+        created = 0
+        updated = 0
+        errors = []
+        seen_ids = set()
+        update_payloads = []
+        append_payloads = []
+
+        for row_number, raw_record in enumerate(records, start=2):
+            cleaned = self._clean_record(raw_record)
+            compatibility_aliases = {
+                "missionid": "templateid",
+                "missiontitle": "title",
+                "description": "participantinstructions",
+                "instructions": "participantinstructions",
+                "facilitatorinstruction": "facilitatorinstructions",
+                "learningobjective": "learningobjectives",
+                "video": "videourl",
+                "image": "imageurl",
+                "pdfurl": "documenturl",
+                "document": "documenturl",
+                "debrief": "debriefquestions",
+            }
+            for old_name, new_name in compatibility_aliases.items():
+                if new_name not in cleaned and old_name in cleaned:
+                    cleaned[new_name] = cleaned[old_name]
+            record = {
+                header: cleaned.get(alias, "")
+                for alias, header in aliases.items()
+            }
+            if not str(record.get("Title", "")).strip():
+                errors.append(f"Row {row_number}: Title is required.")
+                continue
+
+            template_id = str(record.get("TemplateID", "")).strip().upper()
+            if not template_id:
+                highest_number += 1
+                template_id = f"MT-{highest_number:04d}"
+            if template_id in seen_ids:
+                errors.append(
+                    f"Row {row_number}: duplicate TemplateID {template_id} in import file."
+                )
+                continue
+            seen_ids.add(template_id)
+
+            existing_row_number, existing = existing_by_id.get(
+                template_id,
+                (None, {}),
+            )
+            payload = dict(existing)
+            payload.update(record)
+            payload.update({
+                "TemplateID": template_id,
+                "Title": str(record.get("Title", "")).strip(),
+                "Status": str(record.get("Status", "ACTIVE") or "ACTIVE").upper(),
+                "Version": str(record.get("Version", "1.0") or "1.0"),
+                "UpdatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            values = [payload.get(header, "") for header in headers]
+
+            if existing_row_number:
+                end_cell = gspread.utils.rowcol_to_a1(
+                    existing_row_number,
+                    len(headers),
+                )
+                update_payloads.append({
+                    "range": f"A{existing_row_number}:{end_cell}",
+                    "values": [values],
+                })
+                updated += 1
+            else:
+                append_payloads.append(values)
+                created += 1
+
+        if update_payloads:
+            self.mission_templates.batch_update(update_payloads)
+        if append_payloads:
+            self.mission_templates.append_rows(
+                append_payloads,
+                value_input_option="RAW",
+            )
+        if update_payloads or append_payloads:
+            self.clear_cache()
+
+        return {"Created": created, "Updated": updated, "Errors": errors}
+
+    def get_event_missions(self, event_id, include_closed=True):
+        missions = [
+            mission for mission in get_sheet_records("Missions")
+            if str(mission.get("EventID", "")) == str(event_id)
+        ]
+        if not include_closed:
+            missions = [
+                mission for mission in missions
+                if str(mission.get("Status", "")).upper() != "CLOSED"
+            ]
+        return missions
+
+    def upsert_event_mission(self, record):
+        payload = dict(record or {})
+        event_id = str(payload.get("EventID", "")).strip()
+        mission_id = str(payload.get("MissionID", "")).strip().upper()
+        title = str(payload.get("Title", "")).strip()
+        if not event_id or not mission_id or not title:
+            raise ValueError("Event, Mission ID, and Title are required.")
+
+        rows = get_sheet_records("Missions")
+        existing = next(
+            (
+                row for row in rows
+                if str(row.get("EventID", "")) == event_id
+                and str(row.get("MissionID", "")).strip().upper() == mission_id
+            ),
+            {},
+        )
+        merged = dict(existing)
+        merged.update(payload)
+        merged.update({
+            "EventID": event_id,
+            "MissionID": mission_id,
+            "Title": title,
+            "Description": payload.get(
+                "Description",
+                payload.get("ParticipantInstructions", existing.get("Description", "")),
+            ),
+            "Status": str(payload.get("Status", existing.get("Status", "DRAFT")) or "DRAFT").upper(),
+            "Version": str(payload.get("Version", existing.get("Version", "1.0")) or "1.0"),
+            "UpdatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+        headers = self.missions.row_values(1)
+        values = [merged.get(header, "") for header in headers]
+        row_number = next(
+            (
+                index for index, row in enumerate(rows, start=2)
+                if str(row.get("EventID", "")) == event_id
+                and str(row.get("MissionID", "")).strip().upper() == mission_id
+            ),
+            None,
+        )
+        if row_number:
+            end_cell = gspread.utils.rowcol_to_a1(row_number, len(headers))
+            self.missions.update(
+                values=[values],
+                range_name=f"A{row_number}:{end_cell}",
+            )
+            action = "Updated"
+        else:
+            self.missions.append_row(values, value_input_option="RAW")
+            action = "Created"
+
+        self.clear_cache()
+        return {"MissionID": mission_id, "Action": action}
+
+    def add_template_to_event(self, template_id, event_id, mission_id=""):
+        template = self.get_mission_template(template_id)
+        if not template:
+            raise ValueError(f"Template {template_id} was not found.")
+
+        assigned_mission_id = str(mission_id).strip().upper() or str(template_id).strip().upper()
+        record = dict(template)
+        record.update({
+            "EventID": str(event_id),
+            "MissionID": assigned_mission_id,
+            "TemplateID": str(template_id),
+            "Description": template.get("ParticipantInstructions", ""),
+            "Status": "DRAFT",
+        })
+        result = self.upsert_event_mission(record)
+        result["TemplateID"] = str(template_id)
+        return result
+
+    def launch_event_mission(self, event_id, mission_id):
+        rows = get_sheet_records("Missions")
+        target_row = None
+        updates = []
+        for index, row in enumerate(rows, start=2):
+            if str(row.get("EventID", "")) != str(event_id):
+                continue
+            current_id = str(row.get("MissionID", "")).strip().upper()
+            if current_id == str(mission_id).strip().upper():
+                target_row = index
+                updates.append({"range": f"F{index}", "values": [["LIVE"]]})
+            elif str(row.get("Status", "")).upper() == "LIVE":
+                updates.append({"range": f"F{index}", "values": [["CLOSED"]]})
+
+        if target_row is None:
+            raise ValueError(f"Mission {mission_id} was not found for this event.")
+        if updates:
+            self.missions.batch_update(updates)
+        self.clear_cache()
+        return self.get_mission(event_id, mission_id)
+
     def send_mission(
         self,
         event_id,
@@ -663,32 +973,43 @@ class GoogleSheetsDB:
         hint2="",
         hint3="",
         ai_help_enabled="Yes",
+        story="",
+        participant_instructions="",
+        facilitator_instructions="",
+        learning_objectives="",
+        scoring_rule="",
+        video_url="",
+        image_url="",
+        document_url="",
+        debrief_questions="",
+        template_id="",
     ):
-        # Only one mission may be LIVE for an event.
-        rows = get_sheet_records("Missions")
-        for index, row in enumerate(rows, start=2):
-            if (
-                str(row.get("EventID", "")) == str(event_id)
-                and str(row.get("Status", "")).upper() == "LIVE"
-            ):
-                self.missions.update_cell(index, 6, "CLOSED")
-
-        self.missions.append_row([
-            event_id,
-            mission_id,
-            title,
-            description,
-            points,
-            "LIVE",
-            submission_type,
-            clue,
-            answer,
-            hint1,
-            hint2,
-            hint3,
-            ai_help_enabled,
-        ])
-        self.clear_cache()
+        self.upsert_event_mission({
+            "EventID": event_id,
+            "MissionID": mission_id,
+            "Title": title,
+            "Description": description,
+            "Points": points,
+            "Status": "DRAFT",
+            "SubmissionType": submission_type,
+            "Clue": clue,
+            "Answer": answer,
+            "Hint1": hint1,
+            "Hint2": hint2,
+            "Hint3": hint3,
+            "AIHelpEnabled": ai_help_enabled,
+            "TemplateID": template_id,
+            "Story": story,
+            "ParticipantInstructions": participant_instructions or description,
+            "FacilitatorInstructions": facilitator_instructions,
+            "LearningObjectives": learning_objectives,
+            "ScoringRule": scoring_rule,
+            "VideoURL": video_url,
+            "ImageURL": image_url,
+            "DocumentURL": document_url,
+            "DebriefQuestions": debrief_questions,
+        })
+        return self.launch_event_mission(event_id, mission_id)
 
     def get_current_mission(self, event_id):
         state = self.get_event_state(event_id)
@@ -861,12 +1182,15 @@ class GoogleSheetsDB:
         rows = get_sheet_records("Submissions")
         for index, row in enumerate(rows, start=2):
             if str(row.get("SubmissionID", "")) == str(submission_id):
-                self.submissions.update(f"L{index}:O{index}", [[
-                    score,
-                    status,
-                    judged,
-                    remarks,
-                ]])
+                self.submissions.update(
+                    values=[[
+                        score,
+                        status,
+                        judged,
+                        remarks,
+                    ]],
+                    range_name=f"L{index}:O{index}",
+                )
                 self.clear_cache()
                 return True
         return False
@@ -961,7 +1285,10 @@ class GoogleSheetsDB:
 
         for index, row in enumerate(rows, start=2):
             if str(row.get("EventID", "")) == str(event_id):
-                self.event_state.update(f"A{index}:G{index}", [payload])
+                self.event_state.update(
+                    values=[payload],
+                    range_name=f"A{index}:G{index}",
+                )
                 self.clear_cache()
                 return True
 
