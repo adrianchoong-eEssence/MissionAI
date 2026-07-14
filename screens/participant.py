@@ -691,13 +691,45 @@ def show_participant():
     render_team_assignment_card()
     st.divider()
 
-    mission = db.get_current_mission(st.session_state["participant_event_id"])
+    runtime_session = bool(
+        st.session_state.get("participant_session_token", "")
+    )
+    if runtime_session:
+        st_autorefresh(
+            interval=5000,
+            key="live_mission_state_refresh",
+        )
+
+    try:
+        mission = db.get_current_mission(
+            st.session_state["participant_event_id"],
+            session_token=st.session_state.get(
+                "participant_session_token",
+                "",
+            ),
+        )
+    except RuntimeDatabaseError as error:
+        st.warning("Live mission state is reconnecting. Please wait a moment.")
+        st.caption(str(error))
+        mission = None
     st.subheader("🎯 Current Mission")
 
     if mission is None:
         st.info("Waiting for facilitator to launch a mission...")
-        st_autorefresh(interval=5000, key="waiting_for_mission_refresh")
+        if not runtime_session:
+            st_autorefresh(interval=5000, key="waiting_for_mission_refresh")
     else:
+        runtime_stage = mission.get("_RuntimeStage", {})
+        if runtime_stage:
+            st.caption(
+                f"Current stage: {runtime_stage.get('StageName', mission.get('Title', 'Mission'))}"
+            )
+            stage_message = str(
+                runtime_stage.get("ParticipantMessage", "") or ""
+            ).strip()
+            if stage_message:
+                st.info(stage_message)
+
         st.success(mission.get("Title", "Mission"))
         render_mission_content(mission)
 
@@ -714,11 +746,17 @@ def show_participant():
         st.divider()
         if existing_submission:
             render_existing_submission(existing_submission)
-            st_autorefresh(interval=5000, key="submitted_mission_refresh")
+            if not runtime_session:
+                st_autorefresh(interval=5000, key="submitted_mission_refresh")
         else:
-            st.caption(
-                "Auto-refresh pauses while you enter results so your values are not reset."
-            )
+            if runtime_session:
+                st.caption(
+                    "Mission changes update automatically. Your entered values are preserved."
+                )
+            else:
+                st.caption(
+                    "Auto-refresh pauses while you enter results so your values are not reset."
+                )
             if st.button(
                 "🔄 Check for New Mission",
                 width="stretch",

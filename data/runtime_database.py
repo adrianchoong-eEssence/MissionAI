@@ -170,6 +170,59 @@ class SupabaseRuntimeDB:
         )
         return self._normalise_result(result) or {}
 
+    def publish_programme(self, event_id, missions):
+        if not self.can_publish:
+            raise RuntimeDatabaseError(
+                "Publishing requires SUPABASE_SECRET_KEY."
+            )
+
+        payload = []
+        for mission in missions:
+            mission_id = str(mission.get("MissionID", "")).strip()
+            if not mission_id:
+                continue
+            payload.append({
+                "mission_id": mission_id,
+                "mission_payload": dict(mission),
+            })
+
+        result = self._request(
+            "POST",
+            "rpc/exos_publish_programme",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_missions": payload,
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def set_event_stage(self, event_id, stage):
+        if not self.can_publish:
+            raise RuntimeDatabaseError(
+                "Stage publishing requires SUPABASE_SECRET_KEY."
+            )
+        result = self._request(
+            "POST",
+            "rpc/exos_set_event_stage",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_stage_payload": dict(stage or {}),
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def get_participant_current_mission(self, session_token):
+        if not self.is_configured or not str(session_token).strip():
+            return None
+        result = self._request(
+            "POST",
+            "rpc/exos_participant_current_mission",
+            payload={"p_session_token": str(session_token).strip()},
+        )
+        return self._normalise_result(result)
+
     def join_player(self, join_code, participant_name):
         result = self._request(
             "POST",

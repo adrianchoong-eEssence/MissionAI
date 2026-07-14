@@ -204,11 +204,34 @@ class GoogleSheetsDB:
         if not teams:
             raise ValueError("Create at least one team before publishing the event.")
 
-        return self.runtime.publish_event(
+        result = self.runtime.publish_event(
             event=event,
             teams=teams,
             reset_registration=reset_registration,
         )
+        missions = self.get_event_missions(event_id)
+        programme_result = self.runtime.publish_programme(event_id, missions)
+        result.update(programme_result)
+
+        state = self.get_event_state(event_id)
+        if state:
+            current_stage = next(
+                (
+                    stage for stage in self.get_programme_stages(event_id)
+                    if str(stage.get("StageNo", ""))
+                    == str(state.get("CurrentStageNo", ""))
+                ),
+                {
+                    "StageNo": state.get("CurrentStageNo", 0),
+                    "StageType": state.get("State", ""),
+                    "StageName": state.get("StageName", ""),
+                    "MissionID": state.get("MissionID", ""),
+                    "DisplayMode": state.get("DisplayMode", "Hybrid"),
+                },
+            )
+            self.runtime.set_event_stage(event_id, current_stage)
+
+        return result
 
     def sync_runtime_participants_to_sheet(self, event_id):
         if not self.runtime.can_publish:
@@ -959,7 +982,32 @@ class GoogleSheetsDB:
         if updates:
             self.missions.batch_update(updates)
         self.clear_cache()
-        return self.get_mission(event_id, mission_id)
+        mission = self.get_mission(event_id, mission_id)
+
+        if self.runtime.can_publish:
+            self.runtime.publish_programme(
+                event_id,
+                self.get_event_missions(event_id),
+            )
+
+        state = self.get_event_state(event_id) or {}
+        stage = {
+            "StageNo": state.get("CurrentStageNo", 0),
+            "StageName": mission.get("Title", "Mission"),
+            "StageType": "MissionActive",
+            "MissionID": mission.get("MissionID", mission_id),
+            "DisplayMode": "Current Mission",
+            "ParticipantMessage": mission.get(
+                "ParticipantInstructions",
+                mission.get("Description", ""),
+            ),
+            "FacilitatorInstruction": mission.get(
+                "FacilitatorInstructions",
+                "",
+            ),
+        }
+        self.set_event_stage(event_id, stage)
+        return mission
 
     def send_mission(
         self,
@@ -1013,7 +1061,24 @@ class GoogleSheetsDB:
         })
         return self.launch_event_mission(event_id, mission_id)
 
-    def get_current_mission(self, event_id):
+    def get_current_mission(self, event_id, session_token=""):
+        if self.runtime.is_configured and str(session_token).strip():
+            runtime_state = self.runtime.get_participant_current_mission(
+                session_token
+            )
+            if not runtime_state:
+                return None
+            mission = runtime_state.get("Mission")
+            if not isinstance(mission, dict) or not mission:
+                return None
+            mission = dict(mission)
+            mission["_RuntimeStage"] = runtime_state.get("Stage", {})
+            mission["_RuntimeStateVersion"] = runtime_state.get(
+                "StateVersion",
+                0,
+            )
+            return mission
+
         state = self.get_event_state(event_id)
         if state and state.get("MissionID"):
             mission = self.get_mission(event_id, state.get("MissionID"))
@@ -1302,6 +1367,7 @@ class GoogleSheetsDB:
         update_payloads = []
         append_payloads = []
         prepared_missions = []
+        runtime_missions = []
         used_mission_ids = set()
 
         for position, item in enumerate(mission_plan, start=1):
@@ -1344,6 +1410,8 @@ class GoogleSheetsDB:
             else:
                 append_payloads.append(values)
 
+            runtime_missions.append(payload)
+
             prepared_missions.append({
                 "MissionID": mission_id,
                 "Template": template,
@@ -1359,6 +1427,13 @@ class GoogleSheetsDB:
                 value_input_option="RAW",
             )
         self.clear_cache()
+
+        runtime_result = {"MissionsPublished": 0}
+        if self.runtime.can_publish:
+            runtime_result = self.runtime.publish_programme(
+                event_id,
+                runtime_missions,
+            )
 
         stages = []
 
@@ -1462,6 +1537,7 @@ class GoogleSheetsDB:
             "ProgrammeEndTime": current_time.strftime("%H:%M"),
             "RowsCreated": len(append_payloads),
             "RowsUpdated": len(update_payloads),
+            "RuntimeMissions": runtime_result.get("MissionsPublished", 0),
         }
 
     def get_event_state(self, event_id):
@@ -1480,6 +1556,7 @@ class GoogleSheetsDB:
         stage_name="",
         mission_id="",
         display_mode="Hybrid",
+        stage_payload=None,
     ):
         rows = get_sheet_records("EventState")
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1493,17 +1570,31 @@ class GoogleSheetsDB:
             timestamp,
         ]
 
+        sheet_updated = False
         for index, row in enumerate(rows, start=2):
             if str(row.get("EventID", "")) == str(event_id):
                 self.event_state.update(
                     values=[payload],
                     range_name=f"A{index}:G{index}",
                 )
-                self.clear_cache()
-                return True
+                sheet_updated = True
+                break
 
-        self.event_state.append_row(payload)
+        if not sheet_updated:
+            self.event_state.append_row(payload)
         self.clear_cache()
+
+        if self.runtime.can_publish:
+            runtime_stage = dict(stage_payload or {})
+            runtime_stage.update({
+                "StageNo": current_stage_no,
+                "StageType": state,
+                "StageName": stage_name,
+                "MissionID": mission_id,
+                "DisplayMode": display_mode,
+            })
+            self.runtime.set_event_stage(event_id, runtime_stage)
+
         return True
 
     def set_event_stage(self, event_id, stage):
@@ -1514,6 +1605,7 @@ class GoogleSheetsDB:
             stage_name=stage.get("StageName", ""),
             mission_id=stage.get("MissionID", ""),
             display_mode=stage.get("DisplayMode", "Hybrid"),
+            stage_payload=stage,
         )
 
     def seed_aia_saturday_stages(self, event_id):

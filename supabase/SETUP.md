@@ -3,7 +3,9 @@
 1. Create one Supabase project for EXOS.
 2. Open **SQL Editor** in Supabase.
 3. Run the complete `supabase/runtime_schema.sql` file.
-4. Run each numbered migration file in order, starting with `supabase/002_runtime_submissions.sql`.
+4. Run each numbered migration file in order:
+   - `supabase/002_runtime_submissions.sql`
+   - `supabase/003_runtime_programme.sql`
 5. Copy the project URL, publishable key, and secret key from Supabase project settings.
 6. Add these keys to the Streamlit secrets for Admin, Facilitator, and Participant:
 

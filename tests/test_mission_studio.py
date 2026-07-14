@@ -27,6 +27,21 @@ class FakeWorksheet:
         self.batch_updated.extend(payloads)
 
 
+class FakeRuntime:
+    def __init__(self, configured=False, publish_ready=False):
+        self.is_configured = configured
+        self.can_publish = publish_ready
+        self.published_missions = []
+        self.current_state = None
+
+    def publish_programme(self, event_id, missions):
+        self.published_missions = list(missions)
+        return {"MissionsPublished": len(self.published_missions)}
+
+    def get_participant_current_mission(self, session_token):
+        return self.current_state
+
+
 class MissionStudioDataTests(unittest.TestCase):
     def make_db(self):
         database = GoogleSheetsDB.__new__(GoogleSheetsDB)
@@ -34,6 +49,7 @@ class MissionStudioDataTests(unittest.TestCase):
             REQUIRED_WORKSHEETS["MissionTemplates"]
         )
         database.missions = FakeWorksheet(REQUIRED_WORKSHEETS["Missions"])
+        database.runtime = FakeRuntime()
         database.clear_cache = lambda: None
         return database
 
@@ -168,6 +184,35 @@ class MissionStudioDataTests(unittest.TestCase):
         self.assertEqual(captured_stages[2]["MissionID"], "M01")
         self.assertEqual(captured_stages[3]["StageType"], "Debrief")
         self.assertEqual(captured_stages[4]["MissionID"], "M02")
+
+    def test_current_mission_uses_runtime_state_for_participant(self):
+        database = self.make_db()
+        database.runtime = FakeRuntime(configured=True)
+        database.runtime.current_state = {
+            "StateVersion": 9,
+            "Stage": {
+                "StageName": "Signal Hunt",
+                "ParticipantMessage": "Find the signal.",
+            },
+            "Mission": {
+                "EventID": "EVT-TEST",
+                "MissionID": "M09",
+                "Title": "Signal Hunt",
+                "SubmissionType": "TEXT",
+            },
+        }
+
+        mission = database.get_current_mission(
+            "EVT-TEST",
+            session_token="session-token",
+        )
+
+        self.assertEqual(mission["MissionID"], "M09")
+        self.assertEqual(mission["_RuntimeStateVersion"], 9)
+        self.assertEqual(
+            mission["_RuntimeStage"]["ParticipantMessage"],
+            "Find the signal.",
+        )
 
 
 if __name__ == "__main__":
