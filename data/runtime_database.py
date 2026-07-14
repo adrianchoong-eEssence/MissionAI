@@ -119,6 +119,29 @@ class SupabaseRuntimeDB:
             return result[0] if result else None
         return result
 
+    @staticmethod
+    def _submission_record(row):
+        if not row:
+            return None
+        return {
+            "SubmissionID": row.get("submission_id", ""),
+            "EventID": row.get("event_id", ""),
+            "MissionID": row.get("mission_id", ""),
+            "TeamName": row.get("team_name", ""),
+            "ParticipantName": row.get("participant_name", ""),
+            "ImageURL": row.get("image_url", ""),
+            "DriveFileID": row.get("drive_file_id", ""),
+            "SubmissionType": row.get("submission_type", ""),
+            "Metric1": row.get("metric1", ""),
+            "Metric2": row.get("metric2", ""),
+            "Metric3": row.get("metric3", ""),
+            "Score": row.get("score", ""),
+            "Status": row.get("status", "PENDING"),
+            "Judged": row.get("judged", "No"),
+            "Remarks": row.get("remarks", ""),
+            "SubmittedAt": row.get("submitted_at", ""),
+        }
+
     def publish_event(self, event, teams, reset_registration=False):
         if not self.can_publish:
             raise RuntimeDatabaseError(
@@ -221,6 +244,85 @@ class SupabaseRuntimeDB:
             admin=True,
         )
         return self._normalise_result(result) or {}
+
+    def save_submission(self, submission):
+        def value(name, default=""):
+            raw = submission.get(name, default)
+            return str(default if raw is None else raw)
+
+        result = self._request(
+            "POST",
+            "rpc/exos_save_submission",
+            payload={
+                "p_submission_id": value("SubmissionID"),
+                "p_event_id": value("EventID"),
+                "p_mission_id": value("MissionID"),
+                "p_team_name": value("TeamName"),
+                "p_participant_name": value("ParticipantName"),
+                "p_image_url": value("ImageURL"),
+                "p_drive_file_id": value("DriveFileID"),
+                "p_submission_type": value("SubmissionType"),
+                "p_metric1": value("Metric1"),
+                "p_metric2": value("Metric2"),
+                "p_metric3": value("Metric3"),
+                "p_score": value("Score"),
+                "p_status": value("Status", "PENDING"),
+                "p_judged": value("Judged", "No"),
+                "p_remarks": value("Remarks"),
+                "p_submitted_at": value("SubmittedAt"),
+            },
+        )
+        return self._submission_record(self._normalise_result(result))
+
+    def get_submission(self, event_id, mission_id, scope_type, scope_value):
+        result = self._request(
+            "POST",
+            "rpc/exos_get_submission",
+            payload={
+                "p_event_id": str(event_id),
+                "p_mission_id": str(mission_id),
+                "p_scope_type": str(scope_type),
+                "p_scope_value": str(scope_value),
+            },
+        )
+        return self._submission_record(self._normalise_result(result))
+
+    def get_submissions(self, event_id):
+        if not self.can_publish:
+            return []
+        rows = self._request(
+            "GET",
+            "runtime_submissions",
+            query={
+                "select": "*",
+                "event_id": f"eq.{event_id}",
+                "order": "created_at.asc",
+            },
+            admin=True,
+        ) or []
+        return [self._submission_record(row) for row in rows]
+
+    def update_submission(
+        self,
+        submission_id,
+        score="",
+        remarks="",
+        judged="Yes",
+        status="APPROVED",
+    ):
+        result = self._request(
+            "POST",
+            "rpc/exos_update_submission",
+            payload={
+                "p_submission_id": str(submission_id),
+                "p_score": str(score),
+                "p_status": str(status),
+                "p_judged": str(judged),
+                "p_remarks": str(remarks),
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {"Updated": False}
 
     def run_join_load_test(self, join_code, total_participants=100, max_workers=40):
         total = max(1, int(total_participants))

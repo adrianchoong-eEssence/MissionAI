@@ -196,15 +196,11 @@ def find_existing_submission(db, mission, submission_type):
     mission_id = mission["MissionID"]
 
     if submission_type == "NASI":
-        participant_name = st.session_state["participant_name"].strip().lower()
-        for row in db.get_event_submissions(event_id):
-            if (
-                str(row.get("MissionID", "")) == str(mission_id)
-                and str(row.get("ParticipantName", "")).strip().lower()
-                == participant_name
-            ):
-                return row
-        return None
+        return db.get_participant_submission(
+            event_id=event_id,
+            mission_id=mission_id,
+            participant_name=st.session_state["participant_name"],
+        )
 
     return db.get_team_submission(
         event_id=event_id,

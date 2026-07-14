@@ -194,6 +194,22 @@ def show_event_manager():
                         f"Runtime total: {sync_result.get('RuntimeParticipants', 0)}."
                     )
 
+            if st.button(
+                "📥 Sync Runtime Submissions to Google Sheets",
+                key="sync_runtime_submissions",
+            ):
+                try:
+                    sync_result = db.sync_runtime_submissions_to_sheet(
+                        selected_runtime_event.get("EventID", "")
+                    )
+                except Exception as error:
+                    st.error(f"Submission sync failed: {error}")
+                else:
+                    st.success(
+                        f"{sync_result.get('RowsAdded', 0)} new submission rows added. "
+                        f"Runtime total: {sync_result.get('RuntimeSubmissions', 0)}."
+                    )
+
             with st.expander("Registration Load Test"):
                 st.caption(
                     "Use only with a test event. This creates temporary LOAD participants."

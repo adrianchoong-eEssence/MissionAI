@@ -239,6 +239,39 @@ class GoogleSheetsDB:
             "RowsAdded": len(new_rows),
         }
 
+    def sync_runtime_submissions_to_sheet(self, event_id):
+        if not self.runtime.can_publish:
+            raise RuntimeDatabaseError(
+                "Runtime submission export requires the secret key."
+            )
+
+        runtime_submissions = self.runtime.get_submissions(event_id)
+        existing_ids = {
+            str(row.get("SubmissionID", ""))
+            for row in get_sheet_records("Submissions")
+        }
+        headers = self.submissions.row_values(1)
+        new_rows = []
+
+        for submission in runtime_submissions:
+            submission_id = str(submission.get("SubmissionID", ""))
+            if not submission_id or submission_id in existing_ids:
+                continue
+            new_rows.append([
+                submission.get(header, "")
+                for header in headers
+            ])
+            existing_ids.add(submission_id)
+
+        if new_rows:
+            self.submissions.append_rows(new_rows, value_input_option="RAW")
+            self.clear_cache()
+
+        return {
+            "RuntimeSubmissions": len(runtime_submissions),
+            "RowsAdded": len(new_rows),
+        }
+
     def get_event(self, event_id):
         for event in self.get_events():
             if str(event.get("EventID", "")) == str(event_id):
@@ -704,31 +737,7 @@ class GoogleSheetsDB:
         metric3="",
         status="PENDING",
     ):
-        """Save a submission using the universal EXOS submission schema.
-
-        The optional defaults preserve compatibility with older screens while
-        allowing new mission forms to save structured metrics.
-        """
-        self.submissions.append_row([
-            submission_id,
-            event_id,
-            mission_id,
-            team_name,
-            participant_name,
-            image_url,
-            drive_file_id,
-            submission_type,
-            metric1,
-            metric2,
-            metric3,
-            score,
-            status,
-            judged,
-            remarks,
-            submitted_at,
-        ])
-        self.clear_cache()
-        return {
+        record = {
             "SubmissionID": submission_id,
             "EventID": event_id,
             "MissionID": mission_id,
@@ -747,7 +756,25 @@ class GoogleSheetsDB:
             "SubmittedAt": submitted_at,
         }
 
+        if self.runtime.is_configured:
+            return self.runtime.save_submission(record)
+
+        self.submissions.append_row([
+            record.get(header, "")
+            for header in self.submissions.row_values(1)
+        ])
+        self.clear_cache()
+        return record
+
     def get_team_submission(self, event_id, mission_id, team_name):
+        if self.runtime.is_configured:
+            return self.runtime.get_submission(
+                event_id,
+                mission_id,
+                "TEAM",
+                team_name,
+            )
+
         for row in get_sheet_records("Submissions"):
             if (
                 str(row.get("EventID", "")) == str(event_id)
@@ -757,12 +784,44 @@ class GoogleSheetsDB:
                 return row
         return None
 
+    def get_participant_submission(self, event_id, mission_id, participant_name):
+        if self.runtime.is_configured:
+            return self.runtime.get_submission(
+                event_id,
+                mission_id,
+                "PARTICIPANT",
+                participant_name,
+            )
+
+        for row in get_sheet_records("Submissions"):
+            if (
+                str(row.get("EventID", "")) == str(event_id)
+                and str(row.get("MissionID", "")) == str(mission_id)
+                and str(row.get("ParticipantName", "")).strip().lower()
+                == str(participant_name).strip().lower()
+            ):
+                return row
+        return None
+
     def get_event_submissions(self, event_id):
-        return [
+        sheet_rows = [
             row
             for row in get_sheet_records("Submissions")
             if str(row.get("EventID", "")) == str(event_id)
         ]
+        if not self.runtime.can_publish:
+            return sheet_rows
+
+        try:
+            runtime_rows = self.runtime.get_submissions(event_id)
+        except RuntimeDatabaseError:
+            return sheet_rows
+
+        merged = {
+            str(row.get("SubmissionID", "")): row
+            for row in sheet_rows + runtime_rows
+        }
+        return list(merged.values())
 
     def get_submissions(self, event_id):
         return self.get_event_submissions(event_id)
@@ -788,6 +847,17 @@ class GoogleSheetsDB:
         judged="Yes",
         status="APPROVED",
     ):
+        if self.runtime.can_publish:
+            runtime_result = self.runtime.update_submission(
+                submission_id=submission_id,
+                score=score,
+                remarks=remarks,
+                judged=judged,
+                status=status,
+            )
+            if runtime_result.get("Updated"):
+                return True
+
         rows = get_sheet_records("Submissions")
         for index, row in enumerate(rows, start=2):
             if str(row.get("SubmissionID", "")) == str(submission_id):
