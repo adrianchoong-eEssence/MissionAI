@@ -68,6 +68,7 @@ def _render_stage_card(stage, is_current=False):
             <div style="font-size:16px; opacity:0.75;">Stage {stage.get('StageNo', '')}</div>
             <div style="font-size:24px; font-weight:800;">{stage.get('StageName', '')}</div>
             <div style="font-size:15px; margin-top:6px; opacity:0.85;">{_stage_badge(stage.get('StageType', ''))}</div>
+            <div style="font-size:14px; margin-top:6px; opacity:0.75;">{stage.get('StartTime', '') or 'Unscheduled'} • {stage.get('DurationMinutes', '') or '-'} min</div>
             <div style="font-size:14px; margin-top:6px; opacity:0.7;">Mission: {stage.get('MissionID', '') or '-'}</div>
         </div>
         """,
@@ -104,13 +105,7 @@ def show_show_control():
 
     if not stages:
         st.warning("No programme stages found for this event.")
-        st.info("For Saturday, click the button below to load the AIA programme flow.")
-
-        if st.button("⚡ Load Saturday AIA Flow", width="stretch"):
-            db.seed_aia_saturday_stages(event_id)
-            st.success("Saturday programme stages loaded.")
-            st.rerun()
-
+        st.info("Open Programme Builder to select missions and publish the live timeline.")
         return
 
     state = db.get_event_state(event_id)
@@ -130,6 +125,7 @@ def show_show_control():
             <div style="font-size:18px; opacity:0.75;">Stage {current_stage.get('StageNo')} of {len(stages)}</div>
             <div style="font-size:42px; font-weight:900; margin-top:8px;">{current_stage.get('StageName')}</div>
             <div style="font-size:20px; margin-top:10px;">{_stage_badge(current_stage.get('StageType', ''))}</div>
+            <div style="font-size:18px; margin-top:12px; opacity:0.9;">Scheduled: {current_stage.get('StartTime', '') or 'Unscheduled'} • {current_stage.get('DurationMinutes', '') or '-'} minutes</div>
             <div style="font-size:16px; margin-top:12px; opacity:0.8;">Display Mode: {current_stage.get('DisplayMode', '')}</div>
             <div style="font-size:16px; margin-top:6px; opacity:0.8;">Mission ID: {current_stage.get('MissionID', '') or '-'}</div>
         </div>

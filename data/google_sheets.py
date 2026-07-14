@@ -1,7 +1,7 @@
 import gspread
 import streamlit as st
 from google.oauth2.service_account import Credentials
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 import re
 import string
@@ -48,6 +48,7 @@ REQUIRED_WORKSHEETS = {
     "ProgrammeStages": [
         "EventID", "StageNo", "StageName", "StageType", "MissionID",
         "DisplayMode", "ParticipantMessage", "FacilitatorInstruction", "IsActive",
+        "StartTime", "DurationMinutes",
     ],
     "EventState": [
         "EventID", "CurrentStageNo", "State", "StageName", "MissionID",
@@ -351,6 +352,7 @@ class GoogleSheetsDB:
         source_rows = [
             row for row in get_sheet_records("ProgrammeStages")
             if str(row.get("EventID", "")) == str(source_event_id)
+            and str(row.get("IsActive", "Yes")) != "No"
         ]
         source_rows = sorted(
             source_rows,
@@ -1236,23 +1238,231 @@ class GoogleSheetsDB:
             if str(row.get("EventID", "")) == str(event_id):
                 existing_rows.append(index)
 
-        for row_index in reversed(existing_rows):
-            self.programme_stages.delete_rows(row_index)
+        groups = []
+        for row_index in existing_rows:
+            if not groups or row_index != groups[-1][1] + 1:
+                groups.append([row_index, row_index])
+            else:
+                groups[-1][1] = row_index
+        for start_row, end_row in reversed(groups):
+            self.programme_stages.delete_rows(start_row, end_row)
 
+        headers = self.programme_stages.row_values(1)
+        rows_to_append = []
         for stage in stages:
-            self.programme_stages.append_row([
-                event_id,
-                stage.get("StageNo", ""),
-                stage.get("StageName", ""),
-                stage.get("StageType", ""),
-                stage.get("MissionID", ""),
-                stage.get("DisplayMode", "Hybrid"),
-                stage.get("ParticipantMessage", ""),
-                stage.get("FacilitatorInstruction", ""),
-                stage.get("IsActive", "Yes"),
+            payload = dict(stage)
+            payload["EventID"] = event_id
+            rows_to_append.append([
+                payload.get(header, "")
+                for header in headers
             ])
+        if rows_to_append:
+            self.programme_stages.append_rows(
+                rows_to_append,
+                value_input_option="RAW",
+            )
 
         self.clear_cache()
+
+    def build_event_programme(
+        self,
+        event_id,
+        mission_plan,
+        start_time="09:00",
+        include_registration=True,
+        registration_minutes=15,
+        include_team_discovery=True,
+        team_discovery_minutes=15,
+        debrief_minutes=15,
+        include_closing=True,
+    ):
+        if not self.get_event(event_id):
+            raise ValueError(f"Event {event_id} was not found.")
+        if not mission_plan:
+            raise ValueError("Select at least one mission.")
+
+        try:
+            current_time = datetime.strptime(str(start_time), "%H:%M")
+        except ValueError as error:
+            raise ValueError("Programme start time must use HH:MM format.") from error
+
+        templates = {
+            str(row.get("TemplateID", "")).strip().upper(): row
+            for row in self.get_mission_templates()
+        }
+        existing_rows = get_sheet_records("Missions")
+        existing_map = {
+            (
+                str(row.get("EventID", "")),
+                str(row.get("MissionID", "")).strip().upper(),
+            ): (index, row)
+            for index, row in enumerate(existing_rows, start=2)
+        }
+        mission_headers = self.missions.row_values(1)
+        update_payloads = []
+        append_payloads = []
+        prepared_missions = []
+        used_mission_ids = set()
+
+        for position, item in enumerate(mission_plan, start=1):
+            template_id = str(item.get("TemplateID", "")).strip().upper()
+            template = templates.get(template_id)
+            if not template:
+                raise ValueError(f"Template {template_id} was not found.")
+
+            mission_id = str(item.get("MissionID", "")).strip().upper()
+            if not mission_id:
+                mission_id = f"M{position:02d}"
+            if mission_id in used_mission_ids:
+                raise ValueError(f"Mission ID {mission_id} is duplicated in the programme.")
+            used_mission_ids.add(mission_id)
+
+            existing_row_number, existing = existing_map.get(
+                (str(event_id), mission_id),
+                (None, {}),
+            )
+            payload = dict(existing)
+            payload.update(template)
+            payload.update({
+                "EventID": str(event_id),
+                "MissionID": mission_id,
+                "TemplateID": template_id,
+                "Description": template.get("ParticipantInstructions", ""),
+                "Status": "DRAFT",
+                "UpdatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            values = [payload.get(header, "") for header in mission_headers]
+            if existing_row_number:
+                end_cell = gspread.utils.rowcol_to_a1(
+                    existing_row_number,
+                    len(mission_headers),
+                )
+                update_payloads.append({
+                    "range": f"A{existing_row_number}:{end_cell}",
+                    "values": [values],
+                })
+            else:
+                append_payloads.append(values)
+
+            prepared_missions.append({
+                "MissionID": mission_id,
+                "Template": template,
+                "DurationMinutes": max(int(item.get("DurationMinutes") or 30), 1),
+                "IncludeDebrief": bool(item.get("IncludeDebrief", True)),
+            })
+
+        if update_payloads:
+            self.missions.batch_update(update_payloads)
+        if append_payloads:
+            self.missions.append_rows(
+                append_payloads,
+                value_input_option="RAW",
+            )
+        self.clear_cache()
+
+        stages = []
+
+        def add_stage(
+            stage_name,
+            stage_type,
+            duration,
+            mission_id="",
+            display_mode="Hybrid",
+            participant_message="",
+            facilitator_instruction="",
+        ):
+            nonlocal current_time
+            duration_value = max(int(duration or 0), 0)
+            stages.append({
+                "StageNo": len(stages) + 1,
+                "StageName": stage_name,
+                "StageType": stage_type,
+                "MissionID": mission_id,
+                "DisplayMode": display_mode,
+                "ParticipantMessage": participant_message,
+                "FacilitatorInstruction": facilitator_instruction,
+                "IsActive": "Yes",
+                "StartTime": current_time.strftime("%H:%M"),
+                "DurationMinutes": duration_value,
+            })
+            current_time += timedelta(minutes=duration_value)
+
+        if include_registration:
+            add_stage(
+                "Registration",
+                "Registration",
+                registration_minutes,
+                display_mode="Registration",
+                participant_message="Scan the QR code, enter the join code, and register your name.",
+                facilitator_instruction="Monitor registration and support participants who need help joining.",
+            )
+
+        if include_team_discovery:
+            add_stage(
+                "Team Discovery",
+                "TeamDiscovery",
+                team_discovery_minutes,
+                display_mode="Registration",
+                participant_message="Find your assigned team and gather together.",
+                facilitator_instruction="Help participants locate their teams and prepare for the first mission.",
+            )
+
+        for prepared in prepared_missions:
+            template = prepared["Template"]
+            mission_id = prepared["MissionID"]
+            add_stage(
+                str(template.get("Title", mission_id)),
+                "MissionActive",
+                prepared["DurationMinutes"],
+                mission_id=mission_id,
+                display_mode="Current Mission",
+                participant_message=str(
+                    template.get("ParticipantInstructions", "")
+                ),
+                facilitator_instruction=str(
+                    template.get("FacilitatorInstructions", "")
+                ),
+            )
+            if prepared["IncludeDebrief"]:
+                debrief_questions = str(
+                    template.get("DebriefQuestions", "")
+                ).strip()
+                add_stage(
+                    f"{template.get('Title', mission_id)} — Debrief",
+                    "Debrief",
+                    debrief_minutes,
+                    mission_id=mission_id,
+                    display_mode="Collaboration",
+                    participant_message=(
+                        "Reflect on the mission and prepare to share your learning."
+                    ),
+                    facilitator_instruction=(
+                        debrief_questions
+                        or "Connect the experience to workplace behaviour and application."
+                    ),
+                )
+
+        if include_closing:
+            add_stage(
+                "Closing",
+                "Closing",
+                10,
+                display_mode="Winner",
+                participant_message="Thank you for completing the experience together.",
+                facilitator_instruction="Close with key learning, commitments, and recognition.",
+            )
+
+        self.save_programme_stages(event_id, stages)
+        if stages:
+            self.set_event_stage(event_id, stages[0])
+
+        return {
+            "Missions": len(prepared_missions),
+            "Stages": len(stages),
+            "ProgrammeEndTime": current_time.strftime("%H:%M"),
+            "RowsCreated": len(append_payloads),
+            "RowsUpdated": len(update_payloads),
+        }
 
     def get_event_state(self, event_id):
         states = [

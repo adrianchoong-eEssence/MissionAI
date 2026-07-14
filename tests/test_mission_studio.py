@@ -112,6 +112,63 @@ class MissionStudioDataTests(unittest.TestCase):
         self.assertEqual(captured["VideoURL"], "https://example.com/mission-video")
         self.assertEqual(captured["Status"], "DRAFT")
 
+    def test_build_event_programme_creates_ordered_missions_and_stages(self):
+        database = self.make_db()
+        database.get_event = lambda event_id: {"EventID": event_id}
+        database.get_mission_templates = lambda: [
+            {
+                "TemplateID": "MT-ONE",
+                "Title": "First Mission",
+                "ParticipantInstructions": "Do the first mission.",
+                "FacilitatorInstructions": "Brief mission one.",
+                "DebriefQuestions": "What happened?",
+            },
+            {
+                "TemplateID": "MT-TWO",
+                "Title": "Second Mission",
+                "ParticipantInstructions": "Do the second mission.",
+                "FacilitatorInstructions": "Brief mission two.",
+            },
+        ]
+        captured_stages = []
+        database.save_programme_stages = (
+            lambda event_id, stages: captured_stages.extend(stages)
+        )
+        database.set_event_stage = lambda event_id, stage: True
+
+        plan = [
+            {
+                "TemplateID": "MT-ONE",
+                "MissionID": "M01",
+                "DurationMinutes": 30,
+                "IncludeDebrief": True,
+            },
+            {
+                "TemplateID": "MT-TWO",
+                "MissionID": "M02",
+                "DurationMinutes": 45,
+                "IncludeDebrief": False,
+            },
+        ]
+
+        with patch("data.google_sheets.get_sheet_records", return_value=[]):
+            result = database.build_event_programme(
+                "EVT-TEST",
+                plan,
+                start_time="09:00",
+                registration_minutes=15,
+                team_discovery_minutes=15,
+                debrief_minutes=10,
+            )
+
+        self.assertEqual(result["Missions"], 2)
+        self.assertEqual(result["Stages"], 6)
+        self.assertEqual(result["ProgrammeEndTime"], "11:05")
+        self.assertEqual(captured_stages[0]["StageName"], "Registration")
+        self.assertEqual(captured_stages[2]["MissionID"], "M01")
+        self.assertEqual(captured_stages[3]["StageType"], "Debrief")
+        self.assertEqual(captured_stages[4]["MissionID"], "M02")
+
 
 if __name__ == "__main__":
     unittest.main()
