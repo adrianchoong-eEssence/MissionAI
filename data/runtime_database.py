@@ -1,6 +1,9 @@
 import json
 import os
 import time
+import uuid
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -218,3 +221,61 @@ class SupabaseRuntimeDB:
             admin=True,
         )
         return self._normalise_result(result) or {}
+
+    def run_join_load_test(self, join_code, total_participants=100, max_workers=40):
+        total = max(1, int(total_participants))
+        workers = max(1, min(int(max_workers), total, 50))
+        run_id = uuid.uuid4().hex[:8].upper()
+        started = time.perf_counter()
+        joined = []
+        errors = []
+
+        def join_test_participant(number):
+            name = f"LOAD-{run_id}-{number:03d}"
+            return self.join_player(join_code, name)
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(join_test_participant, number): number
+                for number in range(1, total + 1)
+            }
+            for future in as_completed(futures):
+                number = futures[future]
+                try:
+                    joined.append(future.result())
+                except Exception as error:
+                    errors.append({
+                        "Participant": f"LOAD-{run_id}-{number:03d}",
+                        "Error": str(error),
+                    })
+
+        team_counts = Counter(
+            str(player.get("Team", "Unassigned"))
+            for player in joined
+        )
+        counts = list(team_counts.values())
+        spread = max(counts) - min(counts) if counts else total
+        session_tokens = [
+            str(player.get("SessionToken", ""))
+            for player in joined
+            if player.get("SessionToken")
+        ]
+        duplicate_tokens = len(session_tokens) - len(set(session_tokens))
+
+        return {
+            "RunID": run_id,
+            "Requested": total,
+            "Joined": len(joined),
+            "Failed": len(errors),
+            "DurationSeconds": round(time.perf_counter() - started, 2),
+            "TeamCounts": dict(sorted(team_counts.items())),
+            "DistributionSpread": spread,
+            "DuplicateSessionTokens": duplicate_tokens,
+            "Passed": (
+                len(joined) == total
+                and not errors
+                and spread <= 1
+                and duplicate_tokens == 0
+            ),
+            "Errors": errors,
+        }

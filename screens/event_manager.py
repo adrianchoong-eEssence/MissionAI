@@ -193,6 +193,69 @@ def show_event_manager():
                         f"{sync_result.get('RowsAdded', 0)} new participant rows added. "
                         f"Runtime total: {sync_result.get('RuntimeParticipants', 0)}."
                     )
+
+            with st.expander("Registration Load Test"):
+                st.caption(
+                    "Use only with a test event. This creates temporary LOAD participants."
+                )
+                load_test_size = st.number_input(
+                    "Simultaneous test participants",
+                    min_value=12,
+                    max_value=300,
+                    value=100,
+                    step=1,
+                    key="runtime_load_test_size",
+                )
+                confirm_load_test = st.checkbox(
+                    "I confirm this is a test event",
+                    key="confirm_runtime_load_test",
+                )
+
+                if st.button(
+                    "🧪 Run Registration Load Test",
+                    key="run_runtime_load_test",
+                ):
+                    if not confirm_load_test:
+                        st.error("Confirm that the selected event is a test event.")
+                    else:
+                        with st.spinner(
+                            f"Running {int(load_test_size)} simultaneous joins..."
+                        ):
+                            load_result = db.runtime.run_join_load_test(
+                                selected_runtime_event.get("JoinCode", ""),
+                                total_participants=int(load_test_size),
+                            )
+
+                        metric1, metric2, metric3 = st.columns(3)
+                        metric1.metric("Joined", load_result["Joined"])
+                        metric2.metric("Failed", load_result["Failed"])
+                        metric3.metric(
+                            "Duration",
+                            f"{load_result['DurationSeconds']} sec",
+                        )
+
+                        distribution = [
+                            {"Team": team, "Participants": count}
+                            for team, count in load_result["TeamCounts"].items()
+                        ]
+                        st.dataframe(distribution, width="stretch")
+
+                        if load_result["Passed"]:
+                            st.success(
+                                "Load test passed: no failures, duplicates, or team skew."
+                            )
+                        else:
+                            st.error("Load test failed. Do not use this runtime live yet.")
+                            if load_result["Errors"]:
+                                st.dataframe(
+                                    load_result["Errors"][:20],
+                                    width="stretch",
+                                )
+
+                        st.info(
+                            "After testing, publish this event again with the reset option "
+                            "to remove all temporary LOAD participants."
+                        )
     else:
         st.warning(runtime_status["Message"])
         st.caption(
