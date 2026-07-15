@@ -23,8 +23,10 @@ def _secret(name):
     return str(value or "").strip()
 
 
-@st.cache_resource
 def get_runtime_database():
+    # This client is lightweight and stateless. Do not persist it across code
+    # deployments because Streamlit can otherwise retain an instance of an
+    # older class definition after runtime methods are added or changed.
     return SupabaseRuntimeDB()
 
 
