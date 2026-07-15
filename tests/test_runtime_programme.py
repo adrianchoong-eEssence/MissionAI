@@ -35,6 +35,8 @@ class RuntimeProgrammeTests(unittest.TestCase):
                     "state_version": 7,
                     "state_updated_at": "2026-07-15T01:00:00Z",
                 }]
+            if path == "runtime_missions":
+                return [{"mission_id": "M01"}]
             return [{"MissionsPublished": 1}]
 
         runtime._request = fake_request
@@ -78,6 +80,15 @@ class RuntimeProgrammeTests(unittest.TestCase):
         call = runtime.calls[0]
         self.assertEqual(call["path"], "runtime_events")
         self.assertEqual(call["query"]["event_id"], "eq.EVT-TEST")
+        self.assertTrue(call["admin"])
+
+    def test_has_event_mission_checks_runtime_payload(self):
+        runtime = self.make_runtime()
+
+        self.assertTrue(runtime.has_event_mission("EVT-TEST", "M01"))
+        call = runtime.calls[0]
+        self.assertEqual(call["path"], "runtime_missions")
+        self.assertEqual(call["query"]["mission_id"], "eq.M01")
         self.assertTrue(call["admin"])
 
 

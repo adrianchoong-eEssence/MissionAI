@@ -29,6 +29,10 @@ SESSION_KEYS = [
     "ai_name",
     "ai_personality",
     "ai_greeting",
+    "participant_runtime_signature",
+    "participant_runtime_state",
+    "participant_runtime_poll_count",
+    "participant_runtime_error",
 ]
 
 
@@ -72,10 +76,19 @@ def watch_live_mission_state(session_token):
         "participant_runtime_signature"
     )
     st.session_state["participant_runtime_signature"] = signature
+    st.session_state["participant_runtime_state"] = runtime_state
     st.session_state.pop("participant_runtime_error", None)
 
-    checked_at = datetime.now().strftime("%H:%M:%S")
-    st.caption(f"🟢 Live connection active · checked {checked_at}")
+    poll_count = int(
+        st.session_state.get("participant_runtime_poll_count", 0)
+    ) + 1
+    st.session_state["participant_runtime_poll_count"] = poll_count
+    stage_number = runtime_state.get("StageNo", 0)
+    event_id = runtime_state.get("EventID", "")
+    st.caption(
+        f"🟢 Live connection active · {event_id} · "
+        f"stage {stage_number} · check #{poll_count}"
+    )
 
     if previous_signature is not None and signature != previous_signature:
         st.rerun(scope="app")
@@ -732,6 +745,10 @@ def show_participant():
         watch_live_mission_state(
             st.session_state["participant_session_token"]
         )
+    live_runtime_state = st.session_state.get(
+        "participant_runtime_state",
+        {},
+    )
 
     try:
         mission = db.get_current_mission(
@@ -745,10 +762,32 @@ def show_participant():
         st.warning("Live mission state is reconnecting. Please wait a moment.")
         st.caption(str(error))
         mission = None
-    st.subheader("🎯 Current Mission")
+    st.subheader("🎯 Current Mission" if mission else "🎬 Live Stage")
 
     if mission is None:
-        st.info("Waiting for facilitator to launch a mission...")
+        stage_payload = live_runtime_state.get("Stage", {}) or {}
+        stage_name = str(
+            live_runtime_state.get("StageName", "")
+            or stage_payload.get("StageName", "")
+        ).strip()
+        participant_message = str(
+            stage_payload.get("ParticipantMessage", "")
+        ).strip()
+        current_mission_id = str(
+            live_runtime_state.get("MissionID", "")
+        ).strip()
+
+        if stage_name:
+            st.success(stage_name)
+            if participant_message:
+                st.info(participant_message)
+            if current_mission_id:
+                st.warning(
+                    f"Mission {current_mission_id} is being synchronised. "
+                    "Press Check for New Mission once."
+                )
+        else:
+            st.info("Waiting for facilitator to launch a stage...")
         if st.button(
             "🔄 Check for New Mission",
             width="stretch",

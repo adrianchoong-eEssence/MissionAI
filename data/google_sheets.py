@@ -1576,6 +1576,25 @@ class GoogleSheetsDB:
             "DisplayMode": display_mode,
         })
         if self.runtime.can_publish:
+            if (
+                str(mission_id).strip()
+                and not self.runtime.has_event_mission(
+                    event_id,
+                    mission_id,
+                )
+            ):
+                event_missions = self.get_event_missions(event_id)
+                if not any(
+                    str(row.get("MissionID", "")) == str(mission_id)
+                    for row in event_missions
+                ):
+                    raise ValueError(
+                        f"Mission {mission_id} was not found for event {event_id}."
+                    )
+                self.runtime.publish_programme(
+                    event_id,
+                    event_missions,
+                )
             runtime_result = self.runtime.set_event_stage(
                 event_id,
                 runtime_stage,

@@ -249,6 +249,23 @@ class SupabaseRuntimeDB:
             "LastUpdated": row.get("state_updated_at", ""),
         }
 
+    def has_event_mission(self, event_id, mission_id):
+        """Return whether a mission payload exists in the live runtime."""
+        if not self.can_publish:
+            return False
+        result = self._request(
+            "GET",
+            "runtime_missions",
+            query={
+                "event_id": f"eq.{str(event_id).strip()}",
+                "mission_id": f"eq.{str(mission_id).strip()}",
+                "select": "mission_id",
+                "limit": "1",
+            },
+            admin=True,
+        )
+        return bool(self._normalise_result(result))
+
     def get_participant_current_mission(self, session_token):
         if not self.is_configured or not str(session_token).strip():
             return None
