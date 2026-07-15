@@ -1124,6 +1124,7 @@ class GoogleSheetsDB:
         metric2="",
         metric3="",
         status="PENDING",
+        session_token="",
     ):
         record = {
             "SubmissionID": submission_id,
@@ -1142,6 +1143,7 @@ class GoogleSheetsDB:
             "Judged": judged,
             "Remarks": remarks,
             "SubmittedAt": submitted_at,
+            "SessionToken": session_token,
         }
 
         if self.runtime.is_configured:
@@ -1172,13 +1174,20 @@ class GoogleSheetsDB:
                 return row
         return None
 
-    def get_participant_submission(self, event_id, mission_id, participant_name):
+    def get_participant_submission(
+        self,
+        event_id,
+        mission_id,
+        participant_name,
+        session_token="",
+    ):
         if self.runtime.is_configured:
             return self.runtime.get_submission(
                 event_id,
                 mission_id,
                 "PARTICIPANT",
                 participant_name,
+                session_token=session_token,
             )
 
         for row in get_sheet_records("Submissions"):

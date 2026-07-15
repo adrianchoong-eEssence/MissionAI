@@ -20,6 +20,7 @@ COUNTRY_LANGUAGE_PROMPTS = {
 }
 
 SESSION_KEYS = [
+    "participant_id",
     "participant_event_id",
     "participant_name",
     "participant_team",
@@ -111,6 +112,10 @@ def restore_session_from_query_params(db):
         if runtime_player:
             team_name = str(runtime_player.get("Team", ""))
             ai = db.assign_ai_facilitator(team_name) or {}
+            st.session_state["participant_id"] = runtime_player.get(
+                "ParticipantID",
+                "",
+            )
             st.session_state["participant_event_id"] = runtime_player.get(
                 "EventID", ""
             )
@@ -127,6 +132,18 @@ def restore_session_from_query_params(db):
             st.session_state["ai_personality"] = ai.get("Personality", "")
             st.session_state["ai_greeting"] = ai.get("Greeting", "")
             return
+
+    if db.runtime.is_configured:
+        for key in [
+            "event_id",
+            "participant_name",
+            "participant_team",
+            "event_name",
+            "session_token",
+        ]:
+            if key in st.query_params:
+                del st.query_params[key]
+        return
 
     if not event_id or not participant_name:
         return
@@ -247,6 +264,10 @@ def find_existing_submission(db, mission, submission_type):
             event_id=event_id,
             mission_id=mission_id,
             participant_name=st.session_state["participant_name"],
+            session_token=st.session_state.get(
+                "participant_session_token",
+                "",
+            ),
         )
 
     return db.get_team_submission(
@@ -320,6 +341,10 @@ def save_structured_submission(
         metric2=metric2,
         metric3=metric3,
         status="PENDING",
+        session_token=st.session_state.get(
+            "participant_session_token",
+            "",
+        ),
     )
 
 
@@ -697,15 +722,24 @@ def show_participant():
         )
 
         join_code = st.text_input("Join Code").upper().strip()
-        participant_name = st.text_input("Your Name")
+        first_name = st.text_input("First / Given Name")
+        last_name = st.text_input("Last / Family Name")
 
         if st.button("🚀 Join Event", width="stretch"):
             if not join_code:
                 st.warning("Enter Join Code")
                 st.stop()
-            if not participant_name.strip():
-                st.warning("Enter your name")
+            if not first_name.strip():
+                st.warning("Enter your first / given name")
                 st.stop()
+            if not last_name.strip():
+                st.warning("Enter your last / family name")
+                st.stop()
+
+            participant_name = " ".join([
+                first_name.strip(),
+                last_name.strip(),
+            ])
 
             try:
                 player = db.join_player_by_code(
@@ -725,6 +759,10 @@ def show_participant():
 
             ai = db.assign_ai_facilitator(player["Team"]) or {}
 
+            st.session_state["participant_id"] = player.get(
+                "ParticipantID",
+                "",
+            )
             st.session_state["participant_event_id"] = player["EventID"]
             st.session_state["participant_name"] = player["Name"]
             st.session_state["participant_team"] = player["Team"]

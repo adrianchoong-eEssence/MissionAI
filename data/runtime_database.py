@@ -190,6 +190,7 @@ class SupabaseRuntimeDB:
             return None
         return {
             "SubmissionID": row.get("submission_id", ""),
+            "ParticipantID": row.get("participant_id", ""),
             "EventID": row.get("event_id", ""),
             "MissionID": row.get("mission_id", ""),
             "TeamName": row.get("team_name", ""),
@@ -415,7 +416,8 @@ class SupabaseRuntimeDB:
 
         query = {
             "select": (
-                "event_id,display_name,team_name,points,status,joined_at,session_token"
+                "participant_id,event_id,display_name,team_name,points,"
+                "status,joined_at,session_token"
             ),
             "order": "joined_at.asc",
         }
@@ -430,6 +432,7 @@ class SupabaseRuntimeDB:
         ) or []
         return [
             {
+                "ParticipantID": row.get("participant_id", ""),
                 "EventID": row.get("event_id", ""),
                 "Name": row.get("display_name", ""),
                 "Team": row.get("team_name", ""),
@@ -457,13 +460,14 @@ class SupabaseRuntimeDB:
 
         result = self._request(
             "POST",
-            "rpc/exos_save_submission",
+            "rpc/exos_save_submission_v2",
             payload={
                 "p_submission_id": value("SubmissionID"),
                 "p_event_id": value("EventID"),
                 "p_mission_id": value("MissionID"),
                 "p_team_name": value("TeamName"),
                 "p_participant_name": value("ParticipantName"),
+                "p_session_token": value("SessionToken"),
                 "p_image_url": value("ImageURL"),
                 "p_drive_file_id": value("DriveFileID"),
                 "p_submission_type": value("SubmissionType"),
@@ -479,15 +483,23 @@ class SupabaseRuntimeDB:
         )
         return self._submission_record(self._normalise_result(result))
 
-    def get_submission(self, event_id, mission_id, scope_type, scope_value):
+    def get_submission(
+        self,
+        event_id,
+        mission_id,
+        scope_type,
+        scope_value,
+        session_token="",
+    ):
         result = self._request(
             "POST",
-            "rpc/exos_get_submission",
+            "rpc/exos_get_submission_v2",
             payload={
                 "p_event_id": str(event_id),
                 "p_mission_id": str(mission_id),
                 "p_scope_type": str(scope_type),
                 "p_scope_value": str(scope_value),
+                "p_session_token": str(session_token),
             },
         )
         return self._submission_record(self._normalise_result(result))

@@ -136,6 +136,42 @@ class RuntimeProgrammeTests(unittest.TestCase):
             "exos-submissions/test.jpg?token=x",
         )
 
+    def test_individual_submission_uses_session_identity_rpc(self):
+        runtime = self.make_runtime()
+        runtime.save_submission({
+            "SubmissionID": "SUB-1",
+            "EventID": "EVT-TEST",
+            "MissionID": "M01",
+            "TeamName": "Team Alpha",
+            "ParticipantName": "Adrian Choong",
+            "SessionToken": "session-token-1",
+            "SubmissionType": "NASI",
+        })
+
+        call = runtime.calls[0]
+        self.assertEqual(call["path"], "rpc/exos_save_submission_v2")
+        self.assertEqual(
+            call["payload"]["p_session_token"],
+            "session-token-1",
+        )
+
+    def test_individual_submission_lookup_uses_session_identity(self):
+        runtime = self.make_runtime()
+        runtime.get_submission(
+            "EVT-TEST",
+            "M01",
+            "PARTICIPANT",
+            "Adrian Choong",
+            session_token="session-token-1",
+        )
+
+        call = runtime.calls[0]
+        self.assertEqual(call["path"], "rpc/exos_get_submission_v2")
+        self.assertEqual(
+            call["payload"]["p_session_token"],
+            "session-token-1",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
