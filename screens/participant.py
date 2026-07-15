@@ -7,7 +7,7 @@ from streamlit_autorefresh import st_autorefresh
 from ai.facilitator import ask_facilitator
 from data.google_drive import upload_photo
 from data.google_sheets import GoogleSheetsDB
-from data.runtime_database import RuntimeDatabaseError
+from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 
 
 COUNTRY_LANGUAGE_PROMPTS = {
@@ -45,6 +45,40 @@ def reset_session():
     ]:
         if key in st.query_params:
             del st.query_params[key]
+
+
+@st.fragment(run_every="5s")
+def watch_live_mission_state(session_token):
+    """Poll Supabase and rerun the full app when the live stage changes."""
+    try:
+        runtime_state = (
+            get_runtime_database().get_participant_current_mission(
+                session_token
+            )
+            or {}
+        )
+    except RuntimeDatabaseError as error:
+        st.caption("🟠 Live connection reconnecting...")
+        st.session_state["participant_runtime_error"] = str(error)
+        return
+
+    signature = (
+        str(runtime_state.get("EventID", "")),
+        str(runtime_state.get("StateVersion", "")),
+        str(runtime_state.get("StageType", "")),
+        str(runtime_state.get("MissionID", "")),
+    )
+    previous_signature = st.session_state.get(
+        "participant_runtime_signature"
+    )
+    st.session_state["participant_runtime_signature"] = signature
+    st.session_state.pop("participant_runtime_error", None)
+
+    checked_at = datetime.now().strftime("%H:%M:%S")
+    st.caption(f"🟢 Live connection active · checked {checked_at}")
+
+    if previous_signature is not None and signature != previous_signature:
+        st.rerun(scope="app")
 
 
 def restore_session_from_query_params(db):
@@ -695,9 +729,8 @@ def show_participant():
         st.session_state.get("participant_session_token", "")
     )
     if runtime_session:
-        st_autorefresh(
-            interval=5000,
-            key="live_mission_state_refresh",
+        watch_live_mission_state(
+            st.session_state["participant_session_token"]
         )
 
     try:
@@ -716,6 +749,12 @@ def show_participant():
 
     if mission is None:
         st.info("Waiting for facilitator to launch a mission...")
+        if st.button(
+            "🔄 Check for New Mission",
+            width="stretch",
+            key="check_waiting_mission",
+        ):
+            st.rerun()
         if not runtime_session:
             st_autorefresh(interval=5000, key="waiting_for_mission_refresh")
     else:
