@@ -881,3 +881,85 @@ class SupabaseRuntimeDB:
         result["Failed"] += len(cleanup_errors)
         result["Passed"] = result["Passed"] and not cleanup_errors
         return result
+
+    def run_dual_event_load_test(
+        self,
+        events,
+        total_participants_each=100,
+        max_workers_each=40,
+    ):
+        event_configs = [dict(event) for event in events]
+        if len(event_configs) != 2:
+            raise ValueError("Exactly two events are required.")
+
+        event_ids = [
+            str(event.get("EventID", "")).strip()
+            for event in event_configs
+        ]
+        if not all(event_ids) or len(set(event_ids)) != 2:
+            raise ValueError("Select two different published test events.")
+
+        started = time.perf_counter()
+        event_results = []
+
+        def test_event(event):
+            result = self.run_submission_load_test(
+                event_id=event.get("EventID", ""),
+                join_code=event.get("JoinCode", ""),
+                total_participants=total_participants_each,
+                max_workers=max_workers_each,
+            )
+            return {
+                "EventID": event.get("EventID", ""),
+                "EventName": event.get("EventName", ""),
+                **result,
+            }
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {
+                executor.submit(test_event, event): event
+                for event in event_configs
+            }
+            for future in as_completed(futures):
+                event = futures[future]
+                try:
+                    event_results.append(future.result())
+                except Exception as error:
+                    event_results.append({
+                        "EventID": event.get("EventID", ""),
+                        "EventName": event.get("EventName", ""),
+                        "Requested": int(total_participants_each),
+                        "Joined": 0,
+                        "IndividualSubmissions": 0,
+                        "TeamPhotoSubmissions": 0,
+                        "Failed": int(total_participants_each),
+                        "Passed": False,
+                        "CleanupPassed": False,
+                        "Errors": [{
+                            "Stage": "Two-event test",
+                            "Record": event.get("EventID", ""),
+                            "Error": str(error),
+                        }],
+                    })
+
+        event_results.sort(key=lambda row: str(row.get("EventID", "")))
+        run_ids = [
+            str(result.get("RunID", ""))
+            for result in event_results
+            if result.get("RunID")
+        ]
+        isolated_runs = len(run_ids) == 2 and len(set(run_ids)) == 2
+        passed = (
+            len(event_results) == 2
+            and isolated_runs
+            and all(result.get("Passed") for result in event_results)
+        )
+
+        return {
+            "RequestedPerEvent": int(total_participants_each),
+            "RequestedTotal": int(total_participants_each) * 2,
+            "DurationSeconds": round(time.perf_counter() - started, 2),
+            "EventResults": event_results,
+            "IsolatedRuns": isolated_runs,
+            "Passed": passed,
+        }

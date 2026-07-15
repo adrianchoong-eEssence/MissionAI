@@ -264,6 +264,55 @@ class RuntimeProgrammeTests(unittest.TestCase):
             [(method, path) for method, path, _, _, _ in cleanup_calls],
         )
 
+    def test_dual_event_load_test_keeps_runs_separate(self):
+        runtime = SupabaseRuntimeDB.__new__(SupabaseRuntimeDB)
+        calls = []
+
+        def fake_submission_test(
+            event_id,
+            join_code,
+            total_participants=100,
+            max_workers=40,
+        ):
+            calls.append((event_id, join_code, total_participants))
+            return {
+                "RunID": f"RUN-{event_id}",
+                "Requested": total_participants,
+                "Joined": total_participants,
+                "IndividualSubmissions": total_participants,
+                "TeamPhotoSubmissions": 6,
+                "Failed": 0,
+                "Passed": True,
+                "CleanupPassed": True,
+                "Errors": [],
+            }
+
+        runtime.run_submission_load_test = fake_submission_test
+        result = runtime.run_dual_event_load_test(
+            [
+                {
+                    "EventID": "EVT-A",
+                    "EventName": "Test A",
+                    "JoinCode": "TESTA",
+                },
+                {
+                    "EventID": "EVT-B",
+                    "EventName": "Test B",
+                    "JoinCode": "TESTB",
+                },
+            ],
+            total_participants_each=50,
+        )
+
+        self.assertTrue(result["Passed"])
+        self.assertTrue(result["IsolatedRuns"])
+        self.assertEqual(result["RequestedTotal"], 100)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            {event_id for event_id, _, _ in calls},
+            {"EVT-A", "EVT-B"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -341,6 +341,129 @@ def show_event_manager():
                                     load_result["Errors"][:20],
                                     width="stretch",
                                 )
+
+            with st.expander("Two-Event Isolation Load Test"):
+                st.caption(
+                    "Runs registrations, individual submissions, and team photo "
+                    "checks in two events at the same time. Test data is removed "
+                    "automatically."
+                )
+                runtime_labels = list(runtime_options.keys())
+                if len(runtime_labels) < 2:
+                    st.info(
+                        "Create and publish a second test event before running "
+                        "this test."
+                    )
+                else:
+                    event_a_label = st.selectbox(
+                        "Test Event A",
+                        runtime_labels,
+                        index=0,
+                        key="dual_load_event_a",
+                    )
+                    event_b_label = st.selectbox(
+                        "Test Event B",
+                        runtime_labels,
+                        index=1,
+                        key="dual_load_event_b",
+                    )
+                    dual_test_size = st.number_input(
+                        "Participants per event",
+                        min_value=12,
+                        max_value=300,
+                        value=100,
+                        step=1,
+                        key="dual_load_test_size",
+                    )
+                    confirm_dual_test = st.checkbox(
+                        "I confirm both selected events are test events",
+                        key="confirm_dual_load_test",
+                    )
+
+                    if st.button(
+                        "🧪 Run Two-Event Isolation Test",
+                        key="run_dual_event_load_test",
+                    ):
+                        if event_a_label == event_b_label:
+                            st.error("Select two different test events.")
+                        elif not confirm_dual_test:
+                            st.error("Confirm that both events are test events.")
+                        else:
+                            event_a = runtime_options[event_a_label]
+                            event_b = runtime_options[event_b_label]
+                            try:
+                                with st.spinner(
+                                    f"Running {int(dual_test_size)} participants "
+                                    "in each event simultaneously..."
+                                ):
+                                    dual_result = (
+                                        db.runtime.run_dual_event_load_test(
+                                            [event_a, event_b],
+                                            total_participants_each=int(
+                                                dual_test_size
+                                            ),
+                                        )
+                                    )
+                            except Exception as error:
+                                st.error(f"Two-event test failed: {error}")
+                                st.stop()
+
+                            total_individual = sum(
+                                row.get("IndividualSubmissions", 0)
+                                for row in dual_result["EventResults"]
+                            )
+                            total_photos = sum(
+                                row.get("TeamPhotoSubmissions", 0)
+                                for row in dual_result["EventResults"]
+                            )
+                            metric1, metric2, metric3 = st.columns(3)
+                            metric1.metric(
+                                "Individual Submissions",
+                                total_individual,
+                            )
+                            metric2.metric("Team Photos", total_photos)
+                            metric3.metric(
+                                "Duration",
+                                f"{dual_result['DurationSeconds']} sec",
+                            )
+
+                            summary = [
+                                {
+                                    "Event": row.get("EventID", ""),
+                                    "Joined": row.get("Joined", 0),
+                                    "Individual Submissions": row.get(
+                                        "IndividualSubmissions",
+                                        0,
+                                    ),
+                                    "Team Photos": row.get(
+                                        "TeamPhotoSubmissions",
+                                        0,
+                                    ),
+                                    "Passed": row.get("Passed", False),
+                                }
+                                for row in dual_result["EventResults"]
+                            ]
+                            st.dataframe(summary, width="stretch")
+
+                            if dual_result["Passed"]:
+                                st.success(
+                                    "Two-event isolation test passed. Both events "
+                                    "remained separate and test data was cleaned up."
+                                )
+                            else:
+                                st.error(
+                                    "Two-event isolation test failed. Do not run "
+                                    "simultaneous live events yet."
+                                )
+                                errors = []
+                                for row in dual_result["EventResults"]:
+                                    for error in row.get("Errors", []):
+                                        errors.append({
+                                            "Event": row.get("EventID", ""),
+                                            **error,
+                                        })
+                                if errors:
+                                    st.dataframe(errors[:20], width="stretch")
     else:
         st.warning(runtime_status["Message"])
         st.caption(
