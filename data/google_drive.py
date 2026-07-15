@@ -76,12 +76,9 @@ def upload_photo(
     }
 
 
-@st.cache_data(ttl=3000, show_spinner=False)
-def _signed_photo_url(storage_path):
-    return get_runtime_database().create_submission_image_url(
-        storage_path,
-        expires_in=3600,
-    )
+@st.cache_data(ttl=300, show_spinner=False)
+def _private_photo_bytes(storage_path):
+    return get_runtime_database().download_submission_image(storage_path)
 
 
 def get_photo_url(image_url="", file_id=""):
@@ -99,6 +96,6 @@ def get_photo_url(image_url="", file_id=""):
         return ""
 
     try:
-        return _signed_photo_url(storage_path)
+        return _private_photo_bytes(storage_path)
     except RuntimeDatabaseError:
         return ""

@@ -123,6 +123,7 @@ class SupabaseRuntimeDB:
         binary_body=None,
         content_type="application/json",
         extra_headers=None,
+        return_bytes=False,
         retries=4,
     ):
         if not self.url or not self.service_key:
@@ -156,8 +157,11 @@ class SupabaseRuntimeDB:
             )
             try:
                 with urlopen(request, timeout=30) as response:
-                    raw = response.read().decode("utf-8")
-                    return json.loads(raw) if raw else None
+                    raw = response.read()
+                    if return_bytes:
+                        return raw
+                    text = raw.decode("utf-8")
+                    return json.loads(text) if text else None
             except HTTPError as error:
                 response_text = error.read().decode(
                     "utf-8",
@@ -364,7 +368,19 @@ class SupabaseRuntimeDB:
             return ""
         if str(signed_path).startswith("http"):
             return str(signed_path)
-        return f"{self.url}/storage/v1{signed_path}"
+        return f"{self.url}/storage/v1/{str(signed_path).lstrip('/')}"
+
+    def download_submission_image(self, storage_path):
+        safe_path = quote(str(storage_path).strip().lstrip("/"), safe="/")
+        image_bytes = self._storage_request(
+            "GET",
+            f"object/authenticated/exos-submissions/{safe_path}",
+            content_type="application/octet-stream",
+            return_bytes=True,
+        )
+        if not image_bytes:
+            raise RuntimeDatabaseError("The submission image is empty.")
+        return image_bytes
 
     def get_participant_current_mission(self, session_token):
         if not self.is_configured or not str(session_token).strip():
