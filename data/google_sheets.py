@@ -1541,6 +1541,14 @@ class GoogleSheetsDB:
         }
 
     def get_event_state(self, event_id):
+        if self.runtime.can_publish:
+            try:
+                runtime_state = self.runtime.get_event_stage(event_id)
+            except RuntimeDatabaseError:
+                runtime_state = None
+            if runtime_state:
+                return runtime_state
+
         states = [
             row
             for row in get_sheet_records("EventState")
@@ -1558,7 +1566,21 @@ class GoogleSheetsDB:
         display_mode="Hybrid",
         stage_payload=None,
     ):
-        rows = get_sheet_records("EventState")
+        runtime_result = None
+        runtime_stage = dict(stage_payload or {})
+        runtime_stage.update({
+            "StageNo": current_stage_no,
+            "StageType": state,
+            "StageName": stage_name,
+            "MissionID": mission_id,
+            "DisplayMode": display_mode,
+        })
+        if self.runtime.can_publish:
+            runtime_result = self.runtime.set_event_stage(
+                event_id,
+                runtime_stage,
+            )
+
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         payload = [
             event_id,
@@ -1571,31 +1593,35 @@ class GoogleSheetsDB:
         ]
 
         sheet_updated = False
-        for index, row in enumerate(rows, start=2):
-            if str(row.get("EventID", "")) == str(event_id):
-                self.event_state.update(
-                    values=[payload],
-                    range_name=f"A{index}:G{index}",
-                )
+        sheet_warning = ""
+        try:
+            rows = get_sheet_records("EventState")
+            for index, row in enumerate(rows, start=2):
+                if str(row.get("EventID", "")) == str(event_id):
+                    self.event_state.update(
+                        values=[payload],
+                        range_name=f"A{index}:G{index}",
+                    )
+                    sheet_updated = True
+                    break
+
+            if not sheet_updated:
+                self.event_state.append_row(payload)
                 sheet_updated = True
-                break
+            self.clear_cache()
+        except Exception as error:
+            if runtime_result is None:
+                raise
+            sheet_warning = (
+                "The live stage changed successfully, but Google Sheets "
+                f"did not record the change: {error}"
+            )
 
-        if not sheet_updated:
-            self.event_state.append_row(payload)
-        self.clear_cache()
-
-        if self.runtime.can_publish:
-            runtime_stage = dict(stage_payload or {})
-            runtime_stage.update({
-                "StageNo": current_stage_no,
-                "StageType": state,
-                "StageName": stage_name,
-                "MissionID": mission_id,
-                "DisplayMode": display_mode,
-            })
-            self.runtime.set_event_stage(event_id, runtime_stage)
-
-        return True
+        return {
+            "RuntimeUpdated": runtime_result is not None,
+            "SheetUpdated": sheet_updated,
+            "Warning": sheet_warning,
+        }
 
     def set_event_stage(self, event_id, stage):
         return self.set_event_state(

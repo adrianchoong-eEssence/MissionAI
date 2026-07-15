@@ -215,6 +215,40 @@ class SupabaseRuntimeDB:
         )
         return self._normalise_result(result) or {}
 
+    def get_event_stage(self, event_id):
+        """Return the authoritative live stage from Supabase."""
+        if not self.can_publish:
+            return None
+
+        result = self._request(
+            "GET",
+            "runtime_events",
+            query={
+                "event_id": f"eq.{str(event_id).strip()}",
+                "select": (
+                    "event_id,current_stage_no,stage_state,stage_name,"
+                    "current_mission_id,display_mode,state_version,"
+                    "state_updated_at"
+                ),
+                "limit": "1",
+            },
+            admin=True,
+        )
+        row = self._normalise_result(result)
+        if not row:
+            return None
+
+        return {
+            "EventID": row.get("event_id", ""),
+            "CurrentStageNo": row.get("current_stage_no", 0),
+            "State": row.get("stage_state", ""),
+            "StageName": row.get("stage_name", ""),
+            "MissionID": row.get("current_mission_id", ""),
+            "DisplayMode": row.get("display_mode", "Hybrid"),
+            "StateVersion": row.get("state_version", 0),
+            "LastUpdated": row.get("state_updated_at", ""),
+        }
+
     def get_participant_current_mission(self, session_token):
         if not self.is_configured or not str(session_token).strip():
             return None

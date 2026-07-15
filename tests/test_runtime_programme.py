@@ -16,12 +16,24 @@ class RuntimeProgrammeTests(unittest.TestCase):
                 "method": method,
                 "path": path,
                 "payload": payload,
+                "query": query,
                 "admin": admin,
             })
             if path == "rpc/exos_participant_current_mission":
                 return [{
                     "Mission": {"MissionID": "M01"},
                     "StateVersion": 4,
+                }]
+            if path == "runtime_events":
+                return [{
+                    "event_id": "EVT-TEST",
+                    "current_stage_no": 4,
+                    "stage_state": "MissionActive",
+                    "stage_name": "Mission One",
+                    "current_mission_id": "M01",
+                    "display_mode": "Current Mission",
+                    "state_version": 7,
+                    "state_updated_at": "2026-07-15T01:00:00Z",
                 }]
             return [{"MissionsPublished": 1}]
 
@@ -55,6 +67,18 @@ class RuntimeProgrammeTests(unittest.TestCase):
             "rpc/exos_participant_current_mission",
         )
         self.assertFalse(call["admin"])
+
+    def test_get_event_stage_reads_authoritative_runtime_state(self):
+        runtime = self.make_runtime()
+        result = runtime.get_event_stage("EVT-TEST")
+
+        self.assertEqual(result["CurrentStageNo"], 4)
+        self.assertEqual(result["MissionID"], "M01")
+        self.assertEqual(result["StateVersion"], 7)
+        call = runtime.calls[0]
+        self.assertEqual(call["path"], "runtime_events")
+        self.assertEqual(call["query"]["event_id"], "eq.EVT-TEST")
+        self.assertTrue(call["admin"])
 
 
 if __name__ == "__main__":

@@ -76,6 +76,23 @@ def _render_stage_card(stage, is_current=False):
     )
 
 
+def _activate_stage(db, event_id, stage):
+    try:
+        result = db.set_event_stage(event_id, stage)
+    except Exception as error:
+        st.error(f"Stage change failed: {error}")
+        return
+
+    warning = str((result or {}).get("Warning", "")).strip()
+    st.session_state["show_control_flash"] = {
+        "Level": "warning" if warning else "success",
+        "Message": warning or (
+            f"Live stage changed to {stage.get('StageName', 'selected stage')}."
+        ),
+    }
+    st.rerun()
+
+
 def show_show_control():
     st.title("🎬 Show Control")
     st.caption("Control the live programme flow from one place.")
@@ -85,6 +102,13 @@ def show_show_control():
 
     if not event:
         return
+
+    flash = st.session_state.pop("show_control_flash", None)
+    if flash:
+        if flash.get("Level") == "warning":
+            st.warning(flash.get("Message", ""))
+        else:
+            st.success(flash.get("Message", ""))
 
     st.divider()
 
@@ -145,19 +169,15 @@ def show_show_control():
 
     with prev_col:
         if st.button("◀ Previous Stage", width="stretch", disabled=current_index == 0):
-            db.set_event_stage(event_id, stages[current_index - 1])
-            st.rerun()
+            _activate_stage(db, event_id, stages[current_index - 1])
 
     with current_col:
         if st.button("🔄 Re-sync Current Stage", width="stretch"):
-            db.set_event_stage(event_id, current_stage)
-            st.success("Current stage synced.")
-            st.rerun()
+            _activate_stage(db, event_id, current_stage)
 
     with next_col:
         if st.button("Next Stage ▶", width="stretch", disabled=current_index >= len(stages) - 1):
-            db.set_event_stage(event_id, stages[current_index + 1])
-            st.rerun()
+            _activate_stage(db, event_id, stages[current_index + 1])
 
     st.divider()
 
@@ -177,8 +197,7 @@ def show_show_control():
                 key=f"go_stage_{stage.get('StageNo')}",
                 width="stretch",
             ):
-                db.set_event_stage(event_id, stage)
-                st.rerun()
+                _activate_stage(db, event_id, stage)
 
     st.divider()
 
