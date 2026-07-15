@@ -102,6 +102,7 @@ class RuntimeProgrammeTests(unittest.TestCase):
             binary_body=None,
             content_type="application/json",
             extra_headers=None,
+            return_bytes=False,
             retries=4,
         ):
             storage_calls.append({
@@ -110,9 +111,14 @@ class RuntimeProgrammeTests(unittest.TestCase):
                 "payload": payload,
                 "binary_body": binary_body,
                 "content_type": content_type,
+                "return_bytes": return_bytes,
             })
+            if return_bytes:
+                return b"downloaded-image-bytes"
             if "/sign/" in path:
                 return {"signedURL": "/object/sign/exos-submissions/test.jpg?token=x"}
+            if method == "DELETE":
+                return [{"name": "EVT/M01/Team/test.jpg"}]
             return {"Id": "storage-object-id"}
 
         runtime._storage_request = fake_storage_request
@@ -123,6 +129,12 @@ class RuntimeProgrammeTests(unittest.TestCase):
         signed_url = runtime.create_submission_image_url(
             "EVT/M01/Team/test.jpg"
         )
+        downloaded = runtime.download_submission_image(
+            "EVT/M01/Team/test.jpg"
+        )
+        deleted = runtime.delete_submission_images([
+            "EVT/M01/Team/test.jpg"
+        ])
 
         self.assertEqual(uploaded["Bucket"], "exos-submissions")
         self.assertEqual(
@@ -134,6 +146,16 @@ class RuntimeProgrammeTests(unittest.TestCase):
             signed_url,
             "https://example.supabase.co/storage/v1/object/sign/"
             "exos-submissions/test.jpg?token=x",
+        )
+        self.assertEqual(downloaded, b"downloaded-image-bytes")
+        self.assertEqual(deleted[0]["name"], "EVT/M01/Team/test.jpg")
+        self.assertEqual(
+            storage_calls[2]["path"],
+            "object/authenticated/exos-submissions/EVT/M01/Team/test.jpg",
+        )
+        self.assertEqual(
+            storage_calls[3]["payload"],
+            {"prefixes": ["EVT/M01/Team/test.jpg"]},
         )
 
     def test_individual_submission_uses_session_identity_rpc(self):
@@ -170,6 +192,76 @@ class RuntimeProgrammeTests(unittest.TestCase):
         self.assertEqual(
             call["payload"]["p_session_token"],
             "session-token-1",
+        )
+
+    def test_submission_load_test_checks_concurrency_photos_and_cleanup(self):
+        runtime = SupabaseRuntimeDB.__new__(SupabaseRuntimeDB)
+        runtime.url = "https://example.supabase.co"
+        runtime.anon_key = "publishable-key"
+        runtime.service_key = "secret-key"
+        saved = []
+        uploaded = {}
+        deleted = []
+        cleanup_calls = []
+        teams = [f"Team {number}" for number in range(1, 7)]
+
+        def fake_request(
+            method,
+            path,
+            payload=None,
+            query=None,
+            admin=False,
+            retries=4,
+        ):
+            if method == "GET" and path == "runtime_events":
+                return [{"event_id": "EVT-TEST", "next_team_index": 2}]
+            cleanup_calls.append((method, path, payload, query, admin))
+            return []
+
+        def fake_join(join_code, name):
+            number = int(name.split("-")[-1].split()[0])
+            return {
+                "Name": name,
+                "Team": teams[(number - 1) % len(teams)],
+                "SessionToken": f"token-{number}",
+            }
+
+        def fake_save(record):
+            saved.append(dict(record))
+            return dict(record)
+
+        runtime._request = fake_request
+        runtime.join_player = fake_join
+        runtime.save_submission = fake_save
+        runtime.upload_submission_image = (
+            lambda path, image_bytes, content_type="image/jpeg": uploaded.__setitem__(
+                path,
+                image_bytes,
+            )
+        )
+        runtime.download_submission_image = lambda path: uploaded[path]
+        runtime.delete_submission_images = lambda paths: deleted.extend(paths)
+        runtime.get_submissions = lambda event_id: [
+            {"MissionID": record["MissionID"]}
+            for record in saved
+        ]
+
+        result = runtime.run_submission_load_test(
+            "EVT-TEST",
+            "TEST01",
+            total_participants=12,
+            max_workers=6,
+        )
+
+        self.assertTrue(result["Passed"])
+        self.assertTrue(result["CleanupPassed"])
+        self.assertEqual(result["IndividualSubmissions"], 12)
+        self.assertEqual(result["TeamPhotoSubmissions"], 6)
+        self.assertEqual(len(uploaded), 6)
+        self.assertEqual(sorted(uploaded.keys()), sorted(deleted))
+        self.assertIn(
+            ("PATCH", "runtime_events"),
+            [(method, path) for method, path, _, _, _ in cleanup_calls],
         )
 
 

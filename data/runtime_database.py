@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import time
@@ -9,6 +10,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 import streamlit as st
+from PIL import Image
 
 
 class RuntimeDatabaseError(RuntimeError):
@@ -382,6 +384,20 @@ class SupabaseRuntimeDB:
             raise RuntimeDatabaseError("The submission image is empty.")
         return image_bytes
 
+    def delete_submission_images(self, storage_paths):
+        paths = [
+            str(path).strip().lstrip("/")
+            for path in storage_paths
+            if str(path).strip()
+        ]
+        if not paths:
+            return []
+        return self._storage_request(
+            "DELETE",
+            "object/exos-submissions",
+            payload={"prefixes": paths},
+        ) or []
+
     def get_participant_current_mission(self, session_token):
         if not self.is_configured or not str(session_token).strip():
             return None
@@ -614,3 +630,254 @@ class SupabaseRuntimeDB:
             ),
             "Errors": errors,
         }
+
+    def run_submission_load_test(
+        self,
+        event_id,
+        join_code,
+        total_participants=100,
+        max_workers=40,
+    ):
+        total = max(1, int(total_participants))
+        workers = max(1, min(int(max_workers), total, 50))
+        run_id = uuid.uuid4().hex[:8].upper()
+        reflection_mission = f"LOAD-NASI-{run_id}"
+        photo_mission = f"LOAD-PHOTO-{run_id}"
+        started = time.perf_counter()
+        joined = []
+        submission_errors = []
+        photo_errors = []
+        photo_paths = []
+        cleanup_errors = []
+        result = None
+
+        event_rows = self._request(
+            "GET",
+            "runtime_events",
+            query={
+                "event_id": f"eq.{str(event_id).strip()}",
+                "select": "event_id,next_team_index",
+                "limit": "1",
+            },
+            admin=True,
+        ) or []
+        event_row = self._normalise_result(event_rows) or {}
+        original_team_index = int(event_row.get("next_team_index", 0) or 0)
+
+        def join_test_participant(number):
+            name = f"LOAD-{run_id}-{number:03d} Tester"
+            return self.join_player(join_code, name)
+
+        try:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(join_test_participant, number): number
+                    for number in range(1, total + 1)
+                }
+                for future in as_completed(futures):
+                    number = futures[future]
+                    try:
+                        joined.append(future.result())
+                    except Exception as error:
+                        submission_errors.append({
+                            "Stage": "Join",
+                            "Record": f"Participant {number}",
+                            "Error": str(error),
+                        })
+
+            def save_reflection(player):
+                return self.save_submission({
+                    "SubmissionID": str(uuid.uuid4()),
+                    "EventID": event_id,
+                    "MissionID": reflection_mission,
+                    "TeamName": player.get("Team", ""),
+                    "ParticipantName": player.get("Name", ""),
+                    "SessionToken": player.get("SessionToken", ""),
+                    "SubmissionType": "NASI",
+                    "Remarks": f"Concurrent test {run_id}",
+                    "Status": "PENDING",
+                    "Judged": "No",
+                    "SubmittedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+                })
+
+            reflection_results = []
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(save_reflection, player): player
+                    for player in joined
+                }
+                for future in as_completed(futures):
+                    player = futures[future]
+                    try:
+                        reflection_results.append(future.result())
+                    except Exception as error:
+                        submission_errors.append({
+                            "Stage": "Individual submission",
+                            "Record": player.get("Name", ""),
+                            "Error": str(error),
+                        })
+
+            representatives = {}
+            for player in joined:
+                representatives.setdefault(str(player.get("Team", "")), player)
+
+            image_buffer = io.BytesIO()
+            Image.new("RGB", (2, 2), color=(30, 120, 220)).save(
+                image_buffer,
+                format="JPEG",
+                quality=80,
+            )
+            tiny_jpeg = image_buffer.getvalue()
+
+            def save_team_photo(item):
+                position, (team_name, player) = item
+                storage_path = (
+                    f"{event_id}/{photo_mission}/team-{position:03d}/"
+                    f"{run_id}.jpg"
+                )
+                self.upload_submission_image(
+                    storage_path,
+                    tiny_jpeg,
+                    content_type="image/jpeg",
+                )
+                photo_paths.append(storage_path)
+                saved = self.save_submission({
+                    "SubmissionID": str(uuid.uuid4()),
+                    "EventID": event_id,
+                    "MissionID": photo_mission,
+                    "TeamName": team_name,
+                    "ParticipantName": player.get("Name", ""),
+                    "SessionToken": player.get("SessionToken", ""),
+                    "SubmissionType": "PHOTO",
+                    "ImageURL": (
+                        "supabase://exos-submissions/" + storage_path
+                    ),
+                    "DriveFileID": storage_path,
+                    "Status": "PENDING",
+                    "Judged": "No",
+                    "SubmittedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
+                })
+                downloaded = self.download_submission_image(storage_path)
+                return saved, storage_path, downloaded == tiny_jpeg
+
+            photo_results = []
+            photo_items = list(enumerate(representatives.items(), start=1))
+            with ThreadPoolExecutor(
+                max_workers=max(1, min(len(photo_items), 50))
+            ) as executor:
+                futures = {
+                    executor.submit(save_team_photo, item): item
+                    for item in photo_items
+                }
+                for future in as_completed(futures):
+                    _, (team_name, _) = futures[future]
+                    try:
+                        saved, storage_path, downloaded = future.result()
+                        photo_results.append(saved)
+                        if not downloaded:
+                            raise RuntimeDatabaseError(
+                                "Uploaded image could not be downloaded."
+                            )
+                    except Exception as error:
+                        photo_errors.append({
+                            "Stage": "Team photo",
+                            "Record": team_name,
+                            "Error": str(error),
+                        })
+
+            runtime_rows = self.get_submissions(event_id)
+            reflection_rows = [
+                row for row in runtime_rows
+                if row.get("MissionID") == reflection_mission
+            ]
+            photo_rows = [
+                row for row in runtime_rows
+                if row.get("MissionID") == photo_mission
+            ]
+
+            passed = (
+                len(joined) == total
+                and len(reflection_results) == total
+                and len(reflection_rows) == total
+                and len(photo_results) == len(representatives)
+                and len(photo_rows) == len(representatives)
+                and not submission_errors
+                and not photo_errors
+            )
+
+            result = {
+                "RunID": run_id,
+                "Requested": total,
+                "Joined": len(joined),
+                "IndividualSubmissions": len(reflection_rows),
+                "TeamPhotoSubmissions": len(photo_rows),
+                "Teams": len(representatives),
+                "Failed": len(submission_errors) + len(photo_errors),
+                "DurationSeconds": round(time.perf_counter() - started, 2),
+                "Passed": passed,
+                "Errors": submission_errors + photo_errors,
+            }
+        finally:
+            if photo_paths:
+                try:
+                    self.delete_submission_images(photo_paths)
+                except Exception as error:
+                    cleanup_errors.append({
+                        "Stage": "Cleanup",
+                        "Record": "Storage objects",
+                        "Error": str(error),
+                    })
+            try:
+                self._request(
+                    "DELETE",
+                    "runtime_submissions",
+                    query={
+                        "event_id": f"eq.{str(event_id).strip()}",
+                        "mission_id": (
+                            f"in.({reflection_mission},{photo_mission})"
+                        ),
+                    },
+                    admin=True,
+                )
+            except Exception as error:
+                cleanup_errors.append({
+                    "Stage": "Cleanup",
+                    "Record": "Runtime test submissions",
+                    "Error": str(error),
+                })
+            try:
+                self._request(
+                    "DELETE",
+                    "runtime_participants",
+                    query={
+                        "event_id": f"eq.{str(event_id).strip()}",
+                        "display_name": f"like.LOAD-{run_id}-*",
+                    },
+                    admin=True,
+                )
+            except Exception as error:
+                cleanup_errors.append({
+                    "Stage": "Cleanup",
+                    "Record": "Runtime test participants",
+                    "Error": str(error),
+                })
+            try:
+                self._request(
+                    "PATCH",
+                    "runtime_events",
+                    payload={"next_team_index": original_team_index},
+                    query={"event_id": f"eq.{str(event_id).strip()}"},
+                    admin=True,
+                )
+            except Exception as error:
+                cleanup_errors.append({
+                    "Stage": "Cleanup",
+                    "Record": "Team allocation pointer",
+                    "Error": str(error),
+                })
+
+        result["CleanupPassed"] = not cleanup_errors
+        result["Errors"].extend(cleanup_errors)
+        result["Failed"] += len(cleanup_errors)
+        result["Passed"] = result["Passed"] and not cleanup_errors
+        return result

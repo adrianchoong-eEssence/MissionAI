@@ -272,6 +272,75 @@ def show_event_manager():
                             "After testing, publish this event again with the reset option "
                             "to remove all temporary LOAD participants."
                         )
+
+            with st.expander("Concurrent Submission Load Test"):
+                st.caption(
+                    "Use only with a test event. Temporary participants, submissions, "
+                    "and test photos are removed automatically."
+                )
+                submission_test_size = st.number_input(
+                    "Simultaneous individual submissions",
+                    min_value=12,
+                    max_value=300,
+                    value=100,
+                    step=1,
+                    key="runtime_submission_load_test_size",
+                )
+                confirm_submission_test = st.checkbox(
+                    "I confirm this is a test event",
+                    key="confirm_runtime_submission_load_test",
+                )
+
+                if st.button(
+                    "🧪 Run Submission Load Test",
+                    key="run_runtime_submission_load_test",
+                ):
+                    if not confirm_submission_test:
+                        st.error("Confirm that the selected event is a test event.")
+                    else:
+                        try:
+                            with st.spinner(
+                                f"Running {int(submission_test_size)} concurrent "
+                                "submissions and team photo checks..."
+                            ):
+                                load_result = db.runtime.run_submission_load_test(
+                                    event_id=selected_runtime_event.get("EventID", ""),
+                                    join_code=selected_runtime_event.get("JoinCode", ""),
+                                    total_participants=int(submission_test_size),
+                                )
+                        except Exception as error:
+                            st.error(f"Submission load test failed: {error}")
+                            st.stop()
+
+                        metric1, metric2, metric3 = st.columns(3)
+                        metric1.metric(
+                            "Individual Submissions",
+                            load_result["IndividualSubmissions"],
+                        )
+                        metric2.metric(
+                            "Team Photos",
+                            load_result["TeamPhotoSubmissions"],
+                        )
+                        metric3.metric(
+                            "Duration",
+                            f"{load_result['DurationSeconds']} sec",
+                        )
+
+                        if load_result["Passed"]:
+                            st.success(
+                                "Submission load test passed. Temporary test data "
+                                "was cleaned up automatically."
+                            )
+                        else:
+                            st.error(
+                                "Submission load test failed. Do not use this "
+                                "runtime live yet."
+                            )
+                            if load_result["Errors"]:
+                                st.dataframe(
+                                    load_result["Errors"][:20],
+                                    width="stretch",
+                                )
     else:
         st.warning(runtime_status["Message"])
         st.caption(
