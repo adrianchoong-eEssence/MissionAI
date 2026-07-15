@@ -91,6 +91,51 @@ class RuntimeProgrammeTests(unittest.TestCase):
         self.assertEqual(call["query"]["mission_id"], "eq.M01")
         self.assertTrue(call["admin"])
 
+    def test_submission_image_uses_private_storage_endpoint(self):
+        runtime = self.make_runtime()
+        storage_calls = []
+
+        def fake_storage_request(
+            method,
+            path,
+            payload=None,
+            binary_body=None,
+            content_type="application/json",
+            extra_headers=None,
+            retries=4,
+        ):
+            storage_calls.append({
+                "method": method,
+                "path": path,
+                "payload": payload,
+                "binary_body": binary_body,
+                "content_type": content_type,
+            })
+            if "/sign/" in path:
+                return {"signedURL": "/object/sign/exos-submissions/test.jpg?token=x"}
+            return {"Id": "storage-object-id"}
+
+        runtime._storage_request = fake_storage_request
+        uploaded = runtime.upload_submission_image(
+            "EVT/M01/Team/test.jpg",
+            b"image-bytes",
+        )
+        signed_url = runtime.create_submission_image_url(
+            "EVT/M01/Team/test.jpg"
+        )
+
+        self.assertEqual(uploaded["Bucket"], "exos-submissions")
+        self.assertEqual(
+            storage_calls[0]["path"],
+            "object/exos-submissions/EVT/M01/Team/test.jpg",
+        )
+        self.assertEqual(storage_calls[0]["binary_body"], b"image-bytes")
+        self.assertEqual(
+            signed_url,
+            "https://example.supabase.co/storage/v1/object/sign/"
+            "exos-submissions/test.jpg?token=x",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

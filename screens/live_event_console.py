@@ -4,6 +4,7 @@ from datetime import datetime
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
+from data.google_drive import get_photo_url
 from data.google_sheets import GoogleSheetsDB
 
 
@@ -169,6 +170,7 @@ def render_submission_details(submission):
     metric3 = get_value(submission, "Metric3", "")
     remarks = get_value(submission, "Remarks", "")
     image_url = get_value(submission, "ImageURL", "")
+    drive_file_id = get_value(submission, "DriveFileID", "")
 
     if submission_type in {"PIPELINE", "PIPELINE_ENTERPRISE"}:
         col1, col2, col3 = st.columns(3)
@@ -188,8 +190,15 @@ def render_submission_details(submission):
     elif remarks:
         st.info(remarks)
 
-    if image_url and str(image_url).startswith("data:image"):
-        st.image(image_url, caption="Mission Submission", width="stretch")
+    display_url = get_photo_url(image_url, drive_file_id)
+    if display_url:
+        st.image(
+            display_url,
+            caption="Mission Submission",
+            width="stretch",
+        )
+    elif image_url or drive_file_id:
+        st.warning("Submission image is temporarily unavailable.")
 
 
 def render_enterprise_pipeline_form(db, event_id, mission):

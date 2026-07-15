@@ -6,6 +6,7 @@
 4. Run each numbered migration file in order:
    - `supabase/002_runtime_submissions.sql`
    - `supabase/003_runtime_programme.sql`
+   - `supabase/004_submission_storage.sql`
 5. Copy the project URL, publishable key, and secret key from Supabase project settings.
 6. Add these keys to the Streamlit secrets for Admin, Facilitator, and Participant:
 
@@ -14,7 +15,8 @@ SUPABASE_URL="https://YOUR-PROJECT.supabase.co"
 SUPABASE_PUBLISHABLE_KEY="YOUR-PUBLISHABLE-KEY"
 ```
 
-7. Add the secret key only to Admin and Facilitator. The Participant app does not need it:
+7. Add the secret key to Admin, Facilitator, and Participant. The Participant
+   app uses it only on the Streamlit server to upload private submission photos:
 
 ```toml
 SUPABASE_SECRET_KEY="YOUR-SECRET-KEY"

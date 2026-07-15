@@ -5,7 +5,7 @@ import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 import streamlit as st
@@ -114,6 +114,69 @@ class SupabaseRuntimeDB:
                 time.sleep(0.35 * (2 ** attempt))
 
         raise last_error or RuntimeDatabaseError("Runtime request failed.")
+
+    def _storage_request(
+        self,
+        method,
+        path,
+        payload=None,
+        binary_body=None,
+        content_type="application/json",
+        extra_headers=None,
+        retries=4,
+    ):
+        if not self.url or not self.service_key:
+            raise RuntimeDatabaseError(
+                "Supabase Storage requires SUPABASE_SECRET_KEY."
+            )
+
+        endpoint = f"{self.url}/storage/v1/{path.lstrip('/')}"
+        headers = {
+            "apikey": self.service_key,
+            "Authorization": f"Bearer {self.service_key}",
+            "Accept": "application/json",
+            "Content-Type": content_type,
+        }
+        headers.update(extra_headers or {})
+
+        if binary_body is not None:
+            body = binary_body
+        elif payload is not None:
+            body = json.dumps(payload).encode("utf-8")
+        else:
+            body = None
+
+        last_error = None
+        for attempt in range(retries):
+            request = Request(
+                endpoint,
+                data=body,
+                headers=headers,
+                method=method,
+            )
+            try:
+                with urlopen(request, timeout=30) as response:
+                    raw = response.read().decode("utf-8")
+                    return json.loads(raw) if raw else None
+            except HTTPError as error:
+                response_text = error.read().decode(
+                    "utf-8",
+                    errors="replace",
+                )
+                last_error = RuntimeDatabaseError(
+                    f"Storage request failed ({error.code}): {response_text}"
+                )
+                if error.code not in {408, 429, 500, 502, 503, 504}:
+                    raise last_error
+            except (URLError, TimeoutError) as error:
+                last_error = RuntimeDatabaseError(
+                    f"Storage request could not connect: {error}"
+                )
+
+            if attempt < retries - 1:
+                time.sleep(0.35 * (2 ** attempt))
+
+        raise last_error or RuntimeDatabaseError("Storage request failed.")
 
     @staticmethod
     def _normalise_result(result):
@@ -265,6 +328,42 @@ class SupabaseRuntimeDB:
             admin=True,
         )
         return bool(self._normalise_result(result))
+
+    def upload_submission_image(
+        self,
+        storage_path,
+        image_bytes,
+        content_type="image/jpeg",
+    ):
+        if not image_bytes:
+            raise RuntimeDatabaseError("The submission image is empty.")
+        safe_path = quote(str(storage_path).strip().lstrip("/"), safe="/")
+        result = self._storage_request(
+            "POST",
+            f"object/exos-submissions/{safe_path}",
+            binary_body=image_bytes,
+            content_type=content_type,
+            extra_headers={"x-upsert": "false"},
+        ) or {}
+        return {
+            "Bucket": "exos-submissions",
+            "Path": str(storage_path).strip().lstrip("/"),
+            "StorageID": result.get("Id", ""),
+        }
+
+    def create_submission_image_url(self, storage_path, expires_in=3600):
+        safe_path = quote(str(storage_path).strip().lstrip("/"), safe="/")
+        result = self._storage_request(
+            "POST",
+            f"object/sign/exos-submissions/{safe_path}",
+            payload={"expiresIn": max(int(expires_in), 60)},
+        ) or {}
+        signed_path = result.get("signedURL") or result.get("signedUrl") or ""
+        if not signed_path:
+            return ""
+        if str(signed_path).startswith("http"):
+            return str(signed_path)
+        return f"{self.url}/storage/v1{signed_path}"
 
     def get_participant_current_mission(self, session_token):
         if not self.is_configured or not str(session_token).strip():

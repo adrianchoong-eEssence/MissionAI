@@ -5,7 +5,7 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from ai.facilitator import ask_facilitator
-from data.google_drive import upload_photo
+from data.google_drive import get_photo_url, upload_photo
 from data.google_sheets import GoogleSheetsDB
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 
@@ -269,6 +269,7 @@ def render_existing_submission(existing_submission):
     metric3 = existing_submission.get("Metric3", "")
     remarks = existing_submission.get("Remarks", "")
     image_url = existing_submission.get("ImageURL", "")
+    drive_file_id = existing_submission.get("DriveFileID", "")
 
     if submission_type == "PIPELINE":
         st.write(f"**Target:** {metric1}")
@@ -283,9 +284,10 @@ def render_existing_submission(existing_submission):
     elif remarks:
         st.info(remarks)
 
-    if image_url and str(image_url).startswith("data:image"):
+    display_url = get_photo_url(image_url, drive_file_id)
+    if display_url:
         try:
-            st.image(image_url, width="stretch")
+            st.image(display_url, width="stretch")
         except Exception:
             st.warning("Submission image could not be displayed.")
 
@@ -456,13 +458,17 @@ def render_catalyst_form(db, mission):
         drive_file_id = ""
 
         if uploaded_image is not None:
-            uploaded = upload_photo(
-                event_id=st.session_state["participant_event_id"],
-                mission_id=mission["MissionID"],
-                team_name=st.session_state["participant_team"],
-                participant_name=st.session_state["participant_name"],
-                uploaded_file=uploaded_image,
-            )
+            try:
+                uploaded = upload_photo(
+                    event_id=st.session_state["participant_event_id"],
+                    mission_id=mission["MissionID"],
+                    team_name=st.session_state["participant_team"],
+                    participant_name=st.session_state["participant_name"],
+                    uploaded_file=uploaded_image,
+                )
+            except (RuntimeDatabaseError, ValueError) as error:
+                st.error(str(error))
+                st.stop()
             image_url = uploaded.get("url", "")
             drive_file_id = uploaded.get("file_id", "")
 
@@ -582,13 +588,17 @@ def render_photo_form(db, mission):
             key=f"submit_photo_{mission['MissionID']}",
         ):
             with st.spinner("Submitting mission..."):
-                uploaded = upload_photo(
-                    event_id=st.session_state["participant_event_id"],
-                    mission_id=mission["MissionID"],
-                    team_name=st.session_state["participant_team"],
-                    participant_name=st.session_state["participant_name"],
-                    uploaded_file=uploaded_image,
-                )
+                try:
+                    uploaded = upload_photo(
+                        event_id=st.session_state["participant_event_id"],
+                        mission_id=mission["MissionID"],
+                        team_name=st.session_state["participant_team"],
+                        participant_name=st.session_state["participant_name"],
+                        uploaded_file=uploaded_image,
+                    )
+                except (RuntimeDatabaseError, ValueError) as error:
+                    st.error(str(error))
+                    st.stop()
                 save_structured_submission(
                     db=db,
                     mission=mission,
