@@ -5,6 +5,7 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from ai.facilitator import ask_facilitator
+from components.team_geolocation import team_geolocation
 from data.google_drive import get_photo_url, upload_photo
 from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
@@ -51,6 +52,10 @@ def reset_session():
     ]:
         if key in st.query_params:
             del st.query_params[key]
+
+    for key in list(st.session_state):
+        if str(key).startswith("road_hunt_"):
+            st.session_state.pop(key, None)
 
 
 @st.fragment(run_every="5s")
@@ -962,6 +967,137 @@ def render_ai_facilitator(db, mission, runtime_session):
         st.caption(str(error))
 
 
+def _road_hunt_migration_missing(error):
+    message = str(error)
+    return "PGRST202" in message or "exos_road_hunt_state" in message
+
+
+def render_road_hunt_navigator(session_token):
+    """Render the optional navigator-only GPS control for Road Hunt events."""
+    runtime = get_runtime_database()
+    try:
+        state = runtime.get_road_hunt_participant_state(session_token)
+    except RuntimeDatabaseError as error:
+        if _road_hunt_migration_missing(error):
+            return
+        st.caption("🟠 Road Hunt GPS is reconnecting…")
+        return
+
+    if not state.get("Enabled"):
+        return
+
+    event_id = str(state.get("EventID", "")).strip()
+    team_name = str(state.get("TeamName", "")).strip()
+    interval_seconds = int(
+        state.get("LocationIntervalSeconds", 20) or 20
+    )
+    consent_key = f"road_hunt_consent_{event_id}_{team_name}"
+
+    st.divider()
+    with st.expander(
+        "📍 Road Hunt Navigator",
+        expanded=bool(state.get("IsNavigator")),
+    ):
+        st.info(
+            "Use one nominated navigator phone per team. Keep EXOS open, "
+            "the screen awake, and the phone charging."
+        )
+        consent = st.checkbox(
+            "I consent to sharing this phone's location with the event "
+            "facilitators during this Road Hunt. I can stop GPS at any time.",
+            key=consent_key,
+        )
+
+        if not state.get("HasNavigator"):
+            if st.button(
+                "Claim Team Navigator Role",
+                width="stretch",
+                disabled=not consent,
+                key=f"road_hunt_claim_{event_id}_{team_name}",
+            ):
+                try:
+                    result = runtime.claim_team_tracker(session_token)
+                except RuntimeDatabaseError as error:
+                    st.error("Navigator role could not be claimed. Try again.")
+                    st.caption(str(error))
+                else:
+                    if result.get("Claimed"):
+                        st.success("This phone is now your team's navigator.")
+                        st.rerun()
+                    else:
+                        st.warning(
+                            "Another teammate has already claimed the navigator role."
+                        )
+            return
+
+        if not state.get("IsNavigator"):
+            st.success(
+                "Your team already has a navigator phone. Keep using this "
+                "phone for missions and submissions."
+            )
+            return
+
+        st.success("This is the nominated navigator phone for your team.")
+        if not consent:
+            st.warning("Confirm location consent to start GPS.")
+            return
+
+        location = team_geolocation(
+            interval_seconds=interval_seconds,
+            key=f"road_hunt_gps_{event_id}_{team_name}",
+        )
+        if location:
+            signature = str(location.get("captured_at", ""))
+            last_key = f"road_hunt_last_location_{event_id}_{team_name}"
+            if signature and signature != st.session_state.get(last_key):
+                try:
+                    accepted = runtime.submit_team_location(
+                        session_token=session_token,
+                        latitude=location.get("latitude"),
+                        longitude=location.get("longitude"),
+                        accuracy_meters=location.get("accuracy_meters"),
+                        heading_degrees=location.get("heading_degrees"),
+                        speed_mps=location.get("speed_mps"),
+                        captured_at=location.get("captured_at"),
+                    )
+                except (RuntimeDatabaseError, TypeError, ValueError) as error:
+                    st.error("This GPS reading could not be saved. GPS will retry.")
+                    st.caption(str(error))
+                else:
+                    st.session_state[last_key] = signature
+                    accuracy = accepted.get("AccuracyMeters")
+                    accuracy_text = (
+                        f" · accuracy ±{float(accuracy):.0f} m"
+                        if accuracy not in (None, "")
+                        else ""
+                    )
+                    st.caption(
+                        f"Latest team location received{accuracy_text}."
+                    )
+                    state["Arrivals"] = accepted.get(
+                        "Arrivals",
+                        state.get("Arrivals", []),
+                    )
+
+        stops = state.get("Stops", []) or []
+        arrivals = state.get("Arrivals", []) or []
+        arrived_ids = {
+            str(row.get("StopID", ""))
+            for row in arrivals
+        }
+        if stops:
+            st.markdown("#### Route Progress")
+            for stop in stops:
+                stop_id = str(stop.get("StopID", ""))
+                icon = "✅" if stop_id in arrived_ids else "📍"
+                st.write(
+                    f"{icon} {stop.get('Position', '')}. "
+                    f"{stop.get('StopName', stop_id)}"
+                )
+        if arrivals:
+            st.caption(f"{len(arrivals)} route stop(s) reached.")
+
+
 def show_participant():
     st.title("📱 EXOS Mission")
 
@@ -1053,6 +1189,9 @@ def show_participant():
     )
     if runtime_session:
         watch_live_mission_state(
+            st.session_state["participant_session_token"]
+        )
+        render_road_hunt_navigator(
             st.session_state["participant_session_token"]
         )
     live_runtime_state = st.session_state.get(

@@ -463,6 +463,173 @@ def render_credit_wallet_control(db, event_id):
             st.rerun()
 
 
+def render_road_hunt_operations(db, event_id):
+    """Show the live navigator and geofence status for Road Hunt events."""
+    if not db.runtime.can_publish:
+        return
+    try:
+        status = db.runtime.get_road_hunt_status(event_id)
+    except RuntimeDatabaseError as error:
+        message = str(error)
+        if "PGRST202" in message or "exos_road_hunt_status" in message:
+            return
+        st.warning("Road Hunt operations are temporarily reconnecting.")
+        st.caption(message)
+        return
+
+    if not status.get("Enabled"):
+        return
+
+    st.divider()
+    st.subheader("🗺️ Road Hunt Operations")
+    teams = status.get("Teams", []) or []
+    stops = status.get("Stops", []) or []
+    arrivals = status.get("Arrivals", []) or []
+    interval = int(status.get("LocationIntervalSeconds", 20) or 20)
+    stale_after = max(interval * 3, 60)
+    now = pd.Timestamp.now(tz="UTC")
+
+    team_rows = []
+    reporting = 0
+    recent = 0
+    for team in teams:
+        captured_at = team.get("CapturedAt") or team.get("LastSeenAt")
+        last_seen = pd.to_datetime(captured_at, utc=True, errors="coerce")
+        age_seconds = None
+        if not pd.isna(last_seen):
+            age_seconds = max((now - last_seen).total_seconds(), 0)
+            reporting += 1
+            if age_seconds <= stale_after:
+                recent += 1
+
+        team_arrivals = [
+            row for row in arrivals
+            if str(row.get("TeamName", "")) == str(team.get("TeamName", ""))
+        ]
+        if age_seconds is None:
+            gps_status = "Not started"
+        elif age_seconds <= stale_after:
+            gps_status = "Live"
+        else:
+            gps_status = f"Stale ({int(age_seconds // 60)} min)"
+
+        team_rows.append({
+            "Team": team.get("TeamName", ""),
+            "Navigator": "Claimed" if team.get("HasNavigator") else "Waiting",
+            "GPS": gps_status,
+            "Last Seen": captured_at or "",
+            "Accuracy (m)": team.get("AccuracyMeters"),
+            "Stops Reached": len(team_arrivals),
+            "Latitude": team.get("Latitude"),
+            "Longitude": team.get("Longitude"),
+        })
+
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("Teams", len(teams))
+    metric2.metric("GPS Reporting", reporting)
+    metric3.metric("Live Now", recent)
+    metric4.metric("Arrivals", len(arrivals))
+
+    map_rows = [
+        {
+            "latitude": float(row["Latitude"]),
+            "longitude": float(row["Longitude"]),
+        }
+        for row in team_rows
+        if row.get("Latitude") not in (None, "")
+        and row.get("Longitude") not in (None, "")
+    ]
+    if map_rows:
+        st.map(pd.DataFrame(map_rows))
+    else:
+        st.info("Waiting for nominated navigator phones to start GPS.")
+
+    if team_rows:
+        st.dataframe(
+            pd.DataFrame(team_rows).drop(columns=["Latitude", "Longitude"]),
+            width="stretch",
+            hide_index=True,
+        )
+
+    if stops:
+        with st.expander("Route Stops and Arrivals"):
+            stop_names = {
+                str(stop.get("StopID", "")): str(stop.get("StopName", ""))
+                for stop in stops
+            }
+            route_rows = []
+            for stop in stops:
+                stop_id = str(stop.get("StopID", ""))
+                reached = {
+                    str(row.get("TeamName", ""))
+                    for row in arrivals
+                    if str(row.get("StopID", "")) == stop_id
+                }
+                route_rows.append({
+                    "Order": stop.get("Position", ""),
+                    "Stop": stop.get("StopName", stop_id),
+                    "Radius (m)": stop.get("RadiusMeters", ""),
+                    "Teams Reached": len(reached),
+                    "Mission IDs": ", ".join(stop.get("MissionIDs", []) or []),
+                })
+            st.dataframe(route_rows, width="stretch", hide_index=True)
+
+            st.markdown("#### Manual Arrival Fallback")
+            st.caption(
+                "Use only when a navigator has a GPS or mobile-data problem."
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                fallback_team = st.selectbox(
+                    "Team",
+                    [str(row.get("TeamName", "")) for row in teams],
+                    key=f"road_hunt_manual_team_{event_id}",
+                )
+            with col2:
+                fallback_stop = st.selectbox(
+                    "Route Stop",
+                    list(stop_names),
+                    format_func=lambda value: stop_names.get(value, value),
+                    key=f"road_hunt_manual_stop_{event_id}",
+                )
+            if st.button(
+                "Record Manual Arrival",
+                width="stretch",
+                key=f"road_hunt_manual_arrival_{event_id}",
+            ):
+                db.runtime.record_manual_arrival(
+                    event_id,
+                    fallback_team,
+                    fallback_stop,
+                )
+                st.success("Manual arrival recorded.")
+                st.rerun()
+
+    claimed_teams = [
+        str(team.get("TeamName", ""))
+        for team in teams
+        if team.get("HasNavigator")
+    ]
+    if claimed_teams:
+        with st.expander("Navigator Device Control"):
+            release_team = st.selectbox(
+                "Release Navigator for Team",
+                claimed_teams,
+                key=f"road_hunt_release_team_{event_id}",
+            )
+            st.caption(
+                "Release only when the nominated phone is lost, flat, or being replaced."
+            )
+            if st.button(
+                "Release Navigator Device",
+                width="stretch",
+                key=f"road_hunt_release_{event_id}",
+            ):
+                db.runtime.release_team_tracker(event_id, release_team)
+                st.success(f"{release_team} may nominate a new navigator phone.")
+                st.rerun()
+
+
 def show_live_event_console():
     st.title("🎮 Live Event Console")
 
@@ -521,6 +688,7 @@ def show_live_event_console():
         )
 
     render_credit_wallet_control(db, event_id)
+    render_road_hunt_operations(db, event_id)
 
     st.divider()
     st.subheader("🚀 Launch Mission")

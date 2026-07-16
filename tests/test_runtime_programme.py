@@ -305,6 +305,56 @@ class RuntimeProgrammeTests(unittest.TestCase):
         )
         self.assertFalse(runtime.calls[2]["admin"])
 
+    def test_road_hunt_route_and_location_use_expected_rpcs(self):
+        runtime = self.make_runtime()
+        runtime.configure_road_hunt(
+            "EVT-TEST",
+            enabled=True,
+            location_interval_seconds=15,
+        )
+        runtime.publish_road_hunt_route(
+            "EVT-TEST",
+            [{
+                "StopID": "ipoh-01",
+                "StopName": "Mirror Lake",
+                "Latitude": 4.5593,
+                "Longitude": 101.1197,
+                "RadiusMeters": 120,
+                "MissionIDs": "IPOH-01, IPOH-02",
+            }],
+        )
+        runtime.get_road_hunt_participant_state("session-token")
+        runtime.claim_team_tracker("session-token")
+        runtime.submit_team_location(
+            "session-token",
+            4.5593,
+            101.1197,
+            accuracy_meters=8.5,
+            captured_at="2026-07-17T02:00:00Z",
+        )
+        runtime.get_road_hunt_status("EVT-TEST")
+
+        self.assertEqual(
+            runtime.calls[0]["path"],
+            "rpc/exos_configure_road_hunt",
+        )
+        self.assertTrue(runtime.calls[0]["admin"])
+        route_call = runtime.calls[1]
+        self.assertEqual(route_call["path"], "rpc/exos_publish_route")
+        self.assertEqual(
+            route_call["payload"]["p_stops"][0]["mission_ids"],
+            ["IPOH-01", "IPOH-02"],
+        )
+        self.assertTrue(route_call["admin"])
+        self.assertFalse(runtime.calls[2]["admin"])
+        self.assertFalse(runtime.calls[3]["admin"])
+        self.assertFalse(runtime.calls[4]["admin"])
+        self.assertEqual(
+            runtime.calls[4]["payload"]["p_accuracy_meters"],
+            8.5,
+        )
+        self.assertTrue(runtime.calls[5]["admin"])
+
     def test_individual_submission_uses_session_identity_rpc(self):
         runtime = self.make_runtime()
         runtime.save_submission({

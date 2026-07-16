@@ -19,6 +19,38 @@ FORMULA_RACE_TEAMS = [
 ]
 
 
+def road_hunt_editor_rows(stops):
+    rows = []
+    for stop in stops or []:
+        mission_ids = stop.get("MissionIDs", []) or []
+        if not isinstance(mission_ids, str):
+            mission_ids = ", ".join(str(value) for value in mission_ids)
+        rows.append({
+            "StopID": stop.get("StopID", ""),
+            "Position": stop.get("Position", len(rows) + 1),
+            "StopName": stop.get("StopName", ""),
+            "Latitude": stop.get("Latitude"),
+            "Longitude": stop.get("Longitude"),
+            "RadiusMeters": stop.get("RadiusMeters", 150),
+            "MissionIDs": mission_ids,
+            "Instructions": stop.get("Instructions", ""),
+            "Active": bool(stop.get("Active", True)),
+        })
+    if not rows:
+        rows = [{
+            "StopID": "STOP-01",
+            "Position": 1,
+            "StopName": "",
+            "Latitude": None,
+            "Longitude": None,
+            "RadiusMeters": 150,
+            "MissionIDs": "",
+            "Instructions": "",
+            "Active": True,
+        }]
+    return pd.DataFrame(rows)
+
+
 def show_event_manager():
     st.title("🗓 Event Manager")
 
@@ -240,6 +272,132 @@ def show_event_manager():
                     f"Published {team_result.get('TeamsUpdated', 0)} F1 teams. "
                     f"Join code: {runtime_result.get('JoinCode', '')}"
                 )
+
+    st.divider()
+    st.subheader("🗺️ Road Hunt Setup")
+    st.caption(
+        "Enable this only for GPS-based Road Hunts. Add each checkpoint's "
+        "coordinates and geofence radius before the event."
+    )
+
+    road_events = db.get_events()
+    if road_events and db.runtime.can_publish:
+        road_event_options = {
+            f"{event.get('EventID', '')} | {event.get('EventName', '')}": event
+            for event in road_events
+        }
+        selected_road_label = st.selectbox(
+            "Road Hunt Event",
+            list(road_event_options),
+            index=active_event_index(road_events),
+            key="road_hunt_setup_event",
+        )
+        selected_road_event = road_event_options[selected_road_label]
+        selected_road_event_id = str(
+            selected_road_event.get("EventID", "")
+        )
+
+        road_status = {}
+        road_hunt_ready = True
+        try:
+            road_status = db.runtime.get_road_hunt_status(
+                selected_road_event_id
+            )
+        except Exception as error:
+            message = str(error)
+            if "PGRST202" in message or "exos_road_hunt_status" in message:
+                road_hunt_ready = False
+                st.info(
+                    "Install Supabase migration 008 to activate Road Hunt GPS."
+                )
+            elif "Runtime event" in message and "not found" in message:
+                st.info(
+                    "Publish Registration Runtime for this event before saving "
+                    "its Road Hunt route."
+                )
+            else:
+                st.warning(f"Road Hunt status is unavailable: {error}")
+
+        enabled = st.toggle(
+            "Enable GPS Road Hunt for this event",
+            value=bool(road_status.get("Enabled", False)),
+            key=f"road_hunt_enabled_{selected_road_event_id}",
+        )
+        interval_seconds = st.number_input(
+            "Navigator GPS interval (seconds)",
+            min_value=10,
+            max_value=120,
+            value=int(
+                road_status.get("LocationIntervalSeconds", 20) or 20
+            ),
+            step=5,
+            key=f"road_hunt_interval_{selected_road_event_id}",
+        )
+        route_editor = st.data_editor(
+            road_hunt_editor_rows(road_status.get("Stops", [])),
+            num_rows="dynamic",
+            width="stretch",
+            hide_index=True,
+            key=f"road_hunt_route_{selected_road_event_id}",
+            column_config={
+                "Position": st.column_config.NumberColumn(
+                    min_value=1,
+                    step=1,
+                ),
+                "Latitude": st.column_config.NumberColumn(
+                    format="%.6f",
+                    help="Google Maps latitude, for example 4.5975",
+                ),
+                "Longitude": st.column_config.NumberColumn(
+                    format="%.6f",
+                    help="Google Maps longitude, for example 101.0901",
+                ),
+                "RadiusMeters": st.column_config.NumberColumn(
+                    min_value=20,
+                    max_value=5000,
+                    step=10,
+                ),
+                "MissionIDs": st.column_config.TextColumn(
+                    help="Comma-separated mission IDs unlocked at this stop.",
+                ),
+            },
+        )
+        reset_tracking = st.checkbox(
+            "Clear navigator devices, locations, and arrivals when saving",
+            value=False,
+            key=f"road_hunt_reset_{selected_road_event_id}",
+        )
+        if st.button(
+            "📍 Save and Publish Road Hunt",
+            width="stretch",
+            disabled=not road_hunt_ready,
+            key=f"publish_road_hunt_{selected_road_event_id}",
+        ):
+            try:
+                db.publish_event_to_runtime(
+                    selected_road_event_id,
+                    reset_registration=False,
+                )
+                configuration = db.runtime.configure_road_hunt(
+                    selected_road_event_id,
+                    enabled=enabled,
+                    location_interval_seconds=int(interval_seconds),
+                    reset=reset_tracking,
+                )
+                route = db.runtime.publish_road_hunt_route(
+                    selected_road_event_id,
+                    route_editor.to_dict("records"),
+                )
+            except Exception as error:
+                st.error(f"Road Hunt setup failed: {error}")
+            else:
+                st.success(
+                    f"Road Hunt {'enabled' if configuration.get('Enabled') else 'disabled'}; "
+                    f"{route.get('StopsPublished', 0)} route stop(s) published."
+                )
+                st.rerun()
+    elif not db.runtime.can_publish:
+        st.info("Supabase administrator access is required for Road Hunt setup.")
 
     st.divider()
     st.subheader("Live Registration Runtime")

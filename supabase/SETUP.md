@@ -9,6 +9,8 @@
    - `supabase/004_submission_storage.sql`
    - `supabase/005_participant_identity.sql`
    - `supabase/006_credit_wallet_and_mission_media.sql`
+   - `supabase/007_ai_conversations_and_hints.sql`
+   - `supabase/008_road_hunt_gps.sql`
 5. Copy the project URL, publishable key, and secret key from Supabase project settings.
 6. Add these keys to the Streamlit secrets for Admin, Facilitator, and Participant:
 
@@ -19,7 +21,7 @@ SUPABASE_PUBLISHABLE_KEY="YOUR-PUBLISHABLE-KEY"
 
 7. Add the secret key to Admin, Facilitator, and Participant. The Streamlit
    server uses it for private submission photos, mission media, facilitator
-   credit controls, and signed media access:
+   credit controls, Road Hunt operations, and signed media access:
 
 ```toml
 SUPABASE_SECRET_KEY="YOUR-SECRET-KEY"

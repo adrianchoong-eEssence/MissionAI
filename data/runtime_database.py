@@ -793,6 +793,180 @@ class SupabaseRuntimeDB:
         )
         return self._normalise_result(result) or {}
 
+    def configure_road_hunt(
+        self,
+        event_id,
+        enabled=True,
+        location_interval_seconds=20,
+        reset=False,
+    ):
+        result = self._request(
+            "POST",
+            "rpc/exos_configure_road_hunt",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_enabled": bool(enabled),
+                "p_location_interval_seconds": max(
+                    10,
+                    min(int(location_interval_seconds or 20), 120),
+                ),
+                "p_reset": bool(reset),
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def publish_road_hunt_route(self, event_id, stops):
+        route_payload = []
+        for position, stop in enumerate(stops or [], start=1):
+            stop_id = str(stop.get("StopID", "")).strip().upper()
+            stop_name = str(stop.get("StopName", "")).strip()
+            if not stop_id and not stop_name:
+                continue
+            if not stop_id or not stop_name:
+                raise ValueError("Every route stop needs a Stop ID and Stop Name.")
+
+            try:
+                latitude = float(stop.get("Latitude"))
+                longitude = float(stop.get("Longitude"))
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"{stop_name} needs valid latitude and longitude."
+                ) from None
+            if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+                raise ValueError(
+                    f"{stop_name} has latitude or longitude outside the valid range."
+                )
+
+            mission_ids = stop.get("MissionIDs", [])
+            if isinstance(mission_ids, str):
+                mission_ids = [
+                    value.strip()
+                    for value in mission_ids.split(",")
+                    if value.strip()
+                ]
+            else:
+                mission_ids = [
+                    str(value).strip()
+                    for value in (mission_ids or [])
+                    if str(value).strip()
+                ]
+
+            route_payload.append({
+                "stop_id": stop_id,
+                "position": int(stop.get("Position", position) or position),
+                "stop_name": stop_name,
+                "latitude": latitude,
+                "longitude": longitude,
+                "radius_meters": max(
+                    20,
+                    min(int(stop.get("RadiusMeters", 150) or 150), 5000),
+                ),
+                "mission_ids": mission_ids,
+                "instructions": str(stop.get("Instructions", "")).strip(),
+                "active": bool(stop.get("Active", True)),
+            })
+
+        result = self._request(
+            "POST",
+            "rpc/exos_publish_route",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_stops": route_payload,
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def get_road_hunt_participant_state(self, session_token):
+        if not self.is_configured or not str(session_token).strip():
+            return {}
+        result = self._request(
+            "POST",
+            "rpc/exos_road_hunt_state",
+            payload={"p_session_token": str(session_token).strip()},
+        )
+        return self._normalise_result(result) or {}
+
+    def claim_team_tracker(self, session_token):
+        result = self._request(
+            "POST",
+            "rpc/exos_claim_team_tracker",
+            payload={"p_session_token": str(session_token).strip()},
+        )
+        return self._normalise_result(result) or {}
+
+    def submit_team_location(
+        self,
+        session_token,
+        latitude,
+        longitude,
+        accuracy_meters=None,
+        heading_degrees=None,
+        speed_mps=None,
+        captured_at=None,
+    ):
+        result = self._request(
+            "POST",
+            "rpc/exos_submit_team_location",
+            payload={
+                "p_session_token": str(session_token).strip(),
+                "p_latitude": float(latitude),
+                "p_longitude": float(longitude),
+                "p_accuracy_meters": (
+                    None
+                    if accuracy_meters in (None, "")
+                    else max(float(accuracy_meters), 0)
+                ),
+                "p_heading_degrees": (
+                    None
+                    if heading_degrees in (None, "")
+                    else float(heading_degrees)
+                ),
+                "p_speed_mps": (
+                    None
+                    if speed_mps in (None, "")
+                    else float(speed_mps)
+                ),
+                "p_captured_at": captured_at,
+            },
+        )
+        return self._normalise_result(result) or {}
+
+    def get_road_hunt_status(self, event_id):
+        result = self._request(
+            "POST",
+            "rpc/exos_road_hunt_status",
+            payload={"p_event_id": str(event_id).strip()},
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def release_team_tracker(self, event_id, team_name):
+        result = self._request(
+            "POST",
+            "rpc/exos_release_team_tracker",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_team_name": str(team_name).strip(),
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def record_manual_arrival(self, event_id, team_name, stop_id):
+        result = self._request(
+            "POST",
+            "rpc/exos_record_manual_arrival",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_team_name": str(team_name).strip(),
+                "p_stop_id": str(stop_id).strip().upper(),
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
     def run_join_load_test(self, join_code, total_participants=100, max_workers=40):
         total = max(1, int(total_participants))
         workers = max(1, min(int(max_workers), total, 50))
