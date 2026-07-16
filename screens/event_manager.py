@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from data.google_sheets import GoogleSheetsDB
+from screens.app_state import active_event_index
 
 
 FORMULA_RACE_TEAMS = [
@@ -106,6 +107,7 @@ def show_event_manager():
         selected_label = st.selectbox(
             "Source Event",
             list(event_options.keys()),
+            index=active_event_index(events),
             key="duplicate_source_event",
         )
         selected_event = event_options[selected_label]
@@ -165,6 +167,7 @@ def show_event_manager():
         selected_race_label = st.selectbox(
             "Formula RACE Event",
             list(race_event_options),
+            index=active_event_index(race_events),
             key="formula_race_team_event",
         )
         selected_race_event = race_event_options[selected_race_label]
@@ -248,6 +251,7 @@ def show_event_manager():
             selected_runtime_label = st.selectbox(
                 "Event to Publish",
                 list(runtime_options.keys()),
+                index=active_event_index(runtime_events),
                 key="runtime_publish_event",
             )
             selected_runtime_event = runtime_options[selected_runtime_label]

@@ -5,6 +5,7 @@ import streamlit as st
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
 from data.mission_media import get_mission_media_url, upload_mission_media
+from screens.app_state import active_event_index
 
 
 SUBMISSION_TYPES = [
@@ -351,7 +352,12 @@ def render_event_assignment(db):
         f"{row.get('TemplateID', '')} | {row.get('Title', '')}": row
         for row in templates
     }
-    event_label = st.selectbox("Event", list(event_map), key="mission_assignment_event")
+    event_label = st.selectbox(
+        "Event",
+        list(event_map),
+        index=active_event_index(events),
+        key="mission_assignment_event",
+    )
     template_label = st.selectbox(
         "Mission Template",
         list(template_map),
@@ -393,6 +399,7 @@ def render_event_missions(db):
     selected = st.selectbox(
         "Event",
         list(event_map),
+        index=active_event_index(events),
         key="event_mission_list_event",
     )
     event_id = event_map[selected].get("EventID", "")

@@ -3,6 +3,7 @@ from streamlit_autorefresh import st_autorefresh
 
 from data.google_sheets import GoogleSheetsDB
 from data.runtime_database import RuntimeDatabaseError
+from screens.app_state import select_active_event
 
 
 def auto_refresh(seconds=5):
@@ -439,14 +440,9 @@ def show_leaderboard_display():
     with st.sidebar:
         st.title("EXOS Display Control")
 
-        event_options = {
-            f"{event.get('EventID')} — {event.get('EventName')}": event
-            for event in events
-        }
-
-        selected_label = st.selectbox(
-            "Event",
-            list(event_options.keys()),
+        event = select_active_event(
+            events,
+            label="Active Event",
             key="live_display_event",
         )
 
@@ -474,7 +470,6 @@ def show_leaderboard_display():
 
         st.caption("Use browser fullscreen mode for projector display.")
 
-    event = event_options[selected_label]
     event_id = event.get("EventID")
 
     auto_refresh(refresh_seconds)

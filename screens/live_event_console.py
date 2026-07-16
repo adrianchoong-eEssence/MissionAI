@@ -9,6 +9,7 @@ from data.google_drive import get_photo_url
 from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError
+from screens.app_state import select_active_event
 
 
 APPROVED_VALUES = {"yes", "true", "approved"}
@@ -472,13 +473,11 @@ def show_live_event_console():
         st.warning("No events found. Create an event first.")
         return
 
-    event_options = {
-        f"{event.get('EventID')} — {event.get('EventName')}": event
-        for event in events
-    }
-
-    selected_label = st.selectbox("Select Event", list(event_options.keys()))
-    event = event_options[selected_label]
+    event = select_active_event(
+        events,
+        label="Active Event",
+        key="live_console_event",
+    )
     event_id = event.get("EventID")
 
     auto_refresh_on = st.toggle("Auto Refresh", value=False)

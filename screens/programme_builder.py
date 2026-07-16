@@ -9,6 +9,7 @@ from data.google_sheets import GoogleSheetsDB
 from engines.programme_engine import ProgrammeEngine
 from engines.recommendation_engine import RecommendationEngine
 from engines.transformation_engine import TransformationEngine
+from screens.app_state import select_active_event
 
 
 def get_activity_name(activity):
@@ -78,16 +79,11 @@ def render_live_programme_builder(db):
         st.warning("Create or import missions in Mission Studio first.")
         return
 
-    event_options = {
-        f"{event.get('EventID', '')} | {event.get('EventName', '')}": event
-        for event in events
-    }
-    selected_event_label = st.selectbox(
-        "Event",
-        list(event_options),
+    selected_event = select_active_event(
+        events,
+        label="Active Event",
         key="programme_builder_event",
     )
-    selected_event = event_options[selected_event_label]
     event_id = str(selected_event.get("EventID", ""))
 
     template_options = {

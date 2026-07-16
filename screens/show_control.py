@@ -1,6 +1,7 @@
 import streamlit as st
 
 from data.google_sheets import GoogleSheetsDB
+from screens.app_state import select_active_event
 
 
 def _stage_badge(stage_type):
@@ -28,13 +29,11 @@ def _get_selected_event(db):
         st.warning("No events found. Create an event first.")
         return None, None
 
-    event_options = {
-        f"{event.get('EventID')} — {event.get('EventName')}": event
-        for event in events
-    }
-
-    selected_label = st.selectbox("Select Event", list(event_options.keys()))
-    event = event_options[selected_label]
+    event = select_active_event(
+        events,
+        label="Active Event",
+        key="show_control_event",
+    )
     return event, event.get("EventID")
 
 
