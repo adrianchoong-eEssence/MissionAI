@@ -257,7 +257,154 @@ def render_live_programme_builder(db):
     render_existing_programme(db, event_id)
 
 
+def render_saved_programme_packs(db):
+    st.subheader("Reusable Programme Pack Library")
+    st.caption(
+        "Save a completed event once, then install its teams, missions, timeline "
+        "and marketplace into any empty event."
+    )
+
+    events = db.get_events()
+    if not events:
+        st.warning("Create an event before using programme packs.")
+        return
+
+    event_options = {
+        f"{event.get('EventID', '')} — {event.get('EventName', '')}": event
+        for event in events
+    }
+
+    with st.expander("➕ Save a configured event as a reusable pack"):
+        source_label = st.selectbox(
+            "Configured Source Event",
+            list(event_options.keys()),
+            key="pack_source_event",
+        )
+        source_event = event_options[source_label]
+        source_event_id = str(source_event.get("EventID", ""))
+        pack_name = st.text_input(
+            "Pack Name",
+            value=str(source_event.get("EventName", "")),
+            key=f"pack_name_{source_event_id}",
+        )
+        description = st.text_area(
+            "Pack Description",
+            value=(
+                f"Reusable programme created from {source_event.get('EventName', '')}."
+            ),
+            key=f"pack_description_{source_event_id}",
+        )
+        if st.button(
+            "💾 Save to Programme Pack Library",
+            width="stretch",
+            key=f"save_programme_pack_{source_event_id}",
+        ):
+            try:
+                result = db.save_event_as_programme_pack(
+                    source_event_id,
+                    pack_name,
+                    description,
+                )
+            except Exception as error:
+                st.error(f"Programme pack could not be saved: {error}")
+            else:
+                st.success(
+                    f"{result['PackName']} saved as {result['PackID']}."
+                )
+                st.rerun()
+
+    packs = db.get_programme_packs()
+    if not packs:
+        st.info(
+            "No reusable packs saved yet. The installed AIA event can now be "
+            "saved as your first master pack."
+        )
+        return
+
+    summary_rows = []
+    for pack_row in packs:
+        pack = db.get_programme_pack(pack_row.get("PackID", "")) or {}
+        summary_rows.append({
+            "Pack ID": pack.get("PackID", ""),
+            "Programme Pack": pack.get("PackName", ""),
+            "Source Event": pack.get("SourceEventID", ""),
+            "Teams": len(pack.get("Teams", [])),
+            "Missions": len(pack.get("Missions", [])),
+            "Stages": len(pack.get("Stages", [])),
+            "Marketplace": len(pack.get("Marketplace", [])),
+            "Version": pack.get("Version", "1.0"),
+        })
+    st.dataframe(pd.DataFrame(summary_rows), width="stretch", hide_index=True)
+
+    st.markdown("#### Install a Saved Pack")
+    pack_options = {
+        f"{pack.get('PackID', '')} — {pack.get('PackName', '')}": pack
+        for pack in packs
+    }
+    selected_pack_label = st.selectbox(
+        "Programme Pack",
+        list(pack_options.keys()),
+        key="programme_pack_to_install",
+    )
+    selected_pack_row = pack_options[selected_pack_label]
+    selected_pack = db.get_programme_pack(
+        selected_pack_row.get("PackID", ""),
+    ) or {}
+
+    target_label = st.selectbox(
+        "Empty Target Event",
+        list(event_options.keys()),
+        key="programme_pack_target_event",
+    )
+    target_event = event_options[target_label]
+    target_event_id = str(target_event.get("EventID", ""))
+
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("Teams", len(selected_pack.get("Teams", [])))
+    metric2.metric("Missions", len(selected_pack.get("Missions", [])))
+    metric3.metric("Timeline Stages", len(selected_pack.get("Stages", [])))
+    metric4.metric("Marketplace", len(selected_pack.get("Marketplace", [])))
+
+    st.warning(
+        "Installing replaces the target event's teams, missions and timeline. "
+        "It will stop automatically if participants have already joined."
+    )
+    confirmed = st.checkbox(
+        "I confirm the selected target event is correct and has no participants",
+        key=f"confirm_pack_install_{target_event_id}",
+    )
+    if st.button(
+        "🚀 Install Selected Programme Pack",
+        width="stretch",
+        disabled=not confirmed,
+        key=(
+            f"install_saved_pack_{selected_pack.get('PackID', '')}_"
+            f"{target_event_id}"
+        ),
+    ):
+        try:
+            result = db.install_programme_pack(
+                selected_pack.get("PackID", ""),
+                target_event_id,
+            )
+        except Exception as error:
+            st.error(f"Programme pack installation failed: {error}")
+        else:
+            st.success(
+                f"{result['PackName']} installed and published to "
+                f"{result['EventID']}."
+            )
+            result1, result2, result3, result4 = st.columns(4)
+            result1.metric("Teams", result["Teams"])
+            result2.metric("Missions", result["Missions"])
+            result3.metric("Stages", result["Stages"])
+            result4.metric("Marketplace", result["MarketplaceItems"])
+
+
 def render_programme_packs(db):
+    render_saved_programme_packs(db)
+    st.divider()
+    st.markdown("### Ready-made Programme Installers")
     st.subheader("AIA Customer Contact — Innovate to Elevate")
     st.caption(
         "Installs the complete two-day programme into an empty event: six teams, "

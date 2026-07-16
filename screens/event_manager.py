@@ -137,8 +137,15 @@ def show_event_manager():
                 col4.metric("Missions Copied", result["MissionsCopied"])
                 col5.metric("Stages Copied", result["StagesCopied"])
 
+                if result.get("MarketplaceItemsCopied"):
+                    st.success(
+                        f"Marketplace copied: "
+                        f"{result['MarketplaceItemsCopied']} item(s)."
+                    )
+
                 st.info(
-                    "Participants, submissions, scores, and leaderboard data were not copied. "
+                    "Participants, submissions, purchases, scores, and leaderboard "
+                    "data were not copied. "
                     "The duplicated event is in Draft status."
                 )
                 if result.get("RuntimePublished"):

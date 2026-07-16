@@ -1,4 +1,5 @@
 import gspread
+import json
 import streamlit as st
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
@@ -53,6 +54,11 @@ REQUIRED_WORKSHEETS = {
     "EventState": [
         "EventID", "CurrentStageNo", "State", "StageName", "MissionID",
         "DisplayMode", "LastUpdated",
+    ],
+    "ProgrammePacks": [
+        "PackID", "PackName", "Description", "SourceEventID",
+        "TeamsJSON", "MissionsJSON", "StagesJSON", "MarketplaceJSON",
+        "CreditWalletEnabled", "Status", "Version", "CreatedAt", "UpdatedAt",
     ],
 }
 
@@ -140,6 +146,7 @@ class GoogleSheetsDB:
         self.submissions = worksheets["Submissions"]
         self.programme_stages = worksheets["ProgrammeStages"]
         self.event_state = worksheets["EventState"]
+        self.programme_packs = worksheets["ProgrammePacks"]
 
     def clear_cache(self):
         get_sheet_records.clear()
@@ -453,6 +460,8 @@ class GoogleSheetsDB:
 
         runtime_published = False
         runtime_error = ""
+        marketplace_items_copied = 0
+        credit_wallet_copied = False
         if self.runtime.can_publish:
             try:
                 self.publish_event_to_runtime(
@@ -460,6 +469,27 @@ class GoogleSheetsDB:
                     reset_registration=True,
                 )
                 runtime_published = True
+
+                source_wallet = self.runtime.get_credit_wallet_status(
+                    source_event_id,
+                )
+                source_items = source_wallet.get("Items", []) or []
+                wallet_enabled = bool(source_wallet.get("Enabled"))
+                if wallet_enabled or source_items:
+                    self.runtime.configure_credit_wallet(
+                        new_event_id,
+                        enabled=wallet_enabled,
+                        reset=True,
+                    )
+                    credit_wallet_copied = wallet_enabled
+                if source_items:
+                    marketplace_result = self.runtime.publish_marketplace(
+                        new_event_id,
+                        source_items,
+                    )
+                    marketplace_items_copied = int(
+                        marketplace_result.get("ItemsPublished", 0) or 0
+                    )
             except Exception as error:
                 runtime_error = str(error)
 
@@ -471,8 +501,277 @@ class GoogleSheetsDB:
             "TeamsCopied": teams_copied,
             "MissionsCopied": missions_copied,
             "StagesCopied": len(stages),
+            "CreditWalletCopied": credit_wallet_copied,
+            "MarketplaceItemsCopied": marketplace_items_copied,
             "RuntimePublished": runtime_published,
             "RuntimeError": runtime_error,
+        }
+
+    # -------------------------
+    # Reusable Programme Packs
+    # -------------------------
+
+    @staticmethod
+    def _decode_pack_records(value, field_name):
+        if value in (None, ""):
+            return []
+        try:
+            records = json.loads(str(value))
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"Programme pack {field_name} data is invalid."
+            ) from error
+        if not isinstance(records, list):
+            raise ValueError(
+                f"Programme pack {field_name} data must be a list."
+            )
+        return [dict(record) for record in records if isinstance(record, dict)]
+
+    def generate_next_pack_id(self):
+        highest_number = 0
+        for pack in self.get_programme_packs(include_archived=True):
+            pack_id = str(pack.get("PackID", "")).strip()
+            match = re.search(r"(\d+)$", pack_id)
+            if match:
+                highest_number = max(highest_number, int(match.group(1)))
+        return f"PACK-{highest_number + 1:04d}"
+
+    def get_programme_packs(self, include_archived=False):
+        packs = get_sheet_records("ProgrammePacks")
+        if not include_archived:
+            packs = [
+                pack for pack in packs
+                if str(pack.get("Status", "ACTIVE")).strip().upper()
+                != "ARCHIVED"
+            ]
+        return sorted(
+            packs,
+            key=lambda pack: (
+                str(pack.get("PackName", "")).strip().lower(),
+                str(pack.get("PackID", "")).strip(),
+            ),
+        )
+
+    def get_programme_pack(self, pack_id):
+        wanted = str(pack_id).strip()
+        row = next(
+            (
+                pack
+                for pack in self.get_programme_packs(include_archived=True)
+                if str(pack.get("PackID", "")).strip() == wanted
+            ),
+            None,
+        )
+        if row is None:
+            return None
+
+        pack = dict(row)
+        pack["Teams"] = self._decode_pack_records(
+            row.get("TeamsJSON", "[]"),
+            "teams",
+        )
+        pack["Missions"] = self._decode_pack_records(
+            row.get("MissionsJSON", "[]"),
+            "missions",
+        )
+        pack["Stages"] = self._decode_pack_records(
+            row.get("StagesJSON", "[]"),
+            "stages",
+        )
+        pack["Marketplace"] = self._decode_pack_records(
+            row.get("MarketplaceJSON", "[]"),
+            "marketplace",
+        )
+        pack["CreditWalletEnabled"] = str(
+            row.get("CreditWalletEnabled", "")
+        ).strip().lower() in {"yes", "true", "1"}
+        return pack
+
+    def save_event_as_programme_pack(
+        self,
+        event_id,
+        pack_name,
+        description="",
+    ):
+        event = self.get_event(event_id)
+        if not event:
+            raise ValueError(f"Event {event_id} was not found.")
+
+        clean_name = str(pack_name).strip()
+        if not clean_name:
+            raise ValueError("Programme pack name is required.")
+        for existing in self.get_programme_packs():
+            if str(existing.get("PackName", "")).strip().casefold() == clean_name.casefold():
+                raise ValueError(
+                    "A programme pack with this name already exists."
+                )
+
+        teams = self.get_teams(event_id)
+        missions = self.get_event_missions(event_id)
+        stages = self.get_programme_stages(event_id)
+        if not teams:
+            raise ValueError("The source event has no teams.")
+        if not missions:
+            raise ValueError("The source event has no missions.")
+        if not stages:
+            raise ValueError("The source event has no programme timeline.")
+
+        wallet_status = {}
+        if self.runtime.can_publish:
+            try:
+                wallet_status = self.runtime.get_credit_wallet_status(event_id)
+            except Exception:
+                wallet_status = {}
+        marketplace = wallet_status.get("Items", []) or []
+        wallet_enabled = bool(wallet_status.get("Enabled"))
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        pack_id = self.generate_next_pack_id()
+        payload = {
+            "PackID": pack_id,
+            "PackName": clean_name,
+            "Description": str(description).strip(),
+            "SourceEventID": str(event_id),
+            "TeamsJSON": json.dumps(teams, ensure_ascii=False, default=str),
+            "MissionsJSON": json.dumps(missions, ensure_ascii=False, default=str),
+            "StagesJSON": json.dumps(stages, ensure_ascii=False, default=str),
+            "MarketplaceJSON": json.dumps(
+                marketplace,
+                ensure_ascii=False,
+                default=str,
+            ),
+            "CreditWalletEnabled": "Yes" if wallet_enabled else "No",
+            "Status": "ACTIVE",
+            "Version": "1.0",
+            "CreatedAt": timestamp,
+            "UpdatedAt": timestamp,
+        }
+        headers = self.programme_packs.row_values(1)
+        self.programme_packs.append_row(
+            [payload.get(header, "") for header in headers],
+            value_input_option="RAW",
+        )
+        self.clear_cache()
+        return {
+            "PackID": pack_id,
+            "PackName": clean_name,
+            "Teams": len(teams),
+            "Missions": len(missions),
+            "Stages": len(stages),
+            "MarketplaceItems": len(marketplace),
+        }
+
+    def replace_event_missions(self, event_id, missions):
+        clean_event_id = str(event_id).strip()
+        prepared = []
+        seen_ids = set()
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for position, mission in enumerate(missions, start=1):
+            payload = dict(mission)
+            mission_id = str(
+                payload.get("MissionID", "") or f"M{position:02d}"
+            ).strip().upper()
+            if not mission_id:
+                continue
+            if mission_id in seen_ids:
+                raise ValueError(f"Mission ID {mission_id} is duplicated.")
+            seen_ids.add(mission_id)
+            payload.update({
+                "EventID": clean_event_id,
+                "MissionID": mission_id,
+                "Status": "DRAFT",
+                "UpdatedAt": timestamp,
+            })
+            prepared.append(payload)
+
+        if not prepared:
+            raise ValueError("The programme pack has no missions.")
+
+        existing_rows = [
+            index
+            for index, row in enumerate(get_sheet_records("Missions"), start=2)
+            if str(row.get("EventID", "")) == clean_event_id
+        ]
+        for row_number in reversed(existing_rows):
+            self.missions.delete_rows(row_number)
+
+        headers = self.missions.row_values(1)
+        self.missions.append_rows(
+            [
+                [mission.get(header, "") for header in headers]
+                for mission in prepared
+            ],
+            value_input_option="RAW",
+        )
+        self.clear_cache()
+        return len(prepared)
+
+    def install_programme_pack(self, pack_id, event_id):
+        event = self.get_event(event_id)
+        if not event:
+            raise ValueError(f"Event {event_id} was not found.")
+        pack = self.get_programme_pack(pack_id)
+        if not pack:
+            raise ValueError(f"Programme pack {pack_id} was not found.")
+
+        if self.runtime.can_publish and self.runtime.get_players(event_id):
+            raise ValueError(
+                "Participants already exist for this event. Create or select "
+                "an empty event before installing a programme pack."
+            )
+
+        teams = pack.get("Teams", [])
+        missions = pack.get("Missions", [])
+        stages = pack.get("Stages", [])
+        marketplace = pack.get("Marketplace", [])
+        if not stages:
+            raise ValueError("The programme pack has no timeline stages.")
+
+        team_result = self.replace_event_teams(event_id, teams)
+        missions_installed = self.replace_event_missions(event_id, missions)
+        self.save_programme_stages(event_id, stages)
+
+        runtime_published = False
+        if self.runtime.can_publish:
+            self.publish_event_to_runtime(
+                event_id,
+                reset_registration=True,
+            )
+            runtime_published = True
+
+        first_stage = sorted(
+            stages,
+            key=lambda stage: int(stage.get("StageNo") or 0),
+        )[0]
+        self.set_event_stage(event_id, first_stage)
+
+        marketplace_items = 0
+        wallet_enabled = bool(pack.get("CreditWalletEnabled"))
+        if self.runtime.can_publish and (wallet_enabled or marketplace):
+            self.runtime.configure_credit_wallet(
+                event_id,
+                enabled=wallet_enabled,
+                reset=True,
+            )
+            if marketplace:
+                marketplace_result = self.runtime.publish_marketplace(
+                    event_id,
+                    marketplace,
+                )
+                marketplace_items = int(
+                    marketplace_result.get("ItemsPublished", 0) or 0
+                )
+
+        self.clear_cache()
+        return {
+            "PackID": str(pack_id),
+            "PackName": pack.get("PackName", ""),
+            "EventID": str(event_id),
+            "Teams": int(team_result.get("TeamsUpdated", 0) or 0),
+            "Missions": missions_installed,
+            "Stages": len(stages),
+            "MarketplaceItems": marketplace_items,
+            "RuntimePublished": runtime_published,
         }
 
     # -------------------------
