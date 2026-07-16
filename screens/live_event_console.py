@@ -1,14 +1,65 @@
 import uuid
 from datetime import datetime
 
+import pandas as pd
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from data.google_drive import get_photo_url
 from data.google_sheets import GoogleSheetsDB
+from data.mission_media import get_mission_media_url
+from data.runtime_database import RuntimeDatabaseError
 
 
 APPROVED_VALUES = {"yes", "true", "approved"}
+
+DEFAULT_MARKETPLACE_ITEMS = [
+    {
+        "ItemID": "FR-WHEEL-UPGRADE",
+        "ItemName": "Wheel Upgrade",
+        "Description": "Upgrade one set of wheels for the Formula RACE build.",
+        "CreditCost": 100,
+        "StockQuantity": 10,
+        "Active": True,
+        "Position": 1,
+    },
+    {
+        "ItemID": "FR-AXLE-UPGRADE",
+        "ItemName": "Axle Upgrade",
+        "Description": "Upgrade the axle materials for improved reliability.",
+        "CreditCost": 120,
+        "StockQuantity": 10,
+        "Active": True,
+        "Position": 2,
+    },
+    {
+        "ItemID": "FR-AERO-KIT",
+        "ItemName": "Aerodynamic Body Kit",
+        "Description": "Optional materials for an aerodynamic body improvement.",
+        "CreditCost": 150,
+        "StockQuantity": 10,
+        "Active": True,
+        "Position": 3,
+    },
+    {
+        "ItemID": "FR-TEST-RUN",
+        "ItemName": "Additional Test Run",
+        "Description": "Purchase one additional official test run.",
+        "CreditCost": 80,
+        "StockQuantity": 30,
+        "Active": True,
+        "Position": 4,
+    },
+    {
+        "ItemID": "FR-EXPERT-ADVICE",
+        "ItemName": "Expert Consultation",
+        "Description": "Five minutes of technical consultation with a facilitator.",
+        "CreditCost": 60,
+        "StockQuantity": 20,
+        "Active": True,
+        "Position": 5,
+    },
+]
 
 
 def auto_refresh(seconds=5):
@@ -255,6 +306,162 @@ def render_enterprise_pipeline_form(db, event_id, mission):
         st.rerun()
 
 
+def render_credit_wallet_control(db, event_id):
+    st.divider()
+    st.subheader("💳 Credits & Marketplace")
+    if not db.runtime.can_publish:
+        st.info("Supabase administrator access is required for credit controls.")
+        return
+
+    try:
+        status = db.runtime.get_credit_wallet_status(event_id)
+    except RuntimeDatabaseError as error:
+        st.warning(
+            "Credit Wallet is not installed or is temporarily unavailable."
+        )
+        st.caption(str(error))
+        return
+
+    if not status:
+        st.info("Publish this event to the Supabase runtime first.")
+        return
+
+    if not status.get("Enabled"):
+        st.info(
+            "Enable Credits for programmes where teams earn credits and spend "
+            "them in a marketplace. The normal competition leaderboard remains separate."
+        )
+        if st.button("Enable Credit Wallet", width="stretch"):
+            db.runtime.configure_credit_wallet(event_id, enabled=True, reset=False)
+            st.success("Credit Wallet enabled for this event.")
+            st.rerun()
+        return
+
+    wallets = status.get("Wallets", []) or []
+    total_earned = sum(safe_float(row.get("EarnedCredits")) for row in wallets)
+    total_spent = sum(safe_float(row.get("SpentCredits")) for row in wallets)
+    total_balance = sum(safe_float(row.get("Balance")) for row in wallets)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Credits Earned", format_score(total_earned))
+    with col2:
+        st.metric("Credits Spent", format_score(total_spent))
+    with col3:
+        st.metric("Available Balance", format_score(total_balance))
+
+    if wallets:
+        st.dataframe(wallets, width="stretch", hide_index=True)
+
+    frozen = bool(status.get("EarningFrozen"))
+    if frozen:
+        st.success(
+            "Day 1 Credit Leaderboard is frozen. New approvals will not change earned credits."
+        )
+        if st.button("Unfreeze Credit Earnings", width="stretch"):
+            db.runtime.set_credit_freeze(event_id, False)
+            st.rerun()
+    else:
+        st.warning(
+            "Credit earnings are live. Approving or updating a scored submission "
+            "will update that team's earned credits."
+        )
+        if st.button("Freeze Day 1 Credit Leaderboard", width="stretch"):
+            db.runtime.set_credit_freeze(event_id, True)
+            st.rerun()
+
+    st.markdown("#### Marketplace Catalogue")
+    items = status.get("Items", []) or DEFAULT_MARKETPLACE_ITEMS
+    editor_rows = []
+    for position, item in enumerate(items, start=1):
+        editor_rows.append({
+            "ItemID": item.get("ItemID", f"ITEM-{position:02d}"),
+            "ItemName": item.get("ItemName", ""),
+            "Description": item.get("Description", ""),
+            "CreditCost": safe_float(item.get("CreditCost")),
+            "StockQuantity": item.get("StockQuantity"),
+            "Active": bool(item.get("Active", True)),
+            "Position": int(item.get("Position", position) or position),
+        })
+
+    catalogue = st.data_editor(
+        pd.DataFrame(editor_rows),
+        num_rows="dynamic",
+        width="stretch",
+        hide_index=True,
+        key=f"marketplace_catalogue_{event_id}",
+        column_config={
+            "CreditCost": st.column_config.NumberColumn(min_value=0, step=10),
+            "StockQuantity": st.column_config.NumberColumn(
+                help="Leave blank for unlimited stock.",
+                min_value=0,
+                step=1,
+            ),
+            "Position": st.column_config.NumberColumn(min_value=0, step=1),
+        },
+    )
+    if st.button("Publish Marketplace Catalogue", width="stretch"):
+        result = db.runtime.publish_marketplace(
+            event_id,
+            catalogue.fillna("").to_dict("records"),
+        )
+        st.success(f"Published {result.get('ItemsPublished', 0)} marketplace item(s).")
+        st.rerun()
+
+    if wallets:
+        with st.expander("Facilitator Credit Adjustment"):
+            team_name = st.selectbox(
+                "Team",
+                [row.get("TeamName", "") for row in wallets],
+                key=f"credit_adjustment_team_{event_id}",
+            )
+            amount = st.number_input(
+                "Credit Adjustment",
+                value=0.0,
+                step=10.0,
+                help="Use a positive number to add credits or a negative number to deduct.",
+                key=f"credit_adjustment_amount_{event_id}",
+            )
+            description = st.text_input(
+                "Reason",
+                value="Facilitator adjustment",
+                key=f"credit_adjustment_reason_{event_id}",
+            )
+            if st.button("Apply Credit Adjustment", width="stretch"):
+                if amount == 0:
+                    st.error("Enter a non-zero adjustment.")
+                else:
+                    result = db.runtime.adjust_team_credits(
+                        event_id,
+                        team_name,
+                        amount,
+                        description,
+                    )
+                    st.success(
+                        f"{team_name} balance is now "
+                        f"{format_score(result.get('Balance', 0))} credits."
+                    )
+                    st.rerun()
+
+    purchases = status.get("Purchases", []) or []
+    if purchases:
+        with st.expander("Marketplace Purchases"):
+            st.dataframe(purchases, width="stretch", hide_index=True)
+
+    with st.expander("Reset Credit Runtime"):
+        confirmed = st.checkbox(
+            "I understand this deletes all credit transactions and purchases for this event",
+            key=f"confirm_credit_reset_{event_id}",
+        )
+        if st.button(
+            "Reset Credits and Purchases",
+            disabled=not confirmed,
+            width="stretch",
+        ):
+            db.runtime.configure_credit_wallet(event_id, enabled=True, reset=True)
+            st.success("Credit balances and purchases reset to zero.")
+            st.rerun()
+
+
 def show_live_event_console():
     st.title("🎮 Live Event Console")
 
@@ -313,6 +520,8 @@ def show_live_event_console():
         st.success(
             f"🤝 Enterprise Pipeline Score: {format_score(latest_enterprise.get('Score', 0))}%"
         )
+
+    render_credit_wallet_control(db, event_id)
 
     st.divider()
     st.subheader("🚀 Launch Mission")
@@ -417,14 +626,19 @@ def show_live_event_console():
             st.write(participant_instructions)
         if facilitator_instructions:
             st.info("Facilitator: " + facilitator_instructions)
-        if mission.get("VideoURL"):
-            st.video(str(mission.get("VideoURL")))
-        if mission.get("ImageURL"):
-            st.image(str(mission.get("ImageURL")), width="stretch")
-        if mission.get("DocumentURL"):
+        display_video_url = get_mission_media_url(mission.get("VideoURL"))
+        display_image_url = get_mission_media_url(mission.get("ImageURL"))
+        display_document_url = get_mission_media_url(
+            mission.get("DocumentURL")
+        )
+        if display_video_url:
+            st.video(display_video_url)
+        if display_image_url:
+            st.image(display_image_url, width="stretch")
+        if display_document_url:
             st.link_button(
                 "📄 Open Mission Document",
-                str(mission.get("DocumentURL")),
+                display_document_url,
             )
         if mission.get("DebriefQuestions"):
             with st.expander("Debrief Questions"):

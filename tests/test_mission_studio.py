@@ -185,6 +185,43 @@ class MissionStudioDataTests(unittest.TestCase):
         self.assertEqual(captured_stages[3]["StageType"], "Debrief")
         self.assertEqual(captured_stages[4]["MissionID"], "M02")
 
+    def test_build_event_programme_can_add_marketplace_stage(self):
+        database = self.make_db()
+        database.get_event = lambda event_id: {"EventID": event_id}
+        database.get_mission_templates = lambda: [{
+            "TemplateID": "MT-ONE",
+            "Title": "Credit Mission",
+            "ParticipantInstructions": "Earn credits.",
+        }]
+        captured_stages = []
+        database.save_programme_stages = (
+            lambda event_id, stages: captured_stages.extend(stages)
+        )
+        database.set_event_stage = lambda event_id, stage: True
+
+        with patch("data.google_sheets.get_sheet_records", return_value=[]):
+            result = database.build_event_programme(
+                "EVT-TEST",
+                [{
+                    "TemplateID": "MT-ONE",
+                    "MissionID": "M01",
+                    "DurationMinutes": 20,
+                    "IncludeDebrief": False,
+                }],
+                include_registration=False,
+                include_team_discovery=False,
+                include_marketplace=True,
+                marketplace_minutes=30,
+                include_closing=False,
+            )
+
+        self.assertEqual(result["Stages"], 2)
+        self.assertEqual(captured_stages[1]["StageType"], "Marketplace")
+        self.assertEqual(
+            captured_stages[1]["DisplayMode"],
+            "Credit Leaderboard",
+        )
+
     def test_current_mission_uses_runtime_state_for_participant(self):
         database = self.make_db()
         database.runtime = FakeRuntime(configured=True)

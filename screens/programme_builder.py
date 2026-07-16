@@ -126,7 +126,7 @@ def render_live_programme_builder(db):
             key=f"debrief_minutes_{event_id}",
         )
 
-    option1, option2, option3 = st.columns(3)
+    option1, option2, option3, option4 = st.columns(4)
     with option1:
         include_registration = st.checkbox(
             "Include Registration",
@@ -140,10 +140,27 @@ def render_live_programme_builder(db):
             key=f"include_team_discovery_{event_id}",
         )
     with option3:
+        include_marketplace = st.checkbox(
+            "Include Marketplace",
+            value=False,
+            key=f"include_marketplace_{event_id}",
+        )
+    with option4:
         include_closing = st.checkbox(
             "Include Closing",
             value=True,
             key=f"include_closing_{event_id}",
+        )
+
+    marketplace_minutes = 30
+    if include_marketplace:
+        marketplace_minutes = st.number_input(
+            "Marketplace Minutes",
+            min_value=5,
+            max_value=240,
+            value=30,
+            step=5,
+            key=f"marketplace_minutes_{event_id}",
         )
 
     if not selected_template_labels:
@@ -218,6 +235,8 @@ def render_live_programme_builder(db):
                 include_team_discovery=include_team_discovery,
                 team_discovery_minutes=15,
                 debrief_minutes=int(debrief_minutes),
+                include_marketplace=include_marketplace,
+                marketplace_minutes=int(marketplace_minutes),
                 include_closing=include_closing,
             )
         except Exception as error:

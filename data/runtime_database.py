@@ -398,6 +398,56 @@ class SupabaseRuntimeDB:
             payload={"prefixes": paths},
         ) or []
 
+    def upload_mission_media(
+        self,
+        storage_path,
+        media_bytes,
+        content_type,
+    ):
+        if not media_bytes:
+            raise RuntimeDatabaseError("The mission media file is empty.")
+        safe_path = quote(str(storage_path).strip().lstrip("/"), safe="/")
+        result = self._storage_request(
+            "POST",
+            f"object/exos-mission-media/{safe_path}",
+            binary_body=media_bytes,
+            content_type=str(content_type or "application/octet-stream"),
+            extra_headers={"x-upsert": "true"},
+        ) or {}
+        return {
+            "Bucket": "exos-mission-media",
+            "Path": str(storage_path).strip().lstrip("/"),
+            "StorageID": result.get("Id", ""),
+        }
+
+    def create_mission_media_url(self, storage_path, expires_in=3600):
+        safe_path = quote(str(storage_path).strip().lstrip("/"), safe="/")
+        result = self._storage_request(
+            "POST",
+            f"object/sign/exos-mission-media/{safe_path}",
+            payload={"expiresIn": max(int(expires_in), 60)},
+        ) or {}
+        signed_path = result.get("signedURL") or result.get("signedUrl") or ""
+        if not signed_path:
+            return ""
+        if str(signed_path).startswith("http"):
+            return str(signed_path)
+        return f"{self.url}/storage/v1/{str(signed_path).lstrip('/')}"
+
+    def delete_mission_media(self, storage_paths):
+        paths = [
+            str(path).strip().lstrip("/")
+            for path in storage_paths
+            if str(path).strip()
+        ]
+        if not paths:
+            return []
+        return self._storage_request(
+            "DELETE",
+            "object/exos-mission-media",
+            payload={"prefixes": paths},
+        ) or []
+
     def get_participant_current_mission(self, session_token):
         if not self.is_configured or not str(session_token).strip():
             return None
@@ -572,6 +622,107 @@ class SupabaseRuntimeDB:
             admin=True,
         )
         return self._normalise_result(result) or {"Updated": False}
+
+    def configure_credit_wallet(self, event_id, enabled=True, reset=False):
+        result = self._request(
+            "POST",
+            "rpc/exos_configure_credit_wallet",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_enabled": bool(enabled),
+                "p_reset": bool(reset),
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def get_credit_wallet_status(self, event_id):
+        result = self._request(
+            "POST",
+            "rpc/exos_credit_wallet_status",
+            payload={"p_event_id": str(event_id).strip()},
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def publish_marketplace(self, event_id, items):
+        payload = []
+        for position, item in enumerate(items):
+            item_id = str(item.get("ItemID", "")).strip().upper()
+            item_name = str(item.get("ItemName", "")).strip()
+            if not item_id or not item_name:
+                continue
+            stock = item.get("StockQuantity")
+            if stock in ("", None):
+                stock = None
+            else:
+                stock = max(int(float(stock)), 0)
+            payload.append({
+                "item_id": item_id,
+                "item_name": item_name,
+                "description": str(item.get("Description", "")).strip(),
+                "credit_cost": max(float(item.get("CreditCost", 0) or 0), 0),
+                "stock_quantity": stock,
+                "active": bool(item.get("Active", True)),
+                "position": int(item.get("Position", position) or position),
+            })
+
+        result = self._request(
+            "POST",
+            "rpc/exos_publish_marketplace",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_items": payload,
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def set_credit_freeze(self, event_id, frozen=True):
+        result = self._request(
+            "POST",
+            "rpc/exos_set_credit_freeze",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_frozen": bool(frozen),
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def get_team_wallet(self, session_token):
+        result = self._request(
+            "POST",
+            "rpc/exos_team_wallet",
+            payload={"p_session_token": str(session_token).strip()},
+        )
+        return self._normalise_result(result) or {}
+
+    def purchase_marketplace_item(self, session_token, item_id, quantity=1):
+        result = self._request(
+            "POST",
+            "rpc/exos_purchase_marketplace_item",
+            payload={
+                "p_session_token": str(session_token).strip(),
+                "p_item_id": str(item_id).strip().upper(),
+                "p_quantity": max(int(quantity), 1),
+            },
+        )
+        return self._normalise_result(result) or {}
+
+    def adjust_team_credits(self, event_id, team_name, amount, description):
+        result = self._request(
+            "POST",
+            "rpc/exos_adjust_team_credits",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_team_name": str(team_name).strip(),
+                "p_amount": float(amount),
+                "p_description": str(description).strip(),
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
 
     def run_join_load_test(self, join_code, total_participants=100, max_workers=40):
         total = max(1, int(total_participants))

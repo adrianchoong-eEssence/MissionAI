@@ -7,6 +7,7 @@ from streamlit_autorefresh import st_autorefresh
 from ai.facilitator import ask_facilitator
 from data.google_drive import get_photo_url, upload_photo
 from data.google_sheets import GoogleSheetsDB
+from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 
 
@@ -246,7 +247,7 @@ def render_team_assignment_card():
             text-align:center;
             margin-bottom:18px;
         ">
-            <div style="font-size:18px;opacity:.8;">Mission Assignment</div>
+            <div style="font-size:18px;opacity:.8;">Your Team</div>
             <div style="font-size:46px;font-weight:900;margin-top:8px;">{team}</div>
             <div style="font-size:18px;margin-top:12px;opacity:.9;">{instruction}</div>
         </div>
@@ -675,16 +676,24 @@ def render_mission_content(mission):
         st.markdown("#### Mission Story")
         st.markdown(story)
 
-    if video_url:
+    display_video_url = get_mission_media_url(video_url)
+    display_image_url = get_mission_media_url(image_url)
+    display_document_url = get_mission_media_url(document_url)
+
+    if display_video_url:
         try:
-            st.video(video_url)
+            st.video(display_video_url)
         except Exception:
             st.warning("The mission video could not be displayed.")
-            st.link_button("▶️ Open Mission Video", video_url, width="stretch")
+            st.link_button(
+                "▶️ Open Mission Video",
+                display_video_url,
+                width="stretch",
+            )
 
-    if image_url:
+    if display_image_url:
         try:
-            st.image(image_url, width="stretch")
+            st.image(display_image_url, width="stretch")
         except Exception:
             st.warning("The mission image could not be displayed.")
 
@@ -692,12 +701,94 @@ def render_mission_content(mission):
         st.markdown("#### Instructions")
         st.info(instructions)
 
-    if document_url:
+    if display_document_url:
         st.link_button(
             "📄 Open Mission Document",
-            document_url,
+            display_document_url,
             width="stretch",
         )
+
+
+def _credit_number(value):
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        number = 0.0
+    return str(int(number)) if number.is_integer() else f"{number:.1f}"
+
+
+def render_marketplace(session_token):
+    st.subheader("🛒 Team Marketplace")
+    try:
+        marketplace = get_runtime_database().get_team_wallet(session_token)
+    except RuntimeDatabaseError as error:
+        st.warning("The marketplace is reconnecting. Please try again shortly.")
+        st.caption(str(error))
+        return
+
+    if not marketplace.get("Enabled"):
+        st.info("The facilitator has not opened the marketplace yet.")
+        return
+
+    wallet = marketplace.get("Wallet", {}) or {}
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Credits Earned", _credit_number(wallet.get("EarnedCredits")))
+    with col2:
+        st.metric("Credits Spent", _credit_number(wallet.get("SpentCredits")))
+    with col3:
+        st.metric("Available Balance", _credit_number(wallet.get("Balance")))
+
+    items = marketplace.get("Items", []) or []
+    if not items:
+        st.info("No marketplace items are available yet.")
+    for item in items:
+        item_id = str(item.get("ItemID", ""))
+        cost = float(item.get("CreditCost", 0) or 0)
+        stock = item.get("StockQuantity")
+        stock_text = "Unlimited" if stock is None else str(stock)
+        with st.container(border=True):
+            st.markdown(f"#### {item.get('ItemName', item_id)}")
+            if item.get("Description"):
+                st.write(item.get("Description"))
+            st.caption(
+                f"Cost: {_credit_number(cost)} credits · Stock: {stock_text}"
+            )
+            maximum = max(int(stock), 1) if stock is not None else 20
+            quantity = st.number_input(
+                "Quantity",
+                min_value=1,
+                max_value=maximum,
+                value=1,
+                step=1,
+                key=f"marketplace_quantity_{item_id}",
+            )
+            total_cost = cost * int(quantity)
+            if st.button(
+                f"Spend {_credit_number(total_cost)} Credits",
+                key=f"marketplace_buy_{item_id}",
+                width="stretch",
+            ):
+                try:
+                    purchase = get_runtime_database().purchase_marketplace_item(
+                        session_token=session_token,
+                        item_id=item_id,
+                        quantity=int(quantity),
+                    )
+                except RuntimeDatabaseError as error:
+                    st.error(str(error))
+                else:
+                    st.success(
+                        f"Purchased {purchase.get('Quantity', quantity)} × "
+                        f"{purchase.get('ItemName', item.get('ItemName', 'item'))}. "
+                        f"Balance: {_credit_number(purchase.get('Balance', 0))} credits."
+                    )
+                    st.rerun()
+
+    purchases = marketplace.get("Purchases", []) or []
+    if purchases:
+        with st.expander("Team Purchases"):
+            st.dataframe(purchases, width="stretch", hide_index=True)
 
 
 def show_participant():
@@ -825,7 +916,16 @@ def show_participant():
             live_runtime_state.get("MissionID", "")
         ).strip()
 
-        if stage_name:
+        stage_type = str(
+            live_runtime_state.get("StageType", "")
+            or stage_payload.get("StageType", "")
+        ).strip()
+
+        if "MARKETPLACE" in stage_type.upper():
+            render_marketplace(
+                st.session_state.get("participant_session_token", "")
+            )
+        elif stage_name:
             st.success(stage_name)
             if participant_message:
                 st.info(participant_message)

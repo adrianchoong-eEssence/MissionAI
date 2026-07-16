@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
+from data.mission_media import get_mission_media_url, upload_mission_media
 
 
 SUBMISSION_TYPES = [
@@ -131,6 +132,34 @@ def render_template_editor(db):
             value=str(selected.get("DocumentURL", "")),
         )
 
+        st.caption(
+            "Paste a URL above or upload a private file to Supabase below. "
+            "An uploaded file takes priority when you save."
+        )
+        media_key = str(selected.get("TemplateID", "NEW") or "NEW")
+        upload_col1, upload_col2, upload_col3 = st.columns(3)
+        with upload_col1:
+            uploaded_video = st.file_uploader(
+                "Upload Video",
+                type=["mp4", "mov", "webm"],
+                key=f"mission_video_upload_{media_key}",
+                help="Maximum 200 MB.",
+            )
+        with upload_col2:
+            uploaded_image = st.file_uploader(
+                "Upload Picture",
+                type=["jpg", "jpeg", "png", "webp", "gif"],
+                key=f"mission_image_upload_{media_key}",
+                help="Maximum 10 MB.",
+            )
+        with upload_col3:
+            uploaded_document = st.file_uploader(
+                "Upload PDF",
+                type=["pdf"],
+                key=f"mission_document_upload_{media_key}",
+                help="Maximum 25 MB.",
+            )
+
         st.markdown("#### Mission Guidance")
         clue = st.text_area("Clue", value=str(selected.get("Clue", "")))
         answer = st.text_input("Answer", value=str(selected.get("Answer", "")))
@@ -170,8 +199,38 @@ def render_template_editor(db):
             st.error("Participant Instructions are required.")
             return
 
+        resolved_template_id = clean_id(template_id)
+        if not resolved_template_id:
+            resolved_template_id = db.generate_next_template_id()
+
+        resolved_video_url = video_url.strip()
+        resolved_image_url = image_url.strip()
+        resolved_document_url = document_url.strip()
+        try:
+            if uploaded_video is not None:
+                resolved_video_url = upload_mission_media(
+                    uploaded_video,
+                    resolved_template_id,
+                    "video",
+                )
+            if uploaded_image is not None:
+                resolved_image_url = upload_mission_media(
+                    uploaded_image,
+                    resolved_template_id,
+                    "image",
+                )
+            if uploaded_document is not None:
+                resolved_document_url = upload_mission_media(
+                    uploaded_document,
+                    resolved_template_id,
+                    "document",
+                )
+        except Exception as error:
+            st.error(f"Mission media upload failed: {error}")
+            return
+
         result = db.upsert_mission_template({
-            "TemplateID": clean_id(template_id),
+            "TemplateID": resolved_template_id,
             "Title": title.strip(),
             "Story": story.strip(),
             "ParticipantInstructions": participant_instructions.strip(),
@@ -180,9 +239,9 @@ def render_template_editor(db):
             "SubmissionType": submission_type,
             "ScoringRule": scoring_rule.strip(),
             "Points": int(points),
-            "VideoURL": video_url.strip(),
-            "ImageURL": image_url.strip(),
-            "DocumentURL": document_url.strip(),
+            "VideoURL": resolved_video_url,
+            "ImageURL": resolved_image_url,
+            "DocumentURL": resolved_document_url,
             "Clue": clue.strip(),
             "Answer": answer.strip(),
             "Hint1": hint1.strip(),
@@ -308,7 +367,9 @@ def render_event_assignment(db):
 
     st.info(str(template.get("ParticipantInstructions", "")))
     if template.get("VideoURL"):
-        st.video(str(template.get("VideoURL")))
+        display_video_url = get_mission_media_url(template.get("VideoURL"))
+        if display_video_url:
+            st.video(display_video_url)
 
     if st.button("➕ Add Mission to Event", width="stretch"):
         result = db.add_template_to_event(

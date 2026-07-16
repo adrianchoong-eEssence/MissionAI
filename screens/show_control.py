@@ -13,6 +13,8 @@ def _stage_badge(stage_type):
         "Debrief": "💬 Debrief",
         "Break": "🍱 Break",
         "Collaboration": "🤝 Collaboration",
+        "Marketplace": "🛒 Marketplace",
+        "MARKETPLACE": "🛒 Marketplace",
         "Reflection": "📝 Reflection",
         "Closing": "🏁 Closing",
     }

@@ -158,6 +158,88 @@ class RuntimeProgrammeTests(unittest.TestCase):
             {"prefixes": ["EVT/M01/Team/test.jpg"]},
         )
 
+    def test_mission_media_uses_private_storage_and_signed_url(self):
+        runtime = self.make_runtime()
+        storage_calls = []
+
+        def fake_storage_request(
+            method,
+            path,
+            payload=None,
+            binary_body=None,
+            content_type="application/json",
+            extra_headers=None,
+            return_bytes=False,
+            retries=4,
+        ):
+            storage_calls.append({
+                "method": method,
+                "path": path,
+                "payload": payload,
+                "binary_body": binary_body,
+                "content_type": content_type,
+            })
+            if "/sign/" in path:
+                return {
+                    "signedURL": (
+                        "/object/sign/exos-mission-media/templates/"
+                        "MT-01/video.mp4?token=x"
+                    )
+                }
+            return {"Id": "mission-media-id"}
+
+        runtime._storage_request = fake_storage_request
+        uploaded = runtime.upload_mission_media(
+            "templates/MT-01/video.mp4",
+            b"video-bytes",
+            "video/mp4",
+        )
+        signed_url = runtime.create_mission_media_url(
+            "templates/MT-01/video.mp4"
+        )
+
+        self.assertEqual(uploaded["Bucket"], "exos-mission-media")
+        self.assertEqual(
+            storage_calls[0]["path"],
+            "object/exos-mission-media/templates/MT-01/video.mp4",
+        )
+        self.assertEqual(storage_calls[0]["binary_body"], b"video-bytes")
+        self.assertIn("token=x", signed_url)
+
+    def test_credit_wallet_and_marketplace_use_expected_rpcs(self):
+        runtime = self.make_runtime()
+        runtime.configure_credit_wallet("EVT-TEST", enabled=True)
+        runtime.publish_marketplace(
+            "EVT-TEST",
+            [{
+                "ItemID": "UPGRADE-01",
+                "ItemName": "Wheel Upgrade",
+                "CreditCost": 100,
+                "StockQuantity": 10,
+                "Active": True,
+            }],
+        )
+        runtime.purchase_marketplace_item(
+            "session-token",
+            "UPGRADE-01",
+            2,
+        )
+
+        self.assertEqual(
+            runtime.calls[0]["path"],
+            "rpc/exos_configure_credit_wallet",
+        )
+        self.assertTrue(runtime.calls[0]["admin"])
+        self.assertEqual(
+            runtime.calls[1]["payload"]["p_items"][0]["credit_cost"],
+            100.0,
+        )
+        self.assertEqual(
+            runtime.calls[2]["path"],
+            "rpc/exos_purchase_marketplace_item",
+        )
+        self.assertFalse(runtime.calls[2]["admin"])
+
     def test_individual_submission_uses_session_identity_rpc(self):
         runtime = self.make_runtime()
         runtime.save_submission({

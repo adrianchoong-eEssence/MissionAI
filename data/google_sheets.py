@@ -508,6 +508,89 @@ class GoogleSheetsDB:
             if str(team.get("EventID", "")) == str(event_id)
         ]
 
+    def replace_event_teams(self, event_id, teams):
+        clean_event_id = str(event_id).strip()
+        prepared = []
+        seen_names = set()
+        for position, team in enumerate(teams, start=1):
+            team_name = str(team.get("TeamName", "")).strip()
+            if not team_name:
+                continue
+            normalised_name = team_name.casefold()
+            if normalised_name in seen_names:
+                raise ValueError(f"Team name {team_name} is duplicated.")
+            seen_names.add(normalised_name)
+            prepared.append({
+                "EventID": clean_event_id,
+                "TeamID": str(
+                    team.get("TeamID", "") or f"TEAM-{position:02d}"
+                ).strip(),
+                "TeamName": team_name,
+                "Country": str(team.get("Country", "")).strip(),
+                "Language": str(team.get("Language", "")).strip(),
+                "Score": 0,
+                "Status": "Active",
+            })
+
+        if not prepared:
+            raise ValueError("Add at least one team.")
+
+        existing_rows = [
+            index
+            for index, row in enumerate(get_sheet_records("Teams"), start=2)
+            if str(row.get("EventID", "")) == clean_event_id
+        ]
+        for row_number in reversed(existing_rows):
+            self.teams.delete_rows(row_number)
+
+        headers = self.teams.row_values(1)
+        self.teams.append_rows(
+            [
+                [team.get(header, "") for header in headers]
+                for team in prepared
+            ],
+            value_input_option="RAW",
+        )
+
+        event_rows = get_sheet_records("Events")
+        event_row_number = next(
+            (
+                index
+                for index, row in enumerate(event_rows, start=2)
+                if str(row.get("EventID", "")) == clean_event_id
+            ),
+            None,
+        )
+        if event_row_number:
+            event_headers = self.events.row_values(1)
+            updates = []
+            if "NumberOfTeams" in event_headers:
+                column = event_headers.index("NumberOfTeams") + 1
+                updates.append({
+                    "range": gspread.utils.rowcol_to_a1(
+                        event_row_number,
+                        column,
+                    ),
+                    "values": [[len(prepared)]],
+                })
+            if "NextTeamIndex" in event_headers:
+                column = event_headers.index("NextTeamIndex") + 1
+                updates.append({
+                    "range": gspread.utils.rowcol_to_a1(
+                        event_row_number,
+                        column,
+                    ),
+                    "values": [[0]],
+                })
+            if updates:
+                self.events.batch_update(updates)
+
+        self.clear_cache()
+        return {
+            "EventID": clean_event_id,
+            "TeamsUpdated": len(prepared),
+        }
+
     # -------------------------
     # Participants
     # -------------------------
@@ -1348,6 +1431,8 @@ class GoogleSheetsDB:
         include_team_discovery=True,
         team_discovery_minutes=15,
         debrief_minutes=15,
+        include_marketplace=False,
+        marketplace_minutes=30,
         include_closing=True,
     ):
         if not self.get_event(event_id):
@@ -1525,6 +1610,22 @@ class GoogleSheetsDB:
                         or "Connect the experience to workplace behaviour and application."
                     ),
                 )
+
+        if include_marketplace:
+            add_stage(
+                "Team Marketplace",
+                "Marketplace",
+                marketplace_minutes,
+                display_mode="Credit Leaderboard",
+                participant_message=(
+                    "Review your team's available credits and purchase the "
+                    "resources you need for the next phase."
+                ),
+                facilitator_instruction=(
+                    "Open the marketplace, monitor team balances and purchases, "
+                    "and close sales before the build phase begins."
+                ),
+            )
 
         if include_closing:
             add_stage(

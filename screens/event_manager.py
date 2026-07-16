@@ -1,6 +1,21 @@
 import streamlit as st
+import pandas as pd
 
 from data.google_sheets import GoogleSheetsDB
+
+
+FORMULA_RACE_TEAMS = [
+    "Scuderia Ferrari",
+    "McLaren Racing",
+    "Mercedes-AMG",
+    "Red Bull Racing",
+    "Aston Martin",
+    "Alpine",
+    "Williams Racing",
+    "Audi F1 Team",
+    "Haas F1 Team",
+    "Cadillac F1 Team",
+]
 
 
 def show_event_manager():
@@ -133,6 +148,88 @@ def show_event_manager():
                     )
     else:
         st.info("Create an event before duplicating a project.")
+
+    st.divider()
+    st.subheader("Formula RACE Team Setup")
+    st.caption(
+        "Use this for an existing event before participants join. It replaces "
+        "country teams with ten Formula 1 team names and republishes registration."
+    )
+
+    race_events = db.get_events()
+    if race_events:
+        race_event_options = {
+            f"{event.get('EventID', '')} | {event.get('EventName', '')}": event
+            for event in race_events
+        }
+        selected_race_label = st.selectbox(
+            "Formula RACE Event",
+            list(race_event_options),
+            key="formula_race_team_event",
+        )
+        selected_race_event = race_event_options[selected_race_label]
+        selected_race_event_id = str(
+            selected_race_event.get("EventID", "")
+        )
+
+        race_team_rows = pd.DataFrame([
+            {
+                "TeamID": f"F1-{position:02d}",
+                "TeamName": team_name,
+            }
+            for position, team_name in enumerate(
+                FORMULA_RACE_TEAMS,
+                start=1,
+            )
+        ])
+        edited_race_teams = st.data_editor(
+            race_team_rows,
+            width="stretch",
+            hide_index=True,
+            num_rows="fixed",
+            disabled=["TeamID"],
+            key=f"formula_race_teams_{selected_race_event_id}",
+            column_config={
+                "TeamID": st.column_config.TextColumn(),
+                "TeamName": st.column_config.TextColumn(required=True),
+            },
+        )
+        confirm_race_teams = st.checkbox(
+            "I confirm no participants have joined this event",
+            key=f"confirm_formula_race_teams_{selected_race_event_id}",
+        )
+        if st.button(
+            "🏎️ Apply F1 Teams and Publish Registration",
+            width="stretch",
+            disabled=not confirm_race_teams,
+            key=f"apply_formula_race_teams_{selected_race_event_id}",
+        ):
+            try:
+                runtime_players = (
+                    db.runtime.get_players(selected_race_event_id)
+                    if db.runtime.can_publish
+                    else []
+                )
+                if runtime_players:
+                    raise ValueError(
+                        "Participants already exist in the runtime. Clear or "
+                        "export them before replacing teams."
+                    )
+                team_result = db.replace_event_teams(
+                    selected_race_event_id,
+                    edited_race_teams.to_dict("records"),
+                )
+                runtime_result = db.publish_event_to_runtime(
+                    selected_race_event_id,
+                    reset_registration=True,
+                )
+            except Exception as error:
+                st.error(f"Formula RACE team setup failed: {error}")
+            else:
+                st.success(
+                    f"Published {team_result.get('TeamsUpdated', 0)} F1 teams. "
+                    f"Join code: {runtime_result.get('JoinCode', '')}"
+                )
 
     st.divider()
     st.subheader("Live Registration Runtime")

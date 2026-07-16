@@ -9,6 +9,9 @@ This file preserves the decisions imported from the earlier Mission AI developme
 - Google Sheets remains the configuration, reporting, and export layer.
 - Supabase/PostgreSQL handles concurrent registration and other transactional runtime data.
 - Media belongs in object storage; spreadsheet cells store URLs only.
+- Credits use an immutable Supabase transaction ledger. Earned credits,
+  marketplace spending, available balance, and the final race leaderboard are
+  separate measures.
 
 ## Operational rules
 
@@ -45,6 +48,10 @@ Mission Studio supports manual creation, CSV/Excel bulk import, reuse across
 events, and event-specific mission IDs. The Live Event Console launches an
 existing event mission. The Participant App renders story, instructions,
 video, image, and document links from the mission record.
+
+Mission Studio also supports private image, video, and PDF uploads to the
+`exos-mission-media` Supabase Storage bucket. Mission records store stable
+private references; each Streamlit app resolves them to short-lived signed URLs.
 
 ## Delivery rules
 

@@ -2,6 +2,7 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from data.google_sheets import GoogleSheetsDB
+from data.runtime_database import RuntimeDatabaseError
 
 
 def auto_refresh(seconds=5):
@@ -20,10 +21,16 @@ def calculate_leaderboard(submissions):
         if judged not in ["yes", "true", "approved"]:
             continue
 
+        submission_type = str(
+            submission.get("SubmissionType", "")
+        ).upper()
+        if submission_type in {"NASI", "PIPELINE_ENTERPRISE"}:
+            continue
+
         team = submission.get("TeamName", "Unknown Team")
 
         try:
-            score = int(submission.get("Score") or 0)
+            score = float(submission.get("Score") or 0)
         except Exception:
             score = 0
 
@@ -171,6 +178,81 @@ def display_competitive_leaderboard(leaderboard):
                 </div>
                 <div style="font-size:48px; font-weight:900;">
                     {score} pts
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def display_credit_leaderboard(wallet_status):
+    wallets = wallet_status.get("Wallets", []) or []
+    wallets = sorted(
+        wallets,
+        key=lambda row: (
+            -float(row.get("EarnedCredits", 0) or 0),
+            str(row.get("TeamName", "")),
+        ),
+    )
+    if not wallet_status.get("Enabled") or not wallets:
+        st.markdown(
+            """
+            <div style="text-align:center; margin-top:12vh;">
+                <div style="font-size:clamp(38px,5vw,64px); font-weight:900;">
+                    Credit Leaderboard Is Not Ready
+                </div>
+                <div style="font-size:clamp(20px,2.4vw,30px); margin-top:24px; opacity:0.75;">
+                    Enable the Credit Wallet in the Live Event Console.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    frozen_label = " · FINAL" if wallet_status.get("EarningFrozen") else " · LIVE"
+    st.markdown(
+        f"""
+        <div style="text-align:center; font-size:clamp(40px,5vw,62px); font-weight:900; margin-top:4vh;">
+            Day 1 Credit Leaderboard{frozen_label}
+        </div>
+        <div style="text-align:center; font-size:clamp(18px,2vw,26px); opacity:0.72; margin-top:10px;">
+            Rank is based on credits earned. Marketplace spending does not reduce the ranking.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    for index, wallet in enumerate(wallets[:10], start=1):
+        medal = "🥇" if index == 1 else "🥈" if index == 2 else "🥉" if index == 3 else "⭐"
+        earned = float(wallet.get("EarnedCredits", 0) or 0)
+        balance = float(wallet.get("Balance", 0) or 0)
+        earned_text = str(int(earned)) if earned.is_integer() else f"{earned:.1f}"
+        balance_text = str(int(balance)) if balance.is_integer() else f"{balance:.1f}"
+        st.markdown(
+            f"""
+            <div style="
+                margin:clamp(10px,1.5vh,18px) auto;
+                padding:clamp(16px,2vh,24px) clamp(20px,3vw,38px);
+                max-width:1050px;
+                border-radius:24px;
+                background:rgba(255,255,255,0.10);
+                display:grid;
+                grid-template-columns:minmax(0,1fr) auto auto;
+                gap:clamp(18px,3vw,42px);
+                align-items:center;
+                border:1px solid rgba(255,255,255,0.18);
+            ">
+                <div style="font-size:clamp(25px,3vw,40px); font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                    {medal} {index}. {wallet.get('TeamName', '')}
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:clamp(24px,3vw,38px); font-weight:900;">{earned_text}</div>
+                    <div style="font-size:clamp(13px,1.4vw,18px); opacity:0.7;">earned</div>
+                </div>
+                <div style="text-align:right; min-width:100px;">
+                    <div style="font-size:clamp(20px,2.5vw,32px); font-weight:800;">{balance_text}</div>
+                    <div style="font-size:clamp(13px,1.4vw,18px); opacity:0.7;">available</div>
                 </div>
             </div>
             """,
@@ -373,12 +455,13 @@ def show_leaderboard_display():
             [
                 "Registration",
                 "Current Mission",
+                "Credit Leaderboard",
                 "Hybrid",
                 "Leaderboard",
                 "Collaboration",
                 "Winner",
             ],
-            index=2,
+            index=3,
             key="live_display_mode",
         )
 
@@ -401,6 +484,13 @@ def show_leaderboard_display():
     mission = db.get_current_mission(event_id)
     teams_count = db.get_team_count(event_id)
 
+    wallet_status = {}
+    if mode == "Credit Leaderboard" and db.runtime.can_publish:
+        try:
+            wallet_status = db.runtime.get_credit_wallet_status(event_id)
+        except RuntimeDatabaseError:
+            wallet_status = {}
+
     display_header(event, mode)
 
     if mode == "Registration":
@@ -411,6 +501,9 @@ def show_leaderboard_display():
 
     elif mode == "Leaderboard":
         display_competitive_leaderboard(leaderboard)
+
+    elif mode == "Credit Leaderboard":
+        display_credit_leaderboard(wallet_status)
 
     elif mode == "Collaboration":
         display_collaborative_progress(submissions, teams_count)
