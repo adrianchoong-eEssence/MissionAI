@@ -49,7 +49,7 @@ def select_active_event(
     }
     desired_value = options[active_event_index(rows)]
     current_widget_value = st.session_state.get(key)
-    if current_widget_value != desired_value:
+    if current_widget_value not in options:
         st.session_state.pop(key, None)
 
     selected_id = st.selectbox(
