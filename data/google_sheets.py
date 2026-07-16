@@ -100,10 +100,24 @@ def ensure_worksheet(workbook, name, headers):
 @st.cache_resource
 def get_worksheets():
     workbook = get_workbook()
-    return {
-        name: ensure_worksheet(workbook, name, headers)
-        for name, headers in REQUIRED_WORKSHEETS.items()
+    existing = {
+        worksheet.title: worksheet
+        for worksheet in workbook.worksheets()
     }
+
+    worksheets = {}
+    for name, headers in REQUIRED_WORKSHEETS.items():
+        worksheet = existing.get(name)
+        if worksheet is None:
+            worksheet = workbook.add_worksheet(
+                title=name,
+                rows=500,
+                cols=max(len(headers), 10),
+            )
+            worksheet.append_row(headers)
+        worksheets[name] = worksheet
+
+    return worksheets
 
 
 @st.cache_data(ttl=30)
