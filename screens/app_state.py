@@ -25,6 +25,12 @@ def remember_active_event(event):
     return event
 
 
+def _remember_widget_event(key):
+    selected_id = str(st.session_state.get(key, "")).strip()
+    if selected_id:
+        st.session_state[ACTIVE_EVENT_KEY] = selected_id
+
+
 def get_active_event(events):
     rows = list(events or [])
     if not rows:
@@ -49,8 +55,8 @@ def select_active_event(
     }
     desired_value = options[active_event_index(rows)]
     current_widget_value = st.session_state.get(key)
-    if current_widget_value not in options:
-        st.session_state.pop(key, None)
+    if current_widget_value not in options or current_widget_value != desired_value:
+        st.session_state[key] = desired_value
 
     selected_id = st.selectbox(
         label,
@@ -60,6 +66,8 @@ def select_active_event(
             f"{value} — {event_map[value].get('EventName', '')}"
         ),
         key=key,
+        on_change=_remember_widget_event,
+        args=(key,),
     )
     return remember_active_event(event_map[selected_id])
 
