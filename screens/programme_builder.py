@@ -5,6 +5,13 @@ import pandas as pd
 import streamlit as st
 import yaml
 
+from data.aia_customer_contact import (
+    AIA_CUSTOMER_CONTACT_MARKETPLACE,
+    AIA_CUSTOMER_CONTACT_MISSION_PLAN,
+    AIA_CUSTOMER_CONTACT_STAGES,
+    AIA_CUSTOMER_CONTACT_TEAMS,
+    install_aia_customer_contact_pack,
+)
 from data.google_sheets import GoogleSheetsDB
 from engines.programme_engine import ProgrammeEngine
 from engines.recommendation_engine import RecommendationEngine
@@ -250,6 +257,66 @@ def render_live_programme_builder(db):
     render_existing_programme(db, event_id)
 
 
+def render_programme_packs(db):
+    st.subheader("AIA Customer Contact — Innovate to Elevate")
+    st.caption(
+        "Installs the complete two-day programme into an empty event: six teams, "
+        "Mission AI, SYNC AI, Innovation Credits, marketplace and Catalyst."
+    )
+
+    events = db.get_events()
+    if not events:
+        st.warning("Create the AIA event first.")
+        return
+
+    event = select_active_event(
+        events,
+        label="Event to Prepare",
+        key="aia_pack_event",
+    )
+    event_id = str(event.get("EventID", ""))
+
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("Teams", len(AIA_CUSTOMER_CONTACT_TEAMS))
+    metric2.metric("Missions", len(AIA_CUSTOMER_CONTACT_MISSION_PLAN))
+    metric3.metric("Show Control Stages", len(AIA_CUSTOMER_CONTACT_STAGES))
+    metric4.metric("Marketplace Items", len(AIA_CUSTOMER_CONTACT_MARKETPLACE))
+
+    st.info(
+        "Mission AI is a synchronized 60-minute mission sprint, not a free-roaming "
+        "treasure hunt. All six teams receive the same mission together, and each "
+        "team can use its persistent AI Facilitator and controlled hints."
+    )
+    st.warning(
+        "This replaces the selected event's teams and Show Control timeline. "
+        "It will stop if any runtime participants already exist."
+    )
+    confirmed = st.checkbox(
+        "I confirm this is the correct event and no participants have joined",
+        key=f"confirm_aia_pack_{event_id}",
+    )
+    if st.button(
+        "🚀 Install and Publish AIA Programme",
+        width="stretch",
+        disabled=not confirmed,
+        key=f"install_aia_pack_{event_id}",
+    ):
+        try:
+            result = install_aia_customer_contact_pack(db, event_id)
+        except Exception as error:
+            st.error(f"AIA programme installation failed: {error}")
+            return
+
+        st.success("AIA Customer Contact programme installed and published.")
+        result1, result2, result3, result4 = st.columns(4)
+        result1.metric("Teams Published", result["Teams"])
+        result2.metric("Missions Published", result["Missions"])
+        result3.metric("Timeline Stages", result["Stages"])
+        result4.metric("Marketplace Items", result["MarketplaceItems"])
+
+    render_existing_programme(db, event_id)
+
+
 def render_recommendation_builder():
     st.subheader("Programme Recommendations")
     programme_engine = ProgrammeEngine()
@@ -301,10 +368,13 @@ def render_recommendation_builder():
 def show_programme_builder():
     st.title("🛠 Programme Builder")
     db = GoogleSheetsDB()
-    live_tab, recommendation_tab = st.tabs([
+    pack_tab, live_tab, recommendation_tab = st.tabs([
+        "Programme Packs",
         "Build Live Programme",
         "Recommendations",
     ])
+    with pack_tab:
+        render_programme_packs(db)
     with live_tab:
         render_live_programme_builder(db)
     with recommendation_tab:
