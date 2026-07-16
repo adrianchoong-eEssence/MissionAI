@@ -791,6 +791,177 @@ def render_marketplace(session_token):
             st.dataframe(purchases, width="stretch", hide_index=True)
 
 
+def mission_ai_help_enabled(mission):
+    value = str(
+        (mission or {}).get("AIHelpEnabled", "Yes") or "Yes"
+    ).strip().upper()
+    return value not in {"NO", "FALSE", "0", "OFF"}
+
+
+def render_ai_facilitator(db, mission, runtime_session):
+    facilitator_name = st.session_state["ai_name"]
+    session_token = st.session_state.get("participant_session_token", "")
+    mission_id = str((mission or {}).get("MissionID", "")).strip()
+
+    st.divider()
+    st.subheader(f"🤖 {facilitator_name}")
+
+    if st.session_state["ai_greeting"]:
+        st.info(st.session_state["ai_greeting"])
+
+    if not mission or not mission_id:
+        st.caption(
+            f"{facilitator_name} will be ready when the facilitator launches a mission."
+        )
+        return
+
+    conversation_state = {
+        "HintLevel": 0,
+        "Messages": [],
+    }
+    try:
+        if runtime_session:
+            conversation_state = db.get_ai_conversation(
+                session_token,
+                mission_id,
+            )
+            conversation = list(
+                conversation_state.get("Messages", []) or []
+            )
+        else:
+            conversation = db.get_conversation(
+                st.session_state["participant_event_id"],
+                st.session_state["participant_team"],
+            )
+    except RuntimeDatabaseError as error:
+        st.warning("AI Facilitator is reconnecting. Please try again shortly.")
+        st.caption(str(error))
+        conversation = []
+
+    for row in conversation:
+        role = (
+            "user"
+            if str(row.get("Role", "")).lower() == "user"
+            else "assistant"
+        )
+        with st.chat_message(role):
+            st.markdown(row.get("Message", ""))
+
+    if runtime_session and mission_ai_help_enabled(mission):
+        hint_level = max(
+            0,
+            min(int(conversation_state.get("HintLevel", 0) or 0), 3),
+        )
+        st.markdown("#### Need a Hint?")
+        st.caption(
+            "Hints unlock in three steps: a nudge, a stronger hint, then a method hint."
+        )
+
+        hint_buttons = {
+            0: "🧭 Get a Nudge",
+            1: "💡 Get a Stronger Hint",
+            2: "🛠 Get a Method Hint",
+        }
+        if hint_level < 3:
+            if st.button(
+                hint_buttons[hint_level],
+                width="stretch",
+                key=f"ai_hint_{mission_id}_{hint_level}",
+            ):
+                try:
+                    hint = db.advance_ai_hint(session_token, mission_id)
+                    if not hint.get("Enabled", True):
+                        st.warning("AI help is disabled for this mission.")
+                        return
+
+                    released_level = int(hint.get("Level", 0) or 0)
+                    hint_text = str(hint.get("HintText", "")).strip()
+                    try:
+                        reply = ask_facilitator(
+                            facilitator_name=facilitator_name,
+                            personality=st.session_state["ai_personality"],
+                            greeting=st.session_state["ai_greeting"],
+                            mission=mission,
+                            user_message=(
+                                "Our team requested the approved controlled hint. "
+                                "Coach us using only that hint."
+                            ),
+                            assistance_mode="HINT",
+                            allowed_hint=hint_text,
+                        )
+                    except Exception:
+                        reply = (
+                            f"**{hint.get('Label', 'Hint')}** — {hint_text}"
+                        )
+
+                    db.save_conversation(
+                        event_id=st.session_state["participant_event_id"],
+                        team=st.session_state["participant_team"],
+                        ai=facilitator_name,
+                        role="Assistant",
+                        message=reply,
+                        timestamp=datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
+                        session_token=session_token,
+                        mission_id=mission_id,
+                        hint_level=released_level,
+                    )
+                    st.rerun()
+                except RuntimeDatabaseError as error:
+                    st.error("The hint could not be released. Please try again.")
+                    st.caption(str(error))
+        else:
+            st.caption("All three controlled hint levels have been released.")
+    elif not mission_ai_help_enabled(mission):
+        st.caption("AI help is disabled for this mission.")
+
+    prompt = st.chat_input(f"Ask {facilitator_name}...")
+    if not prompt:
+        return
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        db.save_conversation(
+            event_id=st.session_state["participant_event_id"],
+            team=st.session_state["participant_team"],
+            ai=facilitator_name,
+            role="User",
+            message=prompt,
+            timestamp=timestamp,
+            session_token=session_token if runtime_session else "",
+            mission_id=mission_id,
+            hint_level=0,
+        )
+
+        reply = ask_facilitator(
+            facilitator_name=facilitator_name,
+            personality=st.session_state["ai_personality"],
+            greeting=st.session_state["ai_greeting"],
+            mission=mission,
+            user_message=prompt,
+            assistance_mode="COACH",
+        )
+        db.save_conversation(
+            event_id=st.session_state["participant_event_id"],
+            team=st.session_state["participant_team"],
+            ai=facilitator_name,
+            role="Assistant",
+            message=reply,
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            session_token=session_token if runtime_session else "",
+            mission_id=mission_id,
+            hint_level=0,
+        )
+        st.rerun()
+    except RuntimeDatabaseError as error:
+        st.error("AI Facilitator could not save the conversation. Try again.")
+        st.caption(str(error))
+    except Exception as error:
+        st.error("AI Facilitator is temporarily unavailable. Try again shortly.")
+        st.caption(str(error))
+
+
 def show_participant():
     st.title("📱 EXOS Mission")
 
@@ -992,50 +1163,7 @@ def show_participant():
 
             render_submission_form(db, mission, submission_type)
 
-    st.divider()
-    st.subheader(f"🤖 {st.session_state['ai_name']}")
-
-    if st.session_state["ai_greeting"]:
-        st.info(st.session_state["ai_greeting"])
-
-    conversation = db.get_conversation(
-        st.session_state["participant_event_id"],
-        st.session_state["participant_team"],
-    )
-
-    for row in conversation:
-        role = "user" if str(row.get("Role", "")).lower() == "user" else "assistant"
-        with st.chat_message(role):
-            st.markdown(row.get("Message", ""))
-
-    prompt = st.chat_input(f"Ask {st.session_state['ai_name']}...")
-    if prompt:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        db.save_conversation(
-            event_id=st.session_state["participant_event_id"],
-            team=st.session_state["participant_team"],
-            ai=st.session_state["ai_name"],
-            role="User",
-            message=prompt,
-            timestamp=timestamp,
-        )
-
-        reply = ask_facilitator(
-            facilitator_name=st.session_state["ai_name"],
-            personality=st.session_state["ai_personality"],
-            greeting=st.session_state["ai_greeting"],
-            mission=mission,
-            user_message=prompt,
-        )
-        db.save_conversation(
-            event_id=st.session_state["participant_event_id"],
-            team=st.session_state["participant_team"],
-            ai=st.session_state["ai_name"],
-            role="Assistant",
-            message=reply,
-            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        )
-        st.rerun()
+    render_ai_facilitator(db, mission, runtime_session)
 
     st.divider()
     _, leave_col = st.columns([3, 1])

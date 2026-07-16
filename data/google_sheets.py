@@ -752,17 +752,75 @@ class GoogleSheetsDB:
     # Conversations
     # -------------------------
 
-    def save_conversation(self, event_id, team, ai, role, message, timestamp):
+    def save_conversation(
+        self,
+        event_id,
+        team,
+        ai,
+        role,
+        message,
+        timestamp,
+        session_token="",
+        mission_id="",
+        hint_level=0,
+    ):
+        if str(session_token).strip() and self.runtime.is_configured:
+            return self.runtime.save_ai_message(
+                session_token=session_token,
+                mission_id=mission_id,
+                facilitator_name=ai,
+                role=role,
+                message=message,
+                hint_level=hint_level,
+            )
+
         self.conversations.append_row([event_id, team, ai, role, message, timestamp])
         self.clear_cache()
+        return {
+            "EventID": event_id,
+            "TeamName": team,
+            "FacilitatorName": ai,
+            "Role": role,
+            "Message": message,
+            "HintLevel": hint_level,
+            "CreatedAt": timestamp,
+        }
 
-    def get_conversation(self, event_id, team):
+    def get_ai_conversation(self, session_token, mission_id):
+        if str(session_token).strip() and self.runtime.is_configured:
+            return self.runtime.get_ai_conversation(
+                session_token,
+                mission_id,
+            )
+        return {
+            "HintLevel": 0,
+            "Messages": [],
+        }
+
+    def get_conversation(
+        self,
+        event_id,
+        team,
+        session_token="",
+        mission_id="",
+    ):
+        if str(session_token).strip() and self.runtime.is_configured:
+            state = self.get_ai_conversation(session_token, mission_id)
+            return list(state.get("Messages", []) or [])
+
         return [
             row
             for row in get_sheet_records("Conversations")
             if str(row.get("EventID", "")) == str(event_id)
             and str(row.get("Team", "")) == str(team)
         ]
+
+    def advance_ai_hint(self, session_token, mission_id):
+        if not str(session_token).strip() or not self.runtime.is_configured:
+            raise RuntimeDatabaseError(
+                "Controlled hints require an active Supabase participant session."
+            )
+        return self.runtime.advance_ai_hint(session_token, mission_id)
 
     # -------------------------
     # Missions

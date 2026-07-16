@@ -37,6 +37,32 @@ class RuntimeProgrammeTests(unittest.TestCase):
                 }]
             if path == "runtime_missions":
                 return [{"mission_id": "M01"}]
+            if path == "rpc/exos_ai_conversation":
+                return [{
+                    "EventID": "EVT-TEST",
+                    "TeamName": "Team Alpha",
+                    "MissionID": "M01",
+                    "HintLevel": 1,
+                    "Messages": [{
+                        "Role": "Assistant",
+                        "Message": "Start with what you can observe.",
+                    }],
+                }]
+            if path == "rpc/exos_ai_add_message":
+                return [{
+                    "MessageID": "MSG-1",
+                    "Role": "User",
+                    "Message": payload["p_message"],
+                    "HintLevel": payload["p_hint_level"],
+                }]
+            if path == "rpc/exos_ai_advance_hint":
+                return [{
+                    "Enabled": True,
+                    "Level": 2,
+                    "Label": "Stronger Hint",
+                    "HintText": "Divide the evidence into categories.",
+                    "Remaining": 1,
+                }]
             return [{"MissionsPublished": 1}]
 
         runtime._request = fake_request
@@ -69,6 +95,45 @@ class RuntimeProgrammeTests(unittest.TestCase):
             "rpc/exos_participant_current_mission",
         )
         self.assertFalse(call["admin"])
+
+    def test_ai_conversation_uses_participant_session_rpc(self):
+        runtime = self.make_runtime()
+        result = runtime.get_ai_conversation("token-123", "M01")
+
+        self.assertEqual(result["HintLevel"], 1)
+        self.assertEqual(result["Messages"][0]["Role"], "Assistant")
+        call = runtime.calls[0]
+        self.assertEqual(call["path"], "rpc/exos_ai_conversation")
+        self.assertEqual(call["payload"]["p_session_token"], "token-123")
+        self.assertFalse(call["admin"])
+
+    def test_ai_message_write_uses_service_role_rpc(self):
+        runtime = self.make_runtime()
+        result = runtime.save_ai_message(
+            "token-123",
+            "M01",
+            "Atlas",
+            "User",
+            "What should we inspect?",
+            hint_level=1,
+        )
+
+        self.assertEqual(result["MessageID"], "MSG-1")
+        call = runtime.calls[0]
+        self.assertEqual(call["path"], "rpc/exos_ai_add_message")
+        self.assertTrue(call["admin"])
+        self.assertEqual(call["payload"]["p_role"], "user")
+        self.assertEqual(call["payload"]["p_hint_level"], 1)
+
+    def test_ai_hint_advance_uses_service_role_rpc(self):
+        runtime = self.make_runtime()
+        result = runtime.advance_ai_hint("token-123", "M01")
+
+        self.assertEqual(result["Level"], 2)
+        self.assertEqual(result["Remaining"], 1)
+        call = runtime.calls[0]
+        self.assertEqual(call["path"], "rpc/exos_ai_advance_hint")
+        self.assertTrue(call["admin"])
 
     def test_get_event_stage_reads_authoritative_runtime_state(self):
         runtime = self.make_runtime()

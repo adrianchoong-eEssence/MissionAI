@@ -240,7 +240,12 @@ class SupabaseRuntimeDB:
             },
             admin=True,
         )
-        return self._normalise_result(result) or {}
+        published = self._normalise_result(result) or {}
+        if reset_registration:
+            published["AIReset"] = self.reset_ai_event(
+                str(event.get("EventID", "")).strip()
+            )
+        return published
 
     def publish_programme(self, event_id, missions):
         if not self.can_publish:
@@ -458,6 +463,61 @@ class SupabaseRuntimeDB:
         )
         return self._normalise_result(result)
 
+    def get_ai_conversation(self, session_token, mission_id):
+        if not self.is_configured or not str(session_token).strip():
+            return {
+                "HintLevel": 0,
+                "Messages": [],
+            }
+        result = self._request(
+            "POST",
+            "rpc/exos_ai_conversation",
+            payload={
+                "p_session_token": str(session_token).strip(),
+                "p_mission_id": str(mission_id).strip(),
+            },
+        )
+        return self._normalise_result(result) or {
+            "HintLevel": 0,
+            "Messages": [],
+        }
+
+    def save_ai_message(
+        self,
+        session_token,
+        mission_id,
+        facilitator_name,
+        role,
+        message,
+        hint_level=0,
+    ):
+        result = self._request(
+            "POST",
+            "rpc/exos_ai_add_message",
+            payload={
+                "p_session_token": str(session_token).strip(),
+                "p_mission_id": str(mission_id).strip(),
+                "p_facilitator_name": str(facilitator_name).strip(),
+                "p_role": str(role).strip().lower(),
+                "p_message": str(message).strip(),
+                "p_hint_level": max(0, min(int(hint_level or 0), 3)),
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def advance_ai_hint(self, session_token, mission_id):
+        result = self._request(
+            "POST",
+            "rpc/exos_ai_advance_hint",
+            payload={
+                "p_session_token": str(session_token).strip(),
+                "p_mission_id": str(mission_id).strip(),
+            },
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
     def join_player(self, join_code, participant_name):
         result = self._request(
             "POST",
@@ -531,6 +591,15 @@ class SupabaseRuntimeDB:
             "POST",
             "rpc/exos_reset_event_registration",
             payload={"p_event_id": str(event_id)},
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def reset_ai_event(self, event_id):
+        result = self._request(
+            "POST",
+            "rpc/exos_reset_ai_event",
+            payload={"p_event_id": str(event_id).strip()},
             admin=True,
         )
         return self._normalise_result(result) or {}
