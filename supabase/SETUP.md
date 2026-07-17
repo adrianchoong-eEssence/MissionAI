@@ -11,6 +11,7 @@
    - `supabase/006_credit_wallet_and_mission_media.sql`
    - `supabase/007_ai_conversations_and_hints.sql`
    - `supabase/008_road_hunt_gps.sql`
+   - `supabase/009_road_hunt_team_missions.sql`
 5. Copy the project URL, publishable key, and secret key from Supabase project settings.
 6. Add these keys to the Streamlit secrets for Admin, Facilitator, and Participant:
 

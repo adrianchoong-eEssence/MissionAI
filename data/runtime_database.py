@@ -888,6 +888,16 @@ class SupabaseRuntimeDB:
         )
         return self._normalise_result(result) or {}
 
+    def get_road_hunt_unlocked_missions(self, session_token):
+        if not self.is_configured or not str(session_token).strip():
+            return {}
+        result = self._request(
+            "POST",
+            "rpc/exos_road_hunt_missions",
+            payload={"p_session_token": str(session_token).strip()},
+        )
+        return self._normalise_result(result) or {}
+
     def claim_team_tracker(self, session_token):
         result = self._request(
             "POST",

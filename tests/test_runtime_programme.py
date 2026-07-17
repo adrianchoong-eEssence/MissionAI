@@ -63,6 +63,21 @@ class RuntimeProgrammeTests(unittest.TestCase):
                     "HintText": "Divide the evidence into categories.",
                     "Remaining": 1,
                 }]
+            if path == "rpc/exos_road_hunt_missions":
+                return [{
+                    "EventID": "EVT-TEST",
+                    "TeamName": "Team Alpha",
+                    "Enabled": True,
+                    "TotalMissions": 2,
+                    "UnlockedMissions": 1,
+                    "SubmittedMissions": 0,
+                    "AvailableMissions": [{
+                        "StopID": "IPOH-01",
+                        "MissionID": "M01",
+                        "Mission": {"MissionID": "M01"},
+                        "Submitted": False,
+                    }],
+                }]
             return [{"MissionsPublished": 1}]
 
         runtime._request = fake_request
@@ -354,6 +369,25 @@ class RuntimeProgrammeTests(unittest.TestCase):
             8.5,
         )
         self.assertTrue(runtime.calls[5]["admin"])
+
+    def test_road_hunt_team_missions_use_participant_session(self):
+        runtime = self.make_runtime()
+
+        result = runtime.get_road_hunt_unlocked_missions("session-token")
+
+        self.assertTrue(result["Enabled"])
+        self.assertEqual(result["UnlockedMissions"], 1)
+        self.assertEqual(
+            result["AvailableMissions"][0]["MissionID"],
+            "M01",
+        )
+        call = runtime.calls[0]
+        self.assertEqual(call["path"], "rpc/exos_road_hunt_missions")
+        self.assertEqual(
+            call["payload"]["p_session_token"],
+            "session-token",
+        )
+        self.assertFalse(call["admin"])
 
     def test_individual_submission_uses_session_identity_rpc(self):
         runtime = self.make_runtime()

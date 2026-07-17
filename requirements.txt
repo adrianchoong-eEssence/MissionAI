@@ -4,6 +4,7 @@ google-auth
 openai
 PyYAML
 pandas
+pydeck
 openpyxl
 streamlit-autorefresh
 google-api-python-client

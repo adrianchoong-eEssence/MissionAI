@@ -972,6 +972,86 @@ def _road_hunt_migration_missing(error):
     return "PGRST202" in message or "exos_road_hunt_state" in message
 
 
+def _road_hunt_team_missions_missing(error):
+    message = str(error)
+    return "PGRST202" in message or "exos_road_hunt_missions" in message
+
+
+def render_road_hunt_mission_hub(session_token):
+    """Return the mission selected from this team's reached checkpoints."""
+    runtime = get_runtime_database()
+    try:
+        state = runtime.get_road_hunt_unlocked_missions(session_token)
+    except RuntimeDatabaseError as error:
+        if _road_hunt_team_missions_missing(error):
+            return None, False
+        st.caption("🟠 Team missions are reconnecting…")
+        return None, True
+
+    if not state.get("Enabled"):
+        return None, False
+
+    available = state.get("AvailableMissions", []) or []
+    total = int(state.get("TotalMissions", 0) or 0)
+    unlocked = int(state.get("UnlockedMissions", 0) or 0)
+    submitted = int(state.get("SubmittedMissions", 0) or 0)
+
+    st.divider()
+    st.subheader("🧭 Your Team's Road Hunt")
+    metric1, metric2, metric3 = st.columns(3)
+    metric1.metric("Route Missions", total)
+    metric2.metric("Unlocked", unlocked)
+    metric3.metric("Submitted", submitted)
+
+    next_stop = state.get("NextStop", {}) or {}
+    if next_stop:
+        next_name = str(next_stop.get("StopName", "Next checkpoint"))
+        next_instruction = str(next_stop.get("Instructions", "") or "").strip()
+        st.info(f"Next checkpoint: {next_name}")
+        if next_instruction:
+            st.caption(next_instruction)
+    elif total:
+        st.success("All route checkpoints have been reached.")
+
+    if not available:
+        st.warning(
+            "No route mission is unlocked yet. Reach the next checkpoint with "
+            "your navigator GPS active, or ask a facilitator to confirm arrival."
+        )
+        return None, True
+
+    option_map = {}
+    for row in available:
+        mission = row.get("Mission", {}) or {}
+        mission_id = str(row.get("MissionID", "") or mission.get("MissionID", ""))
+        title = str(mission.get("Title", mission_id) or mission_id)
+        stop_name = str(row.get("StopName", "Checkpoint"))
+        icon = "✅" if row.get("Submitted") else "🎯"
+        label = f"{icon} {mission_id} · {title} — {stop_name}"
+        option_map[label] = row
+
+    selected_label = st.selectbox(
+        "Available Team Mission",
+        list(option_map),
+        key=(
+            f"road_hunt_mission_{state.get('EventID', '')}_"
+            f"{state.get('TeamName', '')}"
+        ),
+    )
+    selected = option_map[selected_label]
+    mission = dict(selected.get("Mission", {}) or {})
+    mission["MissionID"] = str(
+        selected.get("MissionID", mission.get("MissionID", ""))
+    )
+    mission["_RoadHuntStop"] = {
+        "StopID": selected.get("StopID", ""),
+        "StopName": selected.get("StopName", ""),
+        "StopPosition": selected.get("StopPosition", 0),
+    }
+    st.caption(f"Unlocked at: {selected.get('StopName', 'checkpoint')}")
+    return mission, True
+
+
 def render_road_hunt_navigator(session_token):
     """Render the optional navigator-only GPS control for Road Hunt events."""
     runtime = get_runtime_database()
@@ -1187,6 +1267,8 @@ def show_participant():
     runtime_session = bool(
         st.session_state.get("participant_session_token", "")
     )
+    road_hunt_mission = None
+    road_hunt_active = False
     if runtime_session:
         watch_live_mission_state(
             st.session_state["participant_session_token"]
@@ -1194,24 +1276,35 @@ def show_participant():
         render_road_hunt_navigator(
             st.session_state["participant_session_token"]
         )
+        road_hunt_mission, road_hunt_active = (
+            render_road_hunt_mission_hub(
+                st.session_state["participant_session_token"]
+            )
+        )
     live_runtime_state = st.session_state.get(
         "participant_runtime_state",
         {},
     )
 
-    try:
-        mission = db.get_current_mission(
-            st.session_state["participant_event_id"],
-            session_token=st.session_state.get(
-                "participant_session_token",
-                "",
-            ),
-        )
-    except RuntimeDatabaseError as error:
-        st.warning("Live mission state is reconnecting. Please wait a moment.")
-        st.caption(str(error))
-        mission = None
-    st.subheader("🎯 Current Mission" if mission else "🎬 Live Stage")
+    if road_hunt_active:
+        mission = road_hunt_mission
+    else:
+        try:
+            mission = db.get_current_mission(
+                st.session_state["participant_event_id"],
+                session_token=st.session_state.get(
+                    "participant_session_token",
+                    "",
+                ),
+            )
+        except RuntimeDatabaseError as error:
+            st.warning("Live mission state is reconnecting. Please wait a moment.")
+            st.caption(str(error))
+            mission = None
+    if road_hunt_active:
+        st.subheader("🎯 Selected Team Mission" if mission else "📍 Route Stage")
+    else:
+        st.subheader("🎯 Current Mission" if mission else "🎬 Live Stage")
 
     if mission is None:
         stage_payload = live_runtime_state.get("Stage", {}) or {}
@@ -1239,7 +1332,7 @@ def show_participant():
             st.success(stage_name)
             if participant_message:
                 st.info(participant_message)
-            if current_mission_id:
+            if current_mission_id and not road_hunt_active:
                 st.warning(
                     f"Mission {current_mission_id} is being synchronised. "
                     "Press Check for New Mission once."

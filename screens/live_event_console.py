@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 import pandas as pd
+import pydeck as pdk
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
@@ -485,9 +486,25 @@ def render_road_hunt_operations(db, event_id):
     teams = status.get("Teams", []) or []
     stops = status.get("Stops", []) or []
     arrivals = status.get("Arrivals", []) or []
+    try:
+        road_submissions = db.runtime.get_submissions(event_id)
+    except RuntimeDatabaseError:
+        road_submissions = []
+    mission_ids_by_stop = {
+        str(stop.get("StopID", "")): {
+            str(mission_id)
+            for mission_id in (stop.get("MissionIDs", []) or [])
+            if str(mission_id)
+        }
+        for stop in stops
+    }
     interval = int(status.get("LocationIntervalSeconds", 20) or 20)
     stale_after = max(interval * 3, 60)
     now = pd.Timestamp.now(tz="UTC")
+    participant_names = {
+        str(row.get("ParticipantID", "")): str(row.get("Name", ""))
+        for row in db.runtime.get_players(event_id)
+    }
 
     team_rows = []
     reporting = 0
@@ -506,22 +523,73 @@ def render_road_hunt_operations(db, event_id):
             row for row in arrivals
             if str(row.get("TeamName", "")) == str(team.get("TeamName", ""))
         ]
+        team_name = str(team.get("TeamName", ""))
+        unlocked_mission_ids = set()
+        for arrival in team_arrivals:
+            unlocked_mission_ids.update(
+                mission_ids_by_stop.get(str(arrival.get("StopID", "")), set())
+            )
+        team_submissions = [
+            row for row in road_submissions
+            if str(row.get("TeamName", "")) == team_name
+            and str(row.get("MissionID", "")) in unlocked_mission_ids
+        ]
+        submitted_mission_ids = {
+            str(row.get("MissionID", ""))
+            for row in team_submissions
+        }
+        approved_mission_ids = {
+            str(row.get("MissionID", ""))
+            for row in team_submissions
+            if str(row.get("Status", "")).upper() == "APPROVED"
+        }
         if age_seconds is None:
             gps_status = "Not started"
+            status_colour = [100, 116, 139, 210]
         elif age_seconds <= stale_after:
             gps_status = "Live"
+            status_colour = [34, 197, 94, 230]
+        elif age_seconds <= stale_after * 3:
+            gps_status = f"Delayed ({int(age_seconds // 60)} min)"
+            status_colour = [250, 204, 21, 230]
         else:
-            gps_status = f"Stale ({int(age_seconds // 60)} min)"
+            gps_status = f"Offline ({int(age_seconds // 60)} min)"
+            status_colour = [239, 68, 68, 230]
+
+        navigator_id = str(team.get("NavigatorParticipantID", ""))
+        navigator_name = participant_names.get(navigator_id, "")
+        if not navigator_name and team.get("HasNavigator"):
+            navigator_name = "Navigator claimed"
+        last_seen_text = ""
+        if not pd.isna(last_seen):
+            last_seen_text = last_seen.tz_convert(
+                "Asia/Kuala_Lumpur"
+            ).strftime("%H:%M:%S")
+        accuracy = team.get("AccuracyMeters")
+        accuracy_value = (
+            max(float(accuracy), 5)
+            if accuracy not in (None, "")
+            else 25.0
+        )
 
         team_rows.append({
             "Team": team.get("TeamName", ""),
-            "Navigator": "Claimed" if team.get("HasNavigator") else "Waiting",
+            "Navigator": navigator_name or "Waiting",
             "GPS": gps_status,
-            "Last Seen": captured_at or "",
-            "Accuracy (m)": team.get("AccuracyMeters"),
+            "Last Seen": last_seen_text,
+            "Accuracy (m)": (
+                round(float(accuracy), 1)
+                if accuracy not in (None, "")
+                else None
+            ),
             "Stops Reached": len(team_arrivals),
+            "Missions Unlocked": len(unlocked_mission_ids),
+            "Missions Submitted": len(submitted_mission_ids),
+            "Missions Approved": len(approved_mission_ids),
             "Latitude": team.get("Latitude"),
             "Longitude": team.get("Longitude"),
+            "StatusColour": status_colour,
+            "AccuracyRadius": accuracy_value,
         })
 
     metric1, metric2, metric3, metric4 = st.columns(4)
@@ -532,21 +600,118 @@ def render_road_hunt_operations(db, event_id):
 
     map_rows = [
         {
-            "latitude": float(row["Latitude"]),
-            "longitude": float(row["Longitude"]),
+            **row,
+            "Latitude": float(row["Latitude"]),
+            "Longitude": float(row["Longitude"]),
+            "Label": f"{row['Team']} · {row['Navigator']}",
+            "AccuracyColour": [
+                row["StatusColour"][0],
+                row["StatusColour"][1],
+                row["StatusColour"][2],
+                45,
+            ],
+            "AccuracyLabel": row.get("Accuracy (m)") or "Unknown",
         }
         for row in team_rows
         if row.get("Latitude") not in (None, "")
         and row.get("Longitude") not in (None, "")
     ]
     if map_rows:
-        st.map(pd.DataFrame(map_rows))
+        latitudes = [row["Latitude"] for row in map_rows]
+        longitudes = [row["Longitude"] for row in map_rows]
+        span = max(
+            max(latitudes) - min(latitudes),
+            max(longitudes) - min(longitudes),
+        )
+        if span <= 0.005:
+            zoom = 15
+        elif span <= 0.02:
+            zoom = 13
+        elif span <= 0.08:
+            zoom = 11
+        elif span <= 0.3:
+            zoom = 9
+        elif span <= 1:
+            zoom = 7
+        else:
+            zoom = 5
+
+        accuracy_layer = pdk.Layer(
+            "ScatterplotLayer",
+            map_rows,
+            get_position="[Longitude, Latitude]",
+            get_radius="AccuracyRadius",
+            radius_units="meters",
+            get_fill_color="AccuracyColour",
+            get_line_color="StatusColour",
+            line_width_min_pixels=1,
+            stroked=True,
+            pickable=False,
+        )
+        marker_layer = pdk.Layer(
+            "ScatterplotLayer",
+            map_rows,
+            get_position="[Longitude, Latitude]",
+            get_radius=8,
+            radius_units="pixels",
+            get_fill_color="StatusColour",
+            get_line_color=[255, 255, 255, 240],
+            line_width_min_pixels=2,
+            stroked=True,
+            pickable=True,
+        )
+        label_layer = pdk.Layer(
+            "TextLayer",
+            map_rows,
+            get_position="[Longitude, Latitude]",
+            get_text="Label",
+            get_size=15,
+            get_color=[15, 23, 42, 255],
+            get_pixel_offset=[0, -20],
+            get_text_anchor="middle",
+            get_alignment_baseline="bottom",
+            pickable=True,
+        )
+        deck = pdk.Deck(
+            layers=[accuracy_layer, marker_layer, label_layer],
+            initial_view_state=pdk.ViewState(
+                latitude=sum(latitudes) / len(latitudes),
+                longitude=sum(longitudes) / len(longitudes),
+                zoom=zoom,
+                pitch=0,
+            ),
+            map_style=(
+                "https://basemaps.cartocdn.com/gl/positron-gl-style/"
+                "style.json"
+            ),
+            tooltip={
+                "html": (
+                    "<b>{Team}</b><br/>Navigator: {Navigator}<br/>"
+                    "GPS: {GPS}<br/>Last seen: {Last Seen}<br/>"
+                    "Accuracy: ±{AccuracyLabel} m<br/>"
+                    "Stops reached: {Stops Reached}<br/>"
+                    "Missions: {Missions Submitted}/{Missions Unlocked} submitted"
+                ),
+                "style": {"backgroundColor": "#0f172a", "color": "white"},
+            },
+        )
+        st.pydeck_chart(deck, width="stretch")
+        st.caption(
+            "The translucent circle shows the phone's reported GPS accuracy."
+        )
     else:
         st.info("Waiting for nominated navigator phones to start GPS.")
 
     if team_rows:
         st.dataframe(
-            pd.DataFrame(team_rows).drop(columns=["Latitude", "Longitude"]),
+            pd.DataFrame(team_rows).drop(
+                columns=[
+                    "Latitude",
+                    "Longitude",
+                    "StatusColour",
+                    "AccuracyRadius",
+                ]
+            ),
             width="stretch",
             hide_index=True,
         )

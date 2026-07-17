@@ -12,6 +12,13 @@ from data.aia_customer_contact import (
     AIA_CUSTOMER_CONTACT_TEAMS,
     install_aia_customer_contact_pack,
 )
+from data.mahb_media_explore import (
+    MAHB_MEDIA_EXPLORE_MISSION_PLAN,
+    MAHB_MEDIA_EXPLORE_ROUTE,
+    MAHB_MEDIA_EXPLORE_STAGES,
+    MAHB_MEDIA_EXPLORE_TEAMS,
+    install_mahb_media_explore_pack,
+)
 from data.google_sheets import GoogleSheetsDB
 from engines.programme_engine import ProgrammeEngine
 from engines.recommendation_engine import RecommendationEngine
@@ -401,6 +408,64 @@ def render_saved_programme_packs(db):
             result4.metric("Marketplace", result["MarketplaceItems"])
 
 
+def render_mahb_media_explore_installer(db, events):
+    st.divider()
+    st.subheader("MAHB Media Explore — GPS Road Hunt")
+    st.caption(
+        "Installs a complete one-day Sepang → Ipoh → George Town → Penang "
+        "Airport Road Hunt with aviation-themed teams, missions, Innovation "
+        "Credits, GPS checkpoints and Show Control stages."
+    )
+
+    event = select_active_event(
+        events,
+        label="MAHB Event to Prepare",
+        key="mahb_media_explore_pack_event",
+    )
+    event_id = str(event.get("EventID", ""))
+
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("Teams", len(MAHB_MEDIA_EXPLORE_TEAMS))
+    metric2.metric("Missions", len(MAHB_MEDIA_EXPLORE_MISSION_PLAN))
+    metric3.metric("GPS Stops", len(MAHB_MEDIA_EXPLORE_ROUTE))
+    metric4.metric("Show Control Stages", len(MAHB_MEDIA_EXPLORE_STAGES))
+
+    st.info(
+        "One navigator phone per vehicle shares GPS with facilitators. The driver "
+        "must never handle EXOS while the vehicle is moving."
+    )
+    st.warning(
+        "This replaces the selected event's teams and Show Control timeline. "
+        "It stops if runtime participants already exist. Route pins, parking, "
+        "access, opening hours and stage timing must be confirmed during the "
+        "route reconnaissance before live use."
+    )
+    confirmed = st.checkbox(
+        "I confirm this is the correct empty event and I will validate the route before launch",
+        key=f"confirm_mahb_media_explore_pack_{event_id}",
+    )
+    if st.button(
+        "🗺️ Install and Publish MAHB Road Hunt",
+        width="stretch",
+        disabled=not confirmed,
+        key=f"install_mahb_media_explore_pack_{event_id}",
+    ):
+        try:
+            result = install_mahb_media_explore_pack(db, event_id)
+        except Exception as error:
+            st.error(f"MAHB Road Hunt installation failed: {error}")
+            return
+
+        st.success("MAHB Media Explore Road Hunt installed and published.")
+        result1, result2, result3, result4 = st.columns(4)
+        result1.metric("Teams Published", result["Teams"])
+        result2.metric("Missions Published", result["Missions"])
+        result3.metric("GPS Stops", result["RouteStops"])
+        result4.metric("Timeline Stages", result["Stages"])
+
+    render_existing_programme(db, event_id)
+
+
 def render_programme_packs(db):
     render_saved_programme_packs(db)
     st.divider()
@@ -462,6 +527,7 @@ def render_programme_packs(db):
         result4.metric("Marketplace Items", result["MarketplaceItems"])
 
     render_existing_programme(db, event_id)
+    render_mahb_media_explore_installer(db, events)
 
 
 def render_recommendation_builder():
