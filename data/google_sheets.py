@@ -1,4 +1,5 @@
 import gspread
+import copy
 import json
 import streamlit as st
 from google.oauth2.service_account import Credentials
@@ -6,6 +7,8 @@ from datetime import datetime, timedelta
 import random
 import re
 import string
+import threading
+import time
 
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 
@@ -62,6 +65,64 @@ REQUIRED_WORKSHEETS = {
     ],
 }
 
+RETRYABLE_SHEETS_STATUS_CODES = {429, 500, 502, 503, 504}
+PARTICIPANT_COUNT_WARNING = (
+    "Participant data is temporarily unavailable. Showing the last known value."
+)
+_LAST_SUCCESSFUL_PARTICIPANT_COUNTS = {}
+_LAST_SUCCESSFUL_SHEET_RECORDS = {}
+_PARTICIPANT_COUNT_LOCK = threading.RLock()
+_SHEET_RECORDS_LOCK = threading.RLock()
+
+
+def _sheet_status_code(error):
+    response = getattr(error, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if status_code is None:
+        status_code = getattr(error, "status_code", None)
+    if status_code is None:
+        status_code = getattr(error, "code", None)
+    try:
+        return int(status_code)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_retryable_sheet_error(error):
+    return (
+        _sheet_status_code(error) in RETRYABLE_SHEETS_STATUS_CODES
+        or isinstance(error, (ConnectionError, TimeoutError))
+    )
+
+
+def _call_sheets_with_retry(
+    operation,
+    *,
+    attempts=4,
+    base_delay_seconds=0.35,
+    max_delay_seconds=3.0,
+):
+    last_error = None
+    for attempt in range(max(1, int(attempts))):
+        try:
+            return operation()
+        except Exception as error:
+            last_error = error
+            if (
+                not _is_retryable_sheet_error(error)
+                or attempt >= attempts - 1
+            ):
+                raise
+
+            delay = min(
+                max_delay_seconds,
+                base_delay_seconds * (2 ** attempt),
+            )
+            jitter = random.uniform(0, max(delay * 0.25, 0.01))
+            time.sleep(delay + jitter)
+
+    raise last_error
+
 
 @st.cache_resource
 def get_workbook():
@@ -77,27 +138,39 @@ def get_workbook():
         )
 
     client = gspread.authorize(credentials)
-    return client.open_by_key(SPREADSHEET_ID)
+    return _call_sheets_with_retry(
+        lambda: client.open_by_key(SPREADSHEET_ID)
+    )
 
 
 def ensure_worksheet(workbook, name, headers):
     try:
-        worksheet = workbook.worksheet(name)
+        worksheet = _call_sheets_with_retry(
+            lambda: workbook.worksheet(name)
+        )
     except gspread.WorksheetNotFound:
-        worksheet = workbook.add_worksheet(title=name, rows=500, cols=max(len(headers), 10))
-        worksheet.append_row(headers)
+        worksheet = _call_sheets_with_retry(
+            lambda: workbook.add_worksheet(
+                title=name,
+                rows=500,
+                cols=max(len(headers), 10),
+            )
+        )
+        _call_sheets_with_retry(lambda: worksheet.append_row(headers))
         return worksheet
 
-    existing = worksheet.row_values(1)
+    existing = _call_sheets_with_retry(lambda: worksheet.row_values(1))
     if not existing:
-        worksheet.append_row(headers)
+        _call_sheets_with_retry(lambda: worksheet.append_row(headers))
         return worksheet
 
     missing_headers = [header for header in headers if header not in existing]
     if missing_headers:
-        worksheet.update(
-            values=[missing_headers],
-            range_name=f"{gspread.utils.rowcol_to_a1(1, len(existing) + 1)}:{gspread.utils.rowcol_to_a1(1, len(existing) + len(missing_headers))}",
+        _call_sheets_with_retry(
+            lambda: worksheet.update(
+                values=[missing_headers],
+                range_name=f"{gspread.utils.rowcol_to_a1(1, len(existing) + 1)}:{gspread.utils.rowcol_to_a1(1, len(existing) + len(missing_headers))}",
+            )
         )
 
     return worksheet
@@ -108,7 +181,7 @@ def get_worksheets():
     workbook = get_workbook()
     existing = {
         worksheet.title: worksheet
-        for worksheet in workbook.worksheets()
+        for worksheet in _call_sheets_with_retry(workbook.worksheets)
     }
 
     worksheets = {}
@@ -129,13 +202,44 @@ def get_worksheets():
 @st.cache_data(ttl=30)
 def get_sheet_records(sheet_name):
     worksheets = get_worksheets()
-    return worksheets[sheet_name].get_all_records()
+    try:
+        records = _call_sheets_with_retry(
+            worksheets[sheet_name].get_all_records
+        )
+    except Exception as error:
+        if not _is_retryable_sheet_error(error):
+            raise
+        with _SHEET_RECORDS_LOCK:
+            if sheet_name not in _LAST_SUCCESSFUL_SHEET_RECORDS:
+                raise
+            return copy.deepcopy(
+                _LAST_SUCCESSFUL_SHEET_RECORDS[sheet_name]
+            )
+
+    with _SHEET_RECORDS_LOCK:
+        _LAST_SUCCESSFUL_SHEET_RECORDS[sheet_name] = copy.deepcopy(records)
+    return records
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def get_sheet_participant_count(event_id):
+    worksheets = get_worksheets()
+    event_ids = _call_sheets_with_retry(
+        lambda: worksheets["Participants"].col_values(1)
+    )
+    clean_event_id = str(event_id).strip()
+    return sum(
+        1
+        for row_event_id in event_ids[1:]
+        if str(row_event_id).strip() == clean_event_id
+    )
 
 
 class GoogleSheetsDB:
     def __init__(self):
         worksheets = get_worksheets()
         self.runtime = get_runtime_database()
+        self._participant_count_warnings = {}
         self.participants = worksheets["Participants"]
         self.events = worksheets["Events"]
         self.missions = worksheets["Missions"]
@@ -150,6 +254,7 @@ class GoogleSheetsDB:
 
     def clear_cache(self):
         get_sheet_records.clear()
+        get_sheet_participant_count.clear()
 
     # -------------------------
     # Events
@@ -1039,10 +1144,55 @@ class GoogleSheetsDB:
         return None
 
     def get_participant_count(self, event_id):
-        return len([
-            p for p in self.get_players()
-            if str(p.get("EventID", "")) == str(event_id)
-        ])
+        clean_event_id = str(event_id).strip()
+        if not hasattr(self, "_participant_count_warnings"):
+            self._participant_count_warnings = {}
+        self._participant_count_warnings[clean_event_id] = False
+
+        runtime_count = None
+        if self.runtime.can_publish:
+            try:
+                runtime_count = len(
+                    self.runtime.get_players(clean_event_id)
+                )
+            except RuntimeDatabaseError:
+                runtime_count = None
+
+        try:
+            sheet_count = get_sheet_participant_count(clean_event_id)
+        except Exception as error:
+            if not _is_retryable_sheet_error(error):
+                raise
+
+            if runtime_count is not None and runtime_count > 0:
+                with _PARTICIPANT_COUNT_LOCK:
+                    _LAST_SUCCESSFUL_PARTICIPANT_COUNTS[
+                        clean_event_id
+                    ] = runtime_count
+                return runtime_count
+
+            with _PARTICIPANT_COUNT_LOCK:
+                last_known_count = _LAST_SUCCESSFUL_PARTICIPANT_COUNTS.get(
+                    clean_event_id,
+                    runtime_count or 0,
+                )
+            self._participant_count_warnings[clean_event_id] = True
+            return last_known_count
+
+        participant_count = max(runtime_count or 0, sheet_count)
+        with _PARTICIPANT_COUNT_LOCK:
+            _LAST_SUCCESSFUL_PARTICIPANT_COUNTS[
+                clean_event_id
+            ] = participant_count
+        return participant_count
+
+    def get_participant_count_warning(self, event_id):
+        clean_event_id = str(event_id).strip()
+        if not hasattr(self, "_participant_count_warnings"):
+            return ""
+        if self._participant_count_warnings.get(clean_event_id, False):
+            return PARTICIPANT_COUNT_WARNING
+        return ""
 
     def get_team_count(self, event_id):
         return len(self.get_teams(event_id))
