@@ -3,6 +3,7 @@ from streamlit_autorefresh import st_autorefresh
 
 from data.google_sheets import GoogleSheetsDB
 from data.runtime_database import RuntimeDatabaseError
+from engines.stage_timer import remaining_seconds
 from screens.app_state import select_active_event
 
 
@@ -446,21 +447,6 @@ def show_leaderboard_display():
             key="live_display_event",
         )
 
-        mode = st.selectbox(
-            "Display Mode",
-            [
-                "Registration",
-                "Current Mission",
-                "Credit Leaderboard",
-                "Hybrid",
-                "Leaderboard",
-                "Collaboration",
-                "Winner",
-            ],
-            index=3,
-            key="live_display_mode",
-        )
-
         refresh_seconds = st.selectbox(
             "Auto Refresh",
             [5, 10, 15, 30],
@@ -471,6 +457,49 @@ def show_leaderboard_display():
         st.caption("Use browser fullscreen mode for projector display.")
 
     event_id = event.get("EventID")
+    state = db.get_event_state(event_id) or {}
+    stages = db.get_programme_stages(event_id)
+    current_stage = next(
+        (
+            stage for stage in stages
+            if str(stage.get("StageNo", ""))
+            == str(state.get("CurrentStageNo", ""))
+        ),
+        stages[0] if stages else {},
+    )
+    requested_mode = str(
+        current_stage.get("DisplayMode", "")
+        or state.get("DisplayMode", "")
+    )
+    allowed_modes = {
+        "Registration",
+        "Current Mission",
+        "Credit Leaderboard",
+        "Hybrid",
+        "Leaderboard",
+        "Collaboration",
+        "Winner",
+    }
+    combined = (
+        str(current_stage.get("StageName", ""))
+        + " "
+        + str(current_stage.get("StageType", ""))
+    ).upper()
+    if requested_mode in allowed_modes:
+        mode = requested_mode
+    elif any(word in combined for word in ("CLOSING", "WINNER", "CHAMPION")):
+        mode = "Winner"
+    elif any(word in combined for word in ("MARKETPLACE", "SYNC", "WALLET")):
+        mode = "Credit Leaderboard"
+    elif any(word in combined for word in ("MISSION", "ACTIVE")):
+        mode = "Hybrid"
+    elif "REGISTRATION" in combined:
+        mode = "Registration"
+    else:
+        mode = "Leaderboard"
+
+    with st.sidebar:
+        st.success(f"Automatic view: {mode}")
 
     auto_refresh(refresh_seconds)
 
@@ -487,6 +516,26 @@ def show_leaderboard_display():
             wallet_status = {}
 
     display_header(event, mode)
+    if current_stage:
+        timer = db.get_stage_timer(
+            event_id,
+            current_stage.get("StageNo", ""),
+            current_stage.get("DurationMinutes", 0),
+        )
+        remaining = remaining_seconds(timer)
+        if str(timer.get("Status", "")).upper() in {"RUNNING", "PAUSED"}:
+            st.markdown(
+                f"""
+                <div style="text-align:center;font-size:clamp(46px,8vw,92px);
+                    font-weight:900;margin:22px 0 8px;">
+                    {remaining // 60:02d}:{remaining % 60:02d}
+                </div>
+                <div style="text-align:center;opacity:.72;">
+                    {current_stage.get('StageName', '')} · {timer.get('Status', '')}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     if mode == "Registration":
         display_registration(event, db, event_id)

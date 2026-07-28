@@ -11,6 +11,7 @@ import threading
 import time
 
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+from engines.stage_timer import new_timer, transition_timer
 
 SPREADSHEET_ID = "1XWCW9UVj_1cxA32ItsE8-nAr9q0NEgOhhD5e3C64Hvw"
 
@@ -288,8 +289,137 @@ class GoogleSheetsDB:
         ])
         self.clear_cache()
 
-    def get_events(self):
-        return get_sheet_records("Events")
+    def get_events(self, include_archived=False):
+        events = get_sheet_records("Events")
+        if include_archived:
+            return events
+        return [
+            event for event in events
+            if str(event.get("Status", "")).strip().upper() != "ARCHIVED"
+        ]
+
+    def update_event(self, event_id, updates):
+        clean_event_id = str(event_id).strip()
+        rows = get_sheet_records("Events")
+        row_number = next(
+            (
+                index for index, row in enumerate(rows, start=2)
+                if str(row.get("EventID", "")).strip() == clean_event_id
+            ),
+            None,
+        )
+        if row_number is None:
+            raise ValueError(f"Event {clean_event_id} was not found.")
+
+        headers = self.events.row_values(1)
+        payload = dict(rows[row_number - 2])
+        payload.update({
+            key: value
+            for key, value in dict(updates or {}).items()
+            if key in headers and key != "EventID"
+        })
+        values = [payload.get(header, "") for header in headers]
+        end_cell = gspread.utils.rowcol_to_a1(row_number, len(headers))
+        _call_sheets_with_retry(
+            lambda: self.events.update(
+                values=[values],
+                range_name=f"A{row_number}:{end_cell}",
+            )
+        )
+        self.clear_cache()
+        return payload
+
+    @staticmethod
+    def event_metadata(event):
+        raw = str((event or {}).get("Notes", "") or "").strip()
+        if not raw:
+            return {}
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError):
+            return {"LegacyNotes": raw}
+        return value if isinstance(value, dict) else {}
+
+    def update_event_metadata(self, event_id, updates):
+        event = self.get_event(event_id)
+        if not event:
+            raise ValueError(f"Event {event_id} was not found.")
+        metadata = self.event_metadata(event)
+        metadata.update(dict(updates or {}))
+        return self.update_event(
+            event_id,
+            {"Notes": json.dumps(metadata, ensure_ascii=False, sort_keys=True)},
+        )
+
+    def get_stage_timer(self, event_id, stage_no, duration_minutes=0):
+        event = self.get_event(event_id)
+        metadata = self.event_metadata(event)
+        timers = metadata.get("StageTimers", {}) or {}
+        key = str(stage_no)
+        return dict(
+            timers.get(key)
+            or new_timer(max(int(float(duration_minutes or 0) * 60), 0))
+        )
+
+    def update_stage_timer(
+        self,
+        event_id,
+        stage_no,
+        action,
+        duration_minutes=0,
+    ):
+        event = self.get_event(event_id)
+        metadata = self.event_metadata(event)
+        timers = dict(metadata.get("StageTimers", {}) or {})
+        key = str(stage_no)
+        timer = timers.get(key) or new_timer(
+            max(int(float(duration_minutes or 0) * 60), 0)
+        )
+        timers[key] = transition_timer(
+            timer,
+            action,
+            duration_seconds=max(
+                int(float(duration_minutes or 0) * 60),
+                0,
+            ),
+        )
+        metadata["StageTimers"] = timers
+        self.update_event(
+            event_id,
+            {"Notes": json.dumps(metadata, ensure_ascii=False, sort_keys=True)},
+        )
+        return timers[key]
+
+    def archive_event(self, event_id):
+        if self.get_participant_count(event_id):
+            raise ValueError(
+                "Events with participants cannot be archived from the normal interface."
+            )
+        return self.update_event(event_id, {"Status": "Archived"})
+
+    def restore_event(self, event_id):
+        return self.update_event(event_id, {"Status": "Draft"})
+
+    def export_backup_snapshot(self):
+        worksheets = {
+            name: get_sheet_records(name)
+            for name in REQUIRED_WORKSHEETS
+        }
+        return {
+            "ExportedAt": datetime.now().isoformat(timespec="seconds"),
+            "SpreadsheetID": SPREADSHEET_ID,
+            "Worksheets": worksheets,
+            "Events": worksheets.get("Events", []),
+            "Teams": worksheets.get("Teams", []),
+            "Missions": worksheets.get("Missions", []),
+            "Participants": worksheets.get("Participants", []),
+            "Submissions": worksheets.get("Submissions", []),
+            "ProgrammeStages": worksheets.get("ProgrammeStages", []),
+            "Scores": [
+                row for row in worksheets.get("Submissions", [])
+                if row.get("Score", "") not in ("", None)
+            ],
+        }
 
     def get_event_by_join_code(self, join_code):
         if self.runtime.is_configured:
@@ -434,14 +564,14 @@ class GoogleSheetsDB:
         }
 
     def get_event(self, event_id):
-        for event in self.get_events():
+        for event in self.get_events(include_archived=True):
             if str(event.get("EventID", "")) == str(event_id):
                 return event
         return None
 
     def generate_next_event_id(self):
         highest_number = 0
-        for event in self.get_events():
+        for event in self.get_events(include_archived=True):
             event_id = str(event.get("EventID", "")).strip()
             match = re.search(r"(\d+)$", event_id)
             if match:
@@ -451,7 +581,7 @@ class GoogleSheetsDB:
     def create_new_join_code(self, length=6):
         existing_codes = {
             str(event.get("JoinCode", "")).strip().upper()
-            for event in self.get_events()
+            for event in self.get_events(include_archived=True)
         }
         characters = string.ascii_uppercase + string.digits
         while True:

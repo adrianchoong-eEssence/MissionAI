@@ -308,6 +308,121 @@ def render_enterprise_pipeline_form(db, event_id, mission):
         st.rerun()
 
 
+def render_review_scoring_widget(db, event_id, show_all=False):
+    mission = db.get_current_mission(event_id)
+    submissions = db.get_submissions(event_id)
+    mission_id = mission.get("MissionID") if mission else ""
+    rows = [
+        row for row in submissions
+        if show_all or not mission_id
+        or str(row.get("MissionID", "")) == str(mission_id)
+    ]
+    pending = [
+        row for row in rows
+        if str(row.get("Status", "")).upper() == "PENDING"
+    ]
+    if pending and st.button(
+        f"Approve All Pending ({len(pending)})",
+        width="stretch",
+        key=f"control_approve_all_{event_id}_{mission_id}_{show_all}",
+    ):
+        for submission in pending:
+            score, _ = calculate_score(submission)
+            db.update_submission_score(
+                submission_id=submission.get("SubmissionID"),
+                score=round(score, 1),
+                remarks=submission.get("Remarks", ""),
+                judged="Yes",
+                status="APPROVED",
+            )
+        st.success("Pending submissions approved.")
+        st.rerun()
+
+    if not rows:
+        st.info("No submissions are waiting for review.")
+        return
+
+    team_names = sorted({
+        str(row.get("TeamName", ""))
+        for row in rows
+        if row.get("TeamName")
+    })
+    selected_team = st.selectbox(
+        "Filter by team",
+        ["All teams"] + team_names,
+        key=f"review_team_filter_{event_id}_{show_all}",
+    )
+    if selected_team != "All teams":
+        rows = [
+            row for row in rows
+            if str(row.get("TeamName", "")) == selected_team
+        ]
+
+    for submission in rows:
+        submission_id = str(submission.get("SubmissionID", ""))
+        suggested, formula = calculate_score(submission)
+        with st.expander(
+            f"{submission.get('TeamName', 'Team')} · "
+            f"{submission.get('MissionID', '')} · "
+            f"{submission.get('Status', 'PENDING')}",
+        ):
+            render_submission_details(submission)
+            st.caption(formula)
+            score = st.number_input(
+                "Awarded score / credits",
+                min_value=0.0,
+                max_value=10000.0,
+                value=float(suggested),
+                step=1.0,
+                key=f"control_score_{submission_id}",
+            )
+            remarks = st.text_area(
+                "Remarks or revision request",
+                value=get_value(submission, "Remarks", ""),
+                key=f"control_remarks_{submission_id}",
+            )
+            approve, reject, revision = st.columns(3)
+            if approve.button(
+                "Approve",
+                width="stretch",
+                key=f"control_approve_{submission_id}",
+            ):
+                db.update_submission_score(
+                    submission_id,
+                    round(score, 1),
+                    remarks,
+                    "Yes",
+                    "APPROVED",
+                )
+                st.rerun()
+            if reject.button(
+                "Reject",
+                width="stretch",
+                key=f"control_reject_{submission_id}",
+            ):
+                db.update_submission_score(
+                    submission_id,
+                    0,
+                    remarks,
+                    "No",
+                    "REJECTED",
+                )
+                st.rerun()
+            if revision.button(
+                "Request Revision",
+                width="stretch",
+                key=f"control_revision_{submission_id}",
+            ):
+                db.update_submission_score(
+                    submission_id,
+                    round(score, 1),
+                    remarks or "Please revise and resubmit.",
+                    "No",
+                    "PENDING",
+                )
+                st.rerun()
+
+
 def render_credit_wallet_control(db, event_id):
     st.divider()
     st.subheader("💳 Credits & Marketplace")

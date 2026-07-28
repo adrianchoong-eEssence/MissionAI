@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import time
+import json
 
 import pandas as pd
 import streamlit as st
@@ -76,6 +77,333 @@ def render_existing_programme(db, event_id):
         width="stretch",
         hide_index=True,
     )
+
+
+def _module_settings(mission):
+    raw = str((mission or {}).get("Story", "") or "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {"Narrative": raw}
+    return value if isinstance(value, dict) else {}
+
+
+def _save_event_module(db, event_id, mission, values, stage):
+    settings = _module_settings(mission)
+    settings.update({
+        "CreditValue": int(values["credit_value"]),
+        "DedicatedAIPrompt": values["ai_prompt"],
+        "EvidenceRequired": bool(values["evidence_required"]),
+        "QRCodeValue": values["qr_value"],
+        "CheckpointName": values["checkpoint_name"],
+        "CheckpointLocation": values["checkpoint_location"],
+        "Latitude": values["latitude"],
+        "Longitude": values["longitude"],
+        "GeofenceRadius": values["geofence_radius"],
+        "MissionVariants": values["variants"],
+        "Mandatory": values["mandatory"],
+    })
+    updated = dict(mission)
+    updated.update({
+        "EventID": event_id,
+        "MissionID": mission.get("MissionID", ""),
+        "Title": values["name"],
+        "Description": values["participant_instructions"],
+        "ParticipantInstructions": values["participant_instructions"],
+        "FacilitatorInstructions": values["facilitator_instructions"],
+        "Clue": values["rules"],
+        "Answer": values["answers"],
+        "ScoringRule": values["scoring"],
+        "Points": int(values["maximum_score"]),
+        "Status": "DRAFT" if values["active"] else "CLOSED",
+        "AIHelpEnabled": "Yes" if values["ai_required"] else "No",
+        "SubmissionType": values["evidence_type"],
+        "DebriefQuestions": values["debrief"],
+        "ImageURL": values["image_url"],
+        "DocumentURL": values["document_url"],
+        "Story": json.dumps(settings, ensure_ascii=False, sort_keys=True),
+    })
+    db.upsert_event_mission(updated)
+    if stage:
+        stages = [dict(row) for row in db.get_programme_stages(event_id)]
+        for row in stages:
+            if str(row.get("StageNo", "")) == str(stage.get("StageNo", "")):
+                row.update({
+                    "StageName": values["name"],
+                    "ParticipantMessage": values["participant_instructions"],
+                    "FacilitatorInstruction": values["facilitator_instructions"],
+                    "DurationMinutes": int(values["time_limit"]),
+                    "IsActive": "Yes" if values["active"] else "No",
+                })
+        db.save_programme_stages(event_id, stages)
+
+
+def render_event_module_editor(db):
+    events = db.get_events()
+    if not events:
+        st.warning("Create an event first.")
+        return
+    event = select_active_event(events, label="Event", key="module_editor_event")
+    event_id = str(event.get("EventID", ""))
+    missions = db.get_event_missions(event_id, include_closed=True)
+    stages = db.get_programme_stages(event_id)
+    if not missions:
+        st.info("Add modules from the Module Library first.")
+        return
+
+    mission_map = {
+        str(mission.get("MissionID", "")): mission
+        for mission in missions
+    }
+    options = [
+        stage for stage in stages
+        if str(stage.get("MissionID", "")) in mission_map
+    ]
+    if not options:
+        st.info("No editable event modules are in the programme.")
+        return
+    selected_stage_no = st.selectbox(
+        "Open module",
+        [str(stage.get("StageNo", "")) for stage in options],
+        format_func=lambda value: next(
+            str(stage.get("StageName", "Module"))
+            for stage in options
+            if str(stage.get("StageNo", "")) == value
+        ),
+        key=f"open_module_{event_id}",
+    )
+    stage = next(
+        row for row in options
+        if str(row.get("StageNo", "")) == selected_stage_no
+    )
+    mission = mission_map[str(stage.get("MissionID", ""))]
+    settings = _module_settings(mission)
+    st.info(
+        f"Event copy for {event.get('EventName', '')}. "
+        f"Master {mission.get('TemplateID', '—')} remains unchanged."
+    )
+
+    with st.form(f"module_form_{event_id}_{stage.get('StageNo', '')}"):
+        with st.expander("Basic Details", expanded=True):
+            name = st.text_input("Module name", value=str(mission.get("Title", "")))
+            mandatory = st.selectbox(
+                "Requirement",
+                ["Mandatory", "Optional"],
+                index=0 if settings.get("Mandatory", "Mandatory") == "Mandatory" else 1,
+            )
+            active = st.checkbox(
+                "Active",
+                value=str(mission.get("Status", "DRAFT")).upper() != "CLOSED",
+            )
+        with st.expander("Instructions", expanded=True):
+            participant_instructions = st.text_area(
+                "Participant instructions",
+                value=str(
+                    mission.get("ParticipantInstructions", "")
+                    or mission.get("Description", "")
+                ),
+            )
+            facilitator_instructions = st.text_area(
+                "Facilitator instructions",
+                value=str(mission.get("FacilitatorInstructions", "")),
+            )
+            rules = st.text_area("Rules", value=str(mission.get("Clue", "")))
+        with st.expander("Timing and Scoring"):
+            c1, c2, c3 = st.columns(3)
+            time_limit = c1.number_input(
+                "Time limit (minutes)",
+                min_value=1,
+                value=max(int(float(stage.get("DurationMinutes", 30) or 30)), 1),
+            )
+            maximum_score = c2.number_input(
+                "Maximum score",
+                min_value=0,
+                value=int(float(mission.get("Points", 0) or 0)),
+            )
+            credit_value = c3.number_input(
+                "Credit value",
+                min_value=0,
+                value=int(settings.get("CreditValue", 0) or 0),
+            )
+            scoring = st.text_area(
+                "Scoring method",
+                value=str(mission.get("ScoringRule", "")),
+            )
+        with st.expander("Missions and Questions"):
+            questions = st.text_area(
+                "Questions",
+                value=str(mission.get("DebriefQuestions", "")),
+            )
+            answers = st.text_area(
+                "Answers or evaluation notes",
+                value=str(mission.get("Answer", "")),
+            )
+            variants = st.text_area(
+                "Mission variants",
+                value=str(settings.get("MissionVariants", "")),
+            )
+            ai_required = st.checkbox(
+                "AI required",
+                value=str(mission.get("AIHelpEnabled", "No")).lower()
+                in {"yes", "true"},
+            )
+            ai_prompt = st.text_area(
+                "Dedicated AI prompt",
+                value=str(settings.get("DedicatedAIPrompt", "")),
+            )
+        with st.expander("Evidence and Media"):
+            evidence_type = st.selectbox(
+                "Evidence type",
+                ["NONE", "PHOTO", "TEXT", "PIPELINE", "HELIUM", "KEYPUNCH", "CATALYST", "NASI"],
+                index=(
+                    ["NONE", "PHOTO", "TEXT", "PIPELINE", "HELIUM", "KEYPUNCH", "CATALYST", "NASI"].index(
+                        str(mission.get("SubmissionType", "NONE")).upper()
+                    )
+                    if str(mission.get("SubmissionType", "NONE")).upper()
+                    in ["NONE", "PHOTO", "TEXT", "PIPELINE", "HELIUM", "KEYPUNCH", "CATALYST", "NASI"]
+                    else 0
+                ),
+            )
+            evidence_required = st.checkbox(
+                "Evidence required",
+                value=bool(settings.get("EvidenceRequired", False)),
+            )
+            image_url = st.text_input(
+                "Image URL",
+                value=str(mission.get("ImageURL", "")),
+            )
+            document_url = st.text_input(
+                "Document URL",
+                value=str(mission.get("DocumentURL", "")),
+            )
+        with st.expander("QR and Location"):
+            qr_value = st.text_input(
+                "QR code value",
+                value=str(settings.get("QRCodeValue", "")),
+            )
+            if qr_value:
+                st.code(qr_value, language=None)
+                st.caption("Use this value with the event QR generator or printed materials.")
+            checkpoint_name = st.text_input(
+                "Checkpoint name",
+                value=str(settings.get("CheckpointName", "")),
+            )
+            checkpoint_location = st.text_input(
+                "Checkpoint location",
+                value=str(settings.get("CheckpointLocation", "")),
+            )
+            location1, location2, location3 = st.columns(3)
+            latitude = location1.number_input(
+                "Latitude",
+                value=float(settings.get("Latitude", 0) or 0),
+                format="%.6f",
+            )
+            longitude = location2.number_input(
+                "Longitude",
+                value=float(settings.get("Longitude", 0) or 0),
+                format="%.6f",
+            )
+            geofence_radius = location3.number_input(
+                "Geofence radius (m)",
+                min_value=0,
+                value=int(settings.get("GeofenceRadius", 0) or 0),
+            )
+        with st.expander("Debrief"):
+            debrief = st.text_area(
+                "Debrief notes",
+                value=str(mission.get("DebriefQuestions", "")),
+            )
+        submitted = st.form_submit_button(
+            "Save Module Changes",
+            type="primary",
+            width="stretch",
+        )
+
+    if submitted:
+        _save_event_module(
+            db,
+            event_id,
+            mission,
+            {
+                "name": name,
+                "mandatory": mandatory,
+                "active": active,
+                "participant_instructions": participant_instructions,
+                "facilitator_instructions": facilitator_instructions,
+                "rules": rules,
+                "time_limit": time_limit,
+                "maximum_score": maximum_score,
+                "credit_value": credit_value,
+                "scoring": scoring,
+                "answers": answers,
+                "variants": variants,
+                "ai_required": ai_required,
+                "ai_prompt": ai_prompt,
+                "evidence_type": evidence_type,
+                "evidence_required": evidence_required,
+                "image_url": image_url,
+                "document_url": document_url,
+                "qr_value": qr_value,
+                "checkpoint_name": checkpoint_name,
+                "checkpoint_location": checkpoint_location,
+                "latitude": latitude,
+                "longitude": longitude,
+                "geofence_radius": geofence_radius,
+                "debrief": debrief or questions,
+            },
+            stage,
+        )
+        st.success("Event module saved. The master template was not changed.")
+        st.rerun()
+
+
+def render_programme_order(db):
+    events = db.get_events()
+    if not events:
+        return
+    event = select_active_event(events, label="Event", key="programme_order_event")
+    event_id = str(event.get("EventID", ""))
+    stages = db.get_programme_stages(event_id)
+    if not stages:
+        st.info("Add modules before arranging the programme.")
+        return
+    for index, stage in enumerate(stages):
+        with st.container(border=True):
+            info, up, down, remove = st.columns([6, 1, 1, 1])
+            info.markdown(
+                f"**{index + 1}. {stage.get('StageName', '')}**  \n"
+                f"{stage.get('DurationMinutes', '—')} min"
+            )
+            if up.button("↑", disabled=index == 0, key=f"up_{event_id}_{index}"):
+                reordered = [dict(row) for row in stages]
+                reordered[index - 1], reordered[index] = reordered[index], reordered[index - 1]
+                for position, row in enumerate(reordered, start=1):
+                    row["StageNo"] = position
+                db.save_programme_stages(event_id, reordered)
+                st.rerun()
+            if down.button("↓", disabled=index == len(stages) - 1, key=f"down_{event_id}_{index}"):
+                reordered = [dict(row) for row in stages]
+                reordered[index + 1], reordered[index] = reordered[index], reordered[index + 1]
+                for position, row in enumerate(reordered, start=1):
+                    row["StageNo"] = position
+                db.save_programme_stages(event_id, reordered)
+                st.rerun()
+            if remove.button("Remove", key=f"remove_{event_id}_{index}"):
+                remaining = [dict(row) for row in stages if row is not stage]
+                for position, row in enumerate(remaining, start=1):
+                    row["StageNo"] = position
+                db.save_programme_stages(event_id, remaining)
+                mission_id = str(stage.get("MissionID", ""))
+                if mission_id:
+                    mission = db.get_mission(event_id, mission_id)
+                    if mission:
+                        archived = dict(mission)
+                        archived["Status"] = "CLOSED"
+                        db.upsert_event_mission(archived)
+                st.success("Module removed from this event.")
+                st.rerun()
 
 
 def render_live_programme_builder(db):
@@ -579,16 +907,20 @@ def render_recommendation_builder():
 
 
 def show_programme_builder():
-    st.title("🛠 Programme Builder")
+    st.title("Programme Builder")
+    st.caption("Add, arrange and edit event-owned module copies.")
     db = GoogleSheetsDB()
-    pack_tab, live_tab, recommendation_tab = st.tabs([
-        "Programme Packs",
-        "Build Live Programme",
-        "Recommendations",
+    library_tab, order_tab, edit_tab, templates_tab = st.tabs([
+        "Module Library",
+        "Programme Order",
+        "Edit Module",
+        "Templates & Advanced",
     ])
-    with pack_tab:
-        render_programme_packs(db)
-    with live_tab:
+    with library_tab:
         render_live_programme_builder(db)
-    with recommendation_tab:
-        render_recommendation_builder()
+    with order_tab:
+        render_programme_order(db)
+    with edit_tab:
+        render_event_module_editor(db)
+    with templates_tab:
+        render_programme_packs(db)
