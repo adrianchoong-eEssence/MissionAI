@@ -106,6 +106,9 @@ def apply_branding(*, dark: bool = False) -> None:
           input, textarea, select {{
             background:#FFFFFF !important; color:{EXOS_NAVY} !important;
           }}
+          input::placeholder, textarea::placeholder {{
+            color:{EXOS_NAVY} !important; opacity:.55;
+          }}
           [data-testid="stWidgetLabel"] p, .stTextInput label p {{
             color:{EXOS_NAVY} !important;
           }}
@@ -128,6 +131,9 @@ def apply_branding(*, dark: bool = False) -> None:
           [data-testid="stSidebar"] [role="radiogroup"] label {{
             min-height:48px; padding:.68rem .85rem; border-radius:10px;
             border:1px solid transparent; font-size:1.08rem; font-weight:650;
+          }}
+          [data-testid="stSidebar"] [role="radiogroup"] label p {{
+            color:{EXOS_NAVY} !important;
           }}
           [data-testid="stSidebar"] [role="radiogroup"] label:hover {{
             background:rgba(8,45,88,.06);
