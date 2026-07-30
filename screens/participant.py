@@ -4,7 +4,12 @@ from datetime import datetime
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
-from branding import experience_header, experience_title, footer
+from branding import (
+    experience_header,
+    experience_title,
+    footer,
+    participant_install_experience,
+)
 from ai.facilitator import ask_facilitator
 from components.team_geolocation import team_geolocation
 from data.google_drive import get_photo_url, upload_photo
@@ -1259,6 +1264,7 @@ def show_participant():
     st.success(f"Welcome {st.session_state['participant_name']}")
     st.caption(st.session_state["participant_event_name"])
     render_team_assignment_card()
+    participant_install_experience()
     st.divider()
 
     runtime_session = bool(

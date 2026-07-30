@@ -64,7 +64,7 @@ def configure_page(layout: str = "wide") -> None:
     )
 
 
-def apply_branding(*, dark: bool = False) -> None:
+def apply_branding(*, dark: bool = False, participant_pwa: bool = False) -> None:
     """Install visual tokens plus title, favicon and install metadata."""
     logo = _data_uri(ASSETS / ("exos-horizontal-dark.svg" if dark else "exos-horizontal-light.svg"))
     manifest = {
@@ -83,6 +83,11 @@ def apply_branding(*, dark: bool = False) -> None:
     manifest_uri = "data:application/manifest+json;base64," + base64.b64encode(
         json.dumps(manifest).encode()
     ).decode()
+    manifest_href = (
+        "/app/static/exos-participant.webmanifest"
+        if participant_pwa
+        else manifest_uri
+    )
     favicon = _data_uri(ASSETS / "exos-favicon-32.png")
 
     st.markdown(
@@ -195,13 +200,20 @@ def apply_branding(*, dark: bool = False) -> None:
           icon.href = {json.dumps(favicon)};
           let manifest = d.querySelector("link[rel='manifest']");
           if (!manifest) {{ manifest=d.createElement('link'); manifest.rel='manifest'; d.head.appendChild(manifest); }}
-          manifest.href = {json.dumps(manifest_uri)};
+          manifest.href = {json.dumps(manifest_href)};
           let apple = d.querySelector("meta[name='apple-mobile-web-app-title']");
           if (!apple) {{ apple=d.createElement('meta'); apple.name='apple-mobile-web-app-title'; d.head.appendChild(apple); }}
           apple.content = 'EXOS';
           let appName = d.querySelector("meta[name='application-name']");
           if (!appName) {{ appName=d.createElement('meta'); appName.name='application-name'; d.head.appendChild(appName); }}
           appName.content = 'EXOS';
+          {"const savedUrl=window.parent.localStorage.getItem('exosParticipantSessionUrl');"
+           "if (!window.parent.location.search && savedUrl) {"
+           "  const saved=new URL(savedUrl);"
+           "  if (saved.origin === window.parent.location.origin && saved.search) {"
+           "    window.parent.location.replace(saved.href);"
+           "  }"
+           "}" if participant_pwa else ""}
           if (!window.parent.sessionStorage.getItem('exosSplashSeen')) {{
             window.parent.sessionStorage.setItem('exosSplashSeen', '1');
             const splash=d.createElement('div');
@@ -216,6 +228,113 @@ def apply_branding(*, dark: bool = False) -> None:
         """,
         height=0,
         width=0,
+    )
+
+
+def participant_install_experience() -> None:
+    """Offer optional installation after a participant has joined."""
+    components.html(
+        f"""
+        <style>
+          * {{ box-sizing:border-box; }}
+          body {{ margin:0; font-family:Eurostile,"Arial Narrow",Arial,sans-serif; }}
+          .install-card {{
+            border:1px solid rgba(8,45,88,.16); border-radius:18px;
+            padding:18px; background:#fff; color:{EXOS_NAVY};
+          }}
+          .install-row {{ display:flex; align-items:center; gap:14px; }}
+          .install-icon {{ width:52px; height:52px; border-radius:12px; }}
+          .install-copy {{ flex:1; min-width:0; }}
+          .install-title {{ font-size:18px; font-weight:800; }}
+          .install-description {{ margin-top:3px; font-size:13px; opacity:.72; }}
+          .install-actions {{ display:flex; gap:9px; margin-top:15px; }}
+          button {{
+            border-radius:10px; padding:10px 14px; font:700 14px inherit;
+            cursor:pointer;
+          }}
+          #install {{ color:#fff; background:{EXOS_NAVY}; border:1px solid {EXOS_NAVY}; }}
+          #continue {{ color:{EXOS_NAVY}; background:#fff; border:1px solid rgba(8,45,88,.28); }}
+          #instructions {{
+            display:none; margin-top:14px; padding:13px 14px;
+            background:rgba(8,45,88,.055); border-radius:11px;
+            font-size:14px; line-height:1.55;
+          }}
+          #instructions strong {{ display:block; margin-bottom:4px; }}
+          @media(max-width:420px) {{
+            .install-actions {{ flex-direction:column; }}
+            button {{ width:100%; }}
+          }}
+        </style>
+        <div class="install-card" id="card">
+          <div class="install-row">
+            <img class="install-icon" src="{_data_uri(ASSETS / "exos-mobile-192.png")}" alt="EXOS">
+            <div class="install-copy">
+              <div class="install-title">Install EXOS</div>
+              <div class="install-description">{PLATFORM_EXPANSION}</div>
+            </div>
+          </div>
+          <div class="install-actions">
+            <button id="install">Install EXOS</button>
+            <button id="continue">Continue in Browser</button>
+          </div>
+          <div id="instructions"></div>
+        </div>
+        <script>
+          const host=window.parent;
+          const current=host.location.href;
+          if (host.location.search) {{
+            host.localStorage.setItem('exosParticipantSessionUrl', current);
+          }}
+
+          let installEvent=host.__exosInstallPrompt || null;
+          if (!host.__exosInstallListenerReady) {{
+            host.__exosInstallListenerReady=true;
+            host.addEventListener('beforeinstallprompt', event => {{
+              event.preventDefault();
+              host.__exosInstallPrompt=event;
+            }});
+          }}
+
+          const ua=navigator.userAgent;
+          const ios=/iPad|iPhone|iPod/.test(ua)
+            || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+          const android=/Android/i.test(ua);
+          const instructions=document.getElementById('instructions');
+
+          function showInstructions() {{
+            if (ios) {{
+              instructions.innerHTML='<strong>Install on iPhone or iPad</strong>'
+                + 'Open this page in Safari. Tap <b>Share</b>, tap '
+                + '<b>Add to Home Screen</b>, then tap <b>Add</b>.';
+            }} else if (android) {{
+              instructions.innerHTML='<strong>Install on Android</strong>'
+                + 'Open this page in Chrome. Tap <b>Install App</b> or '
+                + '<b>Add to Home Screen</b>, then confirm installation.';
+            }} else {{
+              instructions.innerHTML='<strong>Install EXOS</strong>'
+                + 'Use your browser menu and choose <b>Install EXOS</b> or '
+                + '<b>Add to Home Screen</b>.';
+            }}
+            instructions.style.display='block';
+          }}
+
+          document.getElementById('install').addEventListener('click', async () => {{
+            installEvent=host.__exosInstallPrompt || installEvent;
+            if (installEvent) {{
+              installEvent.prompt();
+              await installEvent.userChoice;
+              host.__exosInstallPrompt=null;
+              installEvent=null;
+            }} else {{
+              showInstructions();
+            }}
+          }});
+          document.getElementById('continue').addEventListener('click', () => {{
+            document.getElementById('card').style.display='none';
+          }});
+        </script>
+        """,
+        height=220,
     )
 
 
