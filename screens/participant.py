@@ -1248,7 +1248,6 @@ def show_participant():
             persist_session_in_query_params()
             st.rerun()
 
-        footer()
         return
 
     experience_header(
