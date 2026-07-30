@@ -187,7 +187,13 @@ def apply_branding(*, dark: bool = False, participant_pwa: bool = False) -> None
     components.html(
         f"""
         <script>
-          const d = window.parent.document;
+          const root = (() => {{
+            try {{
+              if (window.top && window.top.document) return window.top;
+            }} catch (error) {{}}
+            return window.parent;
+          }})();
+          const d = root.document;
           d.title = {json.dumps(BROWSER_TITLE)};
           const titleNode=d.querySelector('title');
           if (titleNode) {{
@@ -207,15 +213,15 @@ def apply_branding(*, dark: bool = False, participant_pwa: bool = False) -> None
           let appName = d.querySelector("meta[name='application-name']");
           if (!appName) {{ appName=d.createElement('meta'); appName.name='application-name'; d.head.appendChild(appName); }}
           appName.content = 'EXOS';
-          {"const savedUrl=window.parent.localStorage.getItem('exosParticipantSessionUrl');"
-           "if (!window.parent.location.search && savedUrl) {"
+          {"const savedUrl=root.localStorage.getItem('exosParticipantSessionUrl');"
+           "if (!root.location.search && savedUrl) {"
            "  const saved=new URL(savedUrl);"
-           "  if (saved.origin === window.parent.location.origin && saved.search) {"
-           "    window.parent.location.replace(saved.href);"
+           "  if (saved.origin === root.location.origin && saved.search) {"
+           "    root.location.replace(saved.href);"
            "  }"
            "}" if participant_pwa else ""}
-          if (!window.parent.sessionStorage.getItem('exosSplashSeen')) {{
-            window.parent.sessionStorage.setItem('exosSplashSeen', '1');
+          if (!root.sessionStorage.getItem('exosSplashSeen')) {{
+            root.sessionStorage.setItem('exosSplashSeen', '1');
             const splash=d.createElement('div');
             splash.id='exos-splash';
             splash.innerHTML='<div style="font:800 64px Eurostile,Arial;letter-spacing:.06em">E<span style="color:{EXOS_GOLD}">X</span>OS</div>'
@@ -280,7 +286,12 @@ def participant_install_experience() -> None:
           <div id="instructions"></div>
         </div>
         <script>
-          const host=window.parent;
+          const host=(() => {{
+            try {{
+              if (window.top && window.top.document) return window.top;
+            }} catch (error) {{}}
+            return window.parent;
+          }})();
           const current=host.location.href;
           if (host.location.search) {{
             host.localStorage.setItem('exosParticipantSessionUrl', current);
