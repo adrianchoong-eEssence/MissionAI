@@ -100,6 +100,13 @@ def apply_branding(*, dark: bool = False) -> None:
           input, textarea, select {{
             background:#FFFFFF !important; color:{EXOS_NAVY} !important;
           }}
+          [data-testid="stWidgetLabel"] p, .stTextInput label p {{
+            color:{EXOS_NAVY} !important;
+          }}
+          .stButton > button {{
+            background:{EXOS_NAVY}; border-color:{EXOS_NAVY}; color:#FFFFFF;
+          }}
+          .stButton > button p {{ color:#FFFFFF !important; }}
           #MainMenu, [data-testid="stStatusWidget"], footer {{visibility:hidden;}}
           [data-testid="stHeader"] {{background:transparent;}}
           [data-testid="stSidebar"] {{
