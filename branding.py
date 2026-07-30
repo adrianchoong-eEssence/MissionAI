@@ -94,6 +94,12 @@ def apply_branding(*, dark: bool = False) -> None:
           html, body, [class*="css"], .stApp, button, input, textarea, select {{
             font-family:Eurostile, "Arial Narrow", Arial, sans-serif;
           }}
+          html {{ color-scheme:light; }}
+          .stApp {{ background:#FFFFFF; color:{EXOS_NAVY}; }}
+          [data-testid="stSidebar"] {{ background:#FFFFFF; color:{EXOS_NAVY}; }}
+          input, textarea, select {{
+            background:#FFFFFF !important; color:{EXOS_NAVY} !important;
+          }}
           #MainMenu, [data-testid="stStatusWidget"], footer {{visibility:hidden;}}
           [data-testid="stHeader"] {{background:transparent;}}
           [data-testid="stSidebar"] {{
