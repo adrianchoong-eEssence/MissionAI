@@ -113,6 +113,9 @@ def apply_branding(*, dark: bool = False, participant_pwa: bool = False) -> None
           [data-testid="stWidgetLabel"] p, .stTextInput label p {{
             color:{EXOS_NAVY} !important;
           }}
+          [role="radiogroup"] label p {{
+            color:{EXOS_NAVY} !important;
+          }}
           .stButton > button {{
             background:{EXOS_NAVY}; border-color:{EXOS_NAVY}; color:#FFFFFF;
           }}

@@ -39,16 +39,42 @@ def make_qr_png(value):
     return output.getvalue()
 
 
+def mission_module_name(mission):
+    explicit = str((mission or {}).get("Module", "") or "").strip()
+    if explicit:
+        return explicit
+    mission_id = str((mission or {}).get("MissionID", "") or "").upper()
+    searchable = " ".join(
+        str((mission or {}).get(field, "") or "")
+        for field in ("TemplateID", "Title", "Category")
+    ).casefold()
+    if mission_id.startswith("S") or "sync" in searchable:
+        return "Sync AI"
+    if mission_id.startswith("C") or "catalyst" in searchable:
+        return "Catalyst Challenge"
+    if "road" in searchable or "hunt" in searchable:
+        return "Road Hunt"
+    if mission_id.startswith("M") or "mission ai" in searchable:
+        return "Mission AI"
+    return "Other"
+
+
 def _mission_editor(db, event_id, selected):
     mission_id = str(selected.get("MissionID", "")).strip().upper()
     form_key = f"event_mission_editor_{event_id}_{mission_id or 'new'}"
-    st.markdown(f"### {mission_id or 'New Mission'} Editor")
+    st.markdown(f"## {selected.get('Title', 'Mission Editor')}")
+    st.caption("Mission Editor")
+    if st.session_state.get("exos_administration_mode"):
+        st.caption(f"Mission code: {mission_id}")
     with st.form(form_key):
         st.markdown("#### Basic Details")
         col1, col2 = st.columns(2)
         with col1:
             title = st.text_input("Mission Name", value=str(selected.get("Title", "")))
-            code = st.text_input("Mission Code", value=mission_id)
+            if st.session_state.get("exos_administration_mode"):
+                code = st.text_input("Mission Code", value=mission_id)
+            else:
+                code = mission_id
             category = st.text_input("Mission Category", value=str(selected.get("Category", "Mission AI")))
             status = st.selectbox(
                 "Active / Inactive", ["ACTIVE", "INACTIVE"],
@@ -295,24 +321,66 @@ def render_event_mission_editor(db):
     module = st.selectbox("Module", ["Mission AI"], key="mission_studio_module")
     missions = [
         row for row in db.get_event_missions(event_id)
-        if str(row.get("Module", "Mission AI") or "Mission AI") == module
+        if mission_module_name(row).casefold() == module.casefold()
     ]
 
-    st.markdown("### Event Missions")
-    for row_index, mission in enumerate(missions):
-        cols = st.columns([1, 4, 1, 1])
-        cols[0].write(str(mission.get("MissionID", "")))
-        cols[1].write(str(mission.get("Title", "")))
-        cols[2].write(str(mission.get("Status", "")))
-        if cols[3].button(
-            "Open",
-            key=(
-                f"open_event_mission_{event_id}_"
-                f"{mission.get('MissionID')}_{row_index}"
-            ),
-        ):
-            st.session_state["mission_studio_selected_mission"] = str(mission.get("MissionID", ""))
+    selected_id = str(st.session_state.get("mission_studio_selected_mission", ""))
+    selected = next(
+        (row for row in missions if str(row.get("MissionID")) == selected_id),
+        None,
+    )
+    if selected_id and selected is None:
+        st.session_state.pop("mission_studio_selected_mission", None)
+
+    if selected:
+        if st.button("← Back to Missions", type="secondary"):
+            st.session_state.pop("mission_studio_selected_mission", None)
             st.rerun()
+        _mission_editor(db, event_id, selected)
+        action1, action2, action3 = st.columns(3)
+        new_status = "INACTIVE" if str(selected.get("Status", "")).upper() == "ACTIVE" else "ACTIVE"
+        if action1.button(f"Set {new_status.title()}", width="stretch"):
+            changed = dict(selected)
+            changed["Status"] = new_status
+            db.upsert_event_mission(changed)
+            st.rerun()
+        if action2.button("Duplicate", width="stretch"):
+            db.duplicate_event_mission(event_id, selected_id)
+            st.rerun()
+        confirmed = action3.checkbox("Confirm delete", key=f"confirm_delete_{event_id}_{selected_id}")
+        if action3.button("Delete", width="stretch", disabled=not confirmed):
+            db.delete_event_mission(event_id, selected_id)
+            st.session_state.pop("mission_studio_selected_mission", None)
+            st.rerun()
+        return
+
+    st.markdown("## Missions")
+    st.caption("Choose a mission to start authoring.")
+    if not missions:
+        st.info("No missions belong to this event and module yet.")
+    for row_index, mission in enumerate(missions):
+        with st.container(border=True):
+            title_col, action_col = st.columns([5, 1])
+            with title_col:
+                st.markdown(f"### {mission.get('Title', 'Untitled Mission')}")
+                status = str(mission.get("Status", "DRAFT") or "DRAFT").title()
+                category = str(mission.get("Category", "") or "").strip()
+                st.caption(" · ".join(item for item in (category, status) if item))
+                if st.session_state.get("exos_administration_mode"):
+                    st.caption(f"Mission code: {mission.get('MissionID', '')}")
+            with action_col:
+                if st.button(
+                    "Edit",
+                    key=(
+                        f"edit_event_mission_{event_id}_"
+                        f"{mission.get('MissionID')}_{row_index}"
+                    ),
+                    width="stretch",
+                ):
+                    st.session_state["mission_studio_selected_mission"] = str(
+                        mission.get("MissionID", "")
+                    )
+                    st.rerun()
 
     with st.expander("New Mission"):
         creation_mode = st.radio(
@@ -350,36 +418,6 @@ def render_event_mission_editor(db):
                     st.session_state["mission_studio_selected_mission"] = result["MissionID"]
                     st.rerun()
 
-    if missions:
-        order = st.multiselect(
-            "Mission Order (select all in desired order)",
-            [str(row.get("MissionID")) for row in missions],
-            default=[str(row.get("MissionID")) for row in missions],
-        )
-        if st.button("Save Mission Order") and len(order) == len(missions):
-            db.reorder_event_missions(event_id, order)
-            st.success("Event-specific mission order saved.")
-
-    selected_id = str(st.session_state.get("mission_studio_selected_mission", ""))
-    selected = next((row for row in missions if str(row.get("MissionID")) == selected_id), None)
-    if selected:
-        st.divider()
-        _mission_editor(db, event_id, selected)
-        action1, action2, action3 = st.columns(3)
-        new_status = "INACTIVE" if str(selected.get("Status", "")).upper() == "ACTIVE" else "ACTIVE"
-        if action1.button(f"Set {new_status.title()}", width="stretch"):
-            changed = dict(selected)
-            changed["Status"] = new_status
-            db.upsert_event_mission(changed)
-            st.rerun()
-        if action2.button("Duplicate", width="stretch"):
-            db.duplicate_event_mission(event_id, selected_id)
-            st.rerun()
-        confirmed = action3.checkbox("Confirm delete", key=f"confirm_delete_{event_id}_{selected_id}")
-        if action3.button("Delete", width="stretch", disabled=not confirmed):
-            db.delete_event_mission(event_id, selected_id)
-            st.session_state.pop("mission_studio_selected_mission", None)
-            st.rerun()
 
 
 def safe_int(value, default=0):

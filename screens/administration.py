@@ -14,6 +14,11 @@ def show_administration():
     st.title("Administration")
     st.caption("System information, data safety and recoverable archives.")
     st.info(f"Version: {APP_VERSION} · Build: {BUILD_TIMESTAMP}")
+    st.toggle(
+        "Administration mode",
+        key="exos_administration_mode",
+        help="Shows internal identifiers in authoring screens.",
+    )
     db = GoogleSheetsDB()
 
     st.subheader("Data Safety & Legacy Events")

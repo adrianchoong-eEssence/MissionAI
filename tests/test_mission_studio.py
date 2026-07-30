@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
+from screens.mission_setup import mission_module_name
 
 
 class FakeWorksheet:
@@ -329,6 +330,30 @@ class MissionStudioDataTests(unittest.TestCase):
         self.assertEqual(captured[0]["Clue"], "Existing clue")
         self.assertEqual(captured[0]["MainQuestion"], "Existing question")
         self.assertEqual(captured[0]["CreditValue"], 75)
+
+    def test_mission_module_filter_prefers_explicit_module(self):
+        self.assertEqual(
+            mission_module_name({
+                "MissionID": "M01",
+                "Module": "Sync AI",
+                "Title": "Explicit module wins",
+            }),
+            "Sync AI",
+        )
+
+    def test_mission_module_filter_excludes_legacy_non_mission_ai_records(self):
+        self.assertEqual(
+            mission_module_name({"MissionID": "S01", "Title": "SYNC performance"}),
+            "Sync AI",
+        )
+        self.assertEqual(
+            mission_module_name({"MissionID": "C01", "Title": "Catalyst"}),
+            "Catalyst Challenge",
+        )
+        self.assertEqual(
+            mission_module_name({"MissionID": "M04", "Title": "Elevate"}),
+            "Mission AI",
+        )
 
 
 if __name__ == "__main__":
