@@ -204,7 +204,7 @@ def show_control_centre():
         <style>
         .control-hero {padding:24px;border-radius:22px;
           background:#082D58;
-          border:1px solid rgba(181,154,55,.38);margin-bottom:18px}
+          border:1px solid rgba(181,154,55,.38);margin-bottom:18px;color:#FFFFFF}
         .control-kicker {color:#B59A37;font-size:.78rem;font-weight:800;
           letter-spacing:.14em;text-transform:uppercase}
         .control-title {font-size:clamp(2.1rem,4vw,4rem);font-weight:900;

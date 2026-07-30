@@ -149,6 +149,7 @@ def apply_branding(*, dark: bool = False) -> None:
             border:1px solid rgba(8,45,88,.12); border-radius:14px;
             padding:1rem 1.15rem; background:#FFFFFF;
           }}
+          [data-testid="stMetric"] * {{color:{EXOS_NAVY} !important;}}
           [data-testid="stVerticalBlockBorderWrapper"] {{
             border-color:rgba(8,45,88,.14) !important; border-radius:16px !important;
           }}
