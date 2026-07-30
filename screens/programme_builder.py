@@ -479,7 +479,9 @@ def _new_activity(module_name, day, name, order):
         "DisplayMode": "Collaboration",
         "ParticipantMessage": "",
         "FacilitatorInstruction": encode_activity_details({
-            "FacilitatorInstructions": "", "Questions": "", "Credits": 0, "Rules": "",
+            "FacilitatorInstructions": "", "Questions": "", "Credits": 0,
+            "Rules": "", "Objectives": "", "Scoring": "",
+            "EvidenceRequired": False, "ModuleDetails": {},
         }),
         "IsActive": "Yes",
     }
@@ -496,14 +498,31 @@ def render_programme_first_builder(db):
     modules = build_programme_hierarchy(db.get_programme_stages(event_id))
     st.caption("Arrange the programme like slides. Open a module to edit everything inside it.")
 
-    add_left, add_right, add_defaults = st.columns([2, 1, 1])
+    selected_module_labels = [
+        f"{position}. {module['ModuleName']}"
+        for position, module in enumerate(modules, start=1)
+    ]
+    add_left, position_col, selected_col = st.columns([2, 1, 2])
     module_choice = add_left.selectbox(
         "Add module",
         [f"DAY {day} — {name}" for day, name, _ in DEFAULT_MODULES] + ["Custom module"],
         label_visibility="collapsed",
         key=f"add_module_choice_{event_id}",
     )
-    if add_right.button("＋ Add Module", type="primary", width="stretch"):
+    insert_position = position_col.selectbox(
+        "Insert Position",
+        ["At the beginning", "Before selected module", "After selected module", "At the end"],
+        index=2,
+        key=f"insert_position_{event_id}",
+    )
+    selected_insert_module = selected_col.selectbox(
+        "Selected module",
+        selected_module_labels or ["No modules yet"],
+        disabled=not modules,
+        key=f"insert_selected_module_{event_id}",
+    )
+    add_button_col, defaults_col = st.columns([1, 1])
+    if add_button_col.button("＋ Add Module", type="primary", width="stretch"):
         if module_choice == "Custom module":
             day, name, activities = 1, "New Module", ["New Activity"]
         else:
@@ -520,10 +539,22 @@ def render_programme_first_builder(db):
                 for position, activity in enumerate(activities, start=1)
             ],
         }
-        modules.append(module)
+        if not modules or insert_position == "At the end":
+            insert_at = len(modules)
+        elif insert_position == "At the beginning":
+            insert_at = 0
+        else:
+            selected_index = selected_module_labels.index(selected_insert_module)
+            insert_at = selected_index + (
+                1 if insert_position == "After selected module" else 0
+            )
+        modules.insert(insert_at, module)
         _save_modules(db, event_id, modules)
+        st.session_state[f"programme_notice_{event_id}"] = (
+            f"{name} added at position {insert_at + 1}"
+        )
         st.rerun()
-    if add_defaults.button("Add Default Programme", width="stretch"):
+    if defaults_col.button("Add Default Programme", width="stretch"):
         existing_names = {module["ModuleName"].casefold() for module in modules}
         for default_day, default_name, default_activities in DEFAULT_MODULES:
             if default_name.casefold() in existing_names:
@@ -538,7 +569,11 @@ def render_programme_first_builder(db):
                 ],
             })
         _save_modules(db, event_id, modules)
+        st.session_state[f"programme_notice_{event_id}"] = "Default programme added"
         st.rerun()
+    notice = st.session_state.pop(f"programme_notice_{event_id}", "")
+    if notice:
+        st.success(notice)
 
     if not modules:
         st.info("Start by adding the first module.")
@@ -581,8 +616,21 @@ def render_programme_first_builder(db):
                 """,
                 unsafe_allow_html=True,
             )
-            edit_col, up_col, down_col, remove_col = st.columns([3, 1, 1, 1])
-            edit_col.caption("Edit and expand the complete module agenda below.")
+            move_to_col, move_action_col, up_col, down_col, remove_col = st.columns([2, 1, 1, 1, 1])
+            move_target = move_to_col.selectbox(
+                "Move To Position",
+                list(range(1, len(modules) + 1)),
+                index=index,
+                key=f"module_move_target_{event_id}_{index}",
+            )
+            if move_action_col.button("Move", key=f"module_move_direct_{event_id}_{index}"):
+                moved = modules.pop(index)
+                modules.insert(int(move_target) - 1, moved)
+                _save_modules(db, event_id, modules)
+                st.session_state[f"programme_notice_{event_id}"] = (
+                    f"{moved['ModuleName']} moved to position {move_target}"
+                )
+                st.rerun()
             if up_col.button("↑ Move", disabled=index == 0, key=f"mod_up_{event_id}_{index}"):
                 modules[index - 1], modules[index] = modules[index], modules[index - 1]
                 _save_modules(db, event_id, modules)
@@ -607,6 +655,9 @@ def render_programme_first_builder(db):
                 if activity_added:
                     st.success("Activity added successfully")
                     st.session_state.pop(notice_key, None)
+                first_activity = module["Activities"][0]
+                first_details = activity_details(first_activity)
+                module_details = first_details.get("ModuleDetails", {})
                 name_col, day_col, start_col = st.columns([3, 1, 1])
                 edited_name = name_col.text_input(
                     "Module name", value=module["ModuleName"],
@@ -620,16 +671,85 @@ def render_programme_first_builder(db):
                     "Start", value=str(module.get("StartTime", "")),
                     key=f"module_start_{event_id}_{index}",
                 )
-                if st.button("Save Module", type="primary", key=f"mod_save_{event_id}_{index}"):
+                duration_col, active_col = st.columns([1, 1])
+                edited_duration = duration_col.number_input(
+                    "Duration", min_value=1,
+                    value=int(module.get("DurationMinutes", 15) or 15),
+                    key=f"module_duration_{event_id}_{index}",
+                )
+                module_active = active_col.checkbox(
+                    "Active",
+                    value=str(first_activity.get("IsActive", "Yes")).casefold() != "no",
+                    key=f"module_active_{event_id}_{index}",
+                )
+                module_participant = st.text_area(
+                    "Participant instructions",
+                    value=str(module_details.get(
+                        "ParticipantInstructions",
+                        first_activity.get("ParticipantMessage", ""),
+                    )),
+                    key=f"module_participant_{event_id}_{index}",
+                )
+                module_facilitator = st.text_area(
+                    "Facilitator instructions",
+                    value=str(module_details.get(
+                        "FacilitatorInstructions",
+                        first_details["FacilitatorInstructions"],
+                    )),
+                    key=f"module_facilitator_{event_id}_{index}",
+                )
+                module_rules = st.text_area(
+                    "Rules", value=str(module_details.get("Rules", "")),
+                    key=f"module_rules_{event_id}_{index}",
+                )
+                module_objectives = st.text_area(
+                    "Objectives", value=str(module_details.get("Objectives", "")),
+                    key=f"module_objectives_{event_id}_{index}",
+                )
+                credits_col, scoring_col = st.columns([1, 3])
+                module_credits = credits_col.number_input(
+                    "Credits", min_value=0,
+                    value=int(module_details.get("Credits", 0) or 0),
+                    key=f"module_credits_{event_id}_{index}",
+                )
+                module_scoring = scoring_col.text_area(
+                    "Scoring", value=str(module_details.get("Scoring", "")),
+                    key=f"module_scoring_{event_id}_{index}",
+                )
+                save_module_col, cancel_module_col = st.columns([3, 1])
+                if save_module_col.button("Save Module", type="primary", key=f"mod_save_{event_id}_{index}"):
                     module["ModuleName"] = edited_name.strip() or "Untitled Module"
                     module["Day"] = int(edited_day)
+                    remaining_minutes = sum(
+                        int(float(row.get("DurationMinutes", 0) or 0))
+                        for row in module["Activities"][1:]
+                    )
                     for activity_position, activity in enumerate(module["Activities"]):
                         if activity_position == 0:
                             activity["StartTime"] = edited_start
+                            activity["DurationMinutes"] = max(
+                                int(edited_duration) - remaining_minutes, 1
+                            )
                         activity["StageType"] = encode_module_stage_type(
                             module["ModuleName"], module["Day"], friendly_type(activity)
                         )
+                        activity["IsActive"] = "Yes" if module_active else "No"
+                    first_activity["ParticipantMessage"] = module_participant
+                    first_activity["FacilitatorInstruction"] = encode_activity_details({
+                        **first_details,
+                        "ModuleDetails": {
+                            "ParticipantInstructions": module_participant,
+                            "FacilitatorInstructions": module_facilitator,
+                            "Rules": module_rules,
+                            "Objectives": module_objectives,
+                            "Credits": int(module_credits),
+                            "Scoring": module_scoring,
+                        },
+                    })
                     _save_modules(db, event_id, modules)
+                    st.session_state[f"programme_notice_{event_id}"] = "Module saved"
+                    st.rerun()
+                if cancel_module_col.button("Cancel", key=f"mod_cancel_{event_id}_{index}"):
                     st.rerun()
                 st.markdown("#### Activities")
                 rows = [{
@@ -732,7 +852,34 @@ def render_programme_first_builder(db):
                 selected_activity = module["Activities"][selected_position]
                 details = activity_details(selected_activity)
                 with st.container(border=True):
-                    st.markdown(f"##### {selected_activity.get('StageName', 'Activity')}")
+                    activity_name_col, activity_start_col, activity_duration_col = st.columns([3, 1, 1])
+                    activity_name = activity_name_col.text_input(
+                        "Activity name",
+                        value=str(selected_activity.get("StageName", "")),
+                        key=f"activity_name_{event_id}_{index}_{selected_position}",
+                    )
+                    activity_start = activity_start_col.text_input(
+                        "Start time",
+                        value=str(selected_activity.get("StartTime", "")),
+                        key=f"activity_start_{event_id}_{index}_{selected_position}",
+                    )
+                    activity_duration = activity_duration_col.number_input(
+                        "Duration",
+                        min_value=1,
+                        value=max(int(float(selected_activity.get("DurationMinutes", 15) or 15)), 1),
+                        key=f"activity_duration_{event_id}_{index}_{selected_position}",
+                    )
+                    active_activity, evidence_required = st.columns(2)
+                    activity_active = active_activity.checkbox(
+                        "Active",
+                        value=str(selected_activity.get("IsActive", "Yes")).casefold() != "no",
+                        key=f"activity_active_{event_id}_{index}_{selected_position}",
+                    )
+                    activity_evidence = evidence_required.checkbox(
+                        "Evidence required",
+                        value=details["EvidenceRequired"],
+                        key=f"activity_evidence_{event_id}_{index}_{selected_position}",
+                    )
                     participant_instructions = st.text_area(
                         "Participant instructions",
                         value=str(selected_activity.get("ParticipantMessage", "")),
@@ -755,20 +902,47 @@ def render_programme_first_builder(db):
                         "Credits", min_value=0, value=details["Credits"],
                         key=f"credits_{event_id}_{index}_{selected_position}",
                     )
+                    activity_move_col, activity_move_action = st.columns([3, 1])
+                    activity_target = activity_move_col.selectbox(
+                        "Move To Position",
+                        list(range(1, len(module["Activities"]) + 1)),
+                        index=selected_position,
+                        key=f"activity_move_target_{event_id}_{index}_{selected_position}",
+                    )
+                    if activity_move_action.button(
+                        "Move Activity",
+                        key=f"activity_move_{event_id}_{index}_{selected_position}",
+                    ):
+                        moved_activity = module["Activities"].pop(selected_position)
+                        module["Activities"].insert(int(activity_target) - 1, moved_activity)
+                        _save_modules(db, event_id, modules)
+                        st.session_state[f"programme_notice_{event_id}"] = (
+                            f"{moved_activity.get('StageName', 'Activity')} moved"
+                        )
+                        st.rerun()
                     save_activity, delete_activity = st.columns([3, 1])
                     if save_activity.button(
                         "Save Activity", type="primary",
                         key=f"save_activity_details_{event_id}_{index}_{selected_position}",
                     ):
+                        selected_activity["StageName"] = activity_name.strip() or "Untitled Activity"
+                        selected_activity["StartTime"] = activity_start
+                        selected_activity["DurationMinutes"] = int(activity_duration)
+                        selected_activity["IsActive"] = "Yes" if activity_active else "No"
                         selected_activity["ParticipantMessage"] = participant_instructions
                         selected_activity["FacilitatorInstruction"] = encode_activity_details({
                             "FacilitatorInstructions": facilitator_instructions,
                             "Questions": questions,
                             "Credits": int(credits),
                             "Rules": rules,
+                            "Objectives": details["Objectives"],
+                            "Scoring": details["Scoring"],
+                            "EvidenceRequired": activity_evidence,
+                            "ModuleDetails": details["ModuleDetails"],
                         })
                         _save_modules(db, event_id, modules)
-                        st.success("Activity saved.")
+                        st.session_state[f"programme_notice_{event_id}"] = "Activity saved"
+                        st.rerun()
                     if delete_activity.button(
                         "Delete Activity",
                         key=f"delete_activity_{event_id}_{index}_{selected_position}",

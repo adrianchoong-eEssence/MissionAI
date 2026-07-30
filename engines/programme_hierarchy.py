@@ -54,6 +54,10 @@ def activity_details(stage):
             "Questions": "",
             "Credits": 0,
             "Rules": "",
+            "Objectives": "",
+            "Scoring": "",
+            "EvidenceRequired": False,
+            "ModuleDetails": {},
         }
     import json
     try:
@@ -65,6 +69,14 @@ def activity_details(stage):
         "Questions": str(value.get("Questions", "")),
         "Credits": int(value.get("Credits", 0) or 0),
         "Rules": str(value.get("Rules", "")),
+        "Objectives": str(value.get("Objectives", "")),
+        "Scoring": str(value.get("Scoring", "")),
+        "EvidenceRequired": bool(value.get("EvidenceRequired", False)),
+        "ModuleDetails": (
+            value.get("ModuleDetails", {})
+            if isinstance(value.get("ModuleDetails", {}), dict)
+            else {}
+        ),
     }
 
 
