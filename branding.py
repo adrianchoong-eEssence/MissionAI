@@ -83,11 +83,7 @@ def apply_branding(*, dark: bool = False, participant_pwa: bool = False) -> None
     manifest_uri = "data:application/manifest+json;base64," + base64.b64encode(
         json.dumps(manifest).encode()
     ).decode()
-    manifest_href = (
-        "/app/static/exos-participant.webmanifest"
-        if participant_pwa
-        else manifest_uri
-    )
+    manifest_href = manifest_uri
     favicon = _data_uri(ASSETS / "exos-favicon-32.png")
 
     st.markdown(
@@ -206,7 +202,11 @@ def apply_branding(*, dark: bool = False, participant_pwa: bool = False) -> None
           icon.href = {json.dumps(favicon)};
           let manifest = d.querySelector("link[rel='manifest']");
           if (!manifest) {{ manifest=d.createElement('link'); manifest.rel='manifest'; d.head.appendChild(manifest); }}
-          manifest.href = {json.dumps(manifest_href)};
+          manifest.href = {
+              "new URL('app/static/exos-participant.webmanifest', window.parent.location.href).href"
+              if participant_pwa
+              else json.dumps(manifest_href)
+          };
           let apple = d.querySelector("meta[name='apple-mobile-web-app-title']");
           if (!apple) {{ apple=d.createElement('meta'); apple.name='apple-mobile-web-app-title'; d.head.appendChild(apple); }}
           apple.content = 'EXOS';
