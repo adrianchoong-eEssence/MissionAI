@@ -340,6 +340,82 @@ AIA_CUSTOMER_CONTACT_STAGES = [
 ]
 
 
+def _programme_stage(
+    number, start, minutes, name, stage_type, mission_id="",
+    display="Collaboration", participant="", facilitator="",
+):
+    return {
+        "StageNo": number,
+        "StartTime": start,
+        "DurationMinutes": minutes,
+        "StageName": name,
+        "StageType": stage_type,
+        "MissionID": mission_id,
+        "DisplayMode": display,
+        "ParticipantMessage": participant or name,
+        "FacilitatorInstruction": facilitator or f"Facilitate {name}.",
+        "IsActive": "Yes",
+    }
+
+
+# Concrete Programme → Module → Activity migration target for EVT-0004.
+# Mission and submission identifiers are deliberately unchanged.
+_AIA_HIERARCHY_ROWS = [
+    ("08:45", 15, "Arrival & Registration", "Registration", "", "Registration"),
+    ("09:00", 10, "Energiser", "TeamDiscovery", "", "Collaboration"),
+    ("09:10", 10, "Launch EXOS", "Briefing", "", "Collaboration"),
+    ("09:20", 40, "Bridge of Trust", "Activity", "", "Collaboration"),
+    ("10:00", 5, "Mission AI Briefing", "MissionBriefing", "", "Current Mission"),
+    ("10:05", 5, "Mission Board Opens", "Briefing", "", "Current Mission"),
+    ("10:10", 10, "Signal in the Noise", "MissionActive", "M01", "Current Mission"),
+    ("10:20", 10, "Human × AI Decision Lab", "MissionActive", "M02", "Current Mission"),
+    ("10:30", 15, "Friction Safari", "MissionActive", "M03", "Current Mission"),
+    ("10:45", 15, "Elevate the Moment", "MissionActive", "M04", "Current Mission"),
+    ("11:00", 5, "Submission Review", "Judging", "M04", "Leaderboard"),
+    ("11:05", 5, "Credit Release", "Activity", "M04", "Credit Leaderboard"),
+    ("11:10", 15, "Mission AI Debrief", "Debrief", "M04", "Credit Leaderboard"),
+    ("12:30", 60, "Lunch", "Break", "", "Collaboration"),
+    ("13:30", 10, "Sync AI Briefing", "Briefing", "", "Credit Leaderboard"),
+    ("13:40", 20, "Innovation Market", "Marketplace", "", "Credit Leaderboard"),
+    ("14:00", 15, "Team Planning", "Preparation", "S01", "Current Mission"),
+    ("14:15", 25, "AI Creation", "Preparation", "S01", "Current Mission"),
+    ("14:40", 30, "Rehearsal", "Preparation", "S01", "Current Mission"),
+    ("15:10", 60, "Performance", "Performance", "S02", "Leaderboard"),
+    ("16:10", 20, "Judging", "Judging", "S02", "Leaderboard"),
+    ("16:30", 15, "Day 1 Celebration & Closing", "Closing", "", "Winner"),
+    ("09:00", 10, "Catalyst Briefing", "Briefing", "C01", "Current Mission"),
+    ("09:10", 70, "Catalyst Build", "Preparation", "C01", "Current Mission"),
+    ("10:20", 30, "Catalyst Run", "Performance", "C01", "Current Mission"),
+    ("10:50", 10, "Catalyst Debrief", "Debrief", "C01", "Collaboration"),
+    ("11:00", 60, "Debrief & Action Plan", "Debrief", "C01", "Collaboration"),
+    ("12:00", 15, "Programme Closing", "Closing", "", "Winner"),
+]
+AIA_CUSTOMER_CONTACT_STAGES = [
+    _programme_stage(index, *row)
+    for index, row in enumerate(_AIA_HIERARCHY_ROWS, start=1)
+]
+
+
+def migrate_evt0004_programme_hierarchy(db):
+    """Execute the non-destructive EVT-0004 stage migration.
+
+    Missions, submissions, scores and wallets live in separate stores and are
+    not replaced. Only the event-owned running order is migrated.
+    """
+    event_id = "EVT-0004"
+    if not db.get_event(event_id):
+        raise ValueError("EVT-0004 was not found.")
+    previous = [dict(row) for row in db.get_programme_stages(event_id)]
+    db.save_programme_stages(event_id, AIA_CUSTOMER_CONTACT_STAGES)
+    db.set_event_stage(event_id, AIA_CUSTOMER_CONTACT_STAGES[0])
+    return {
+        "EventID": event_id,
+        "PreviousStages": len(previous),
+        "MigratedStages": len(AIA_CUSTOMER_CONTACT_STAGES),
+        "MissionsPreserved": len(db.get_event_missions(event_id, include_closed=True)),
+    }
+
+
 def install_aia_customer_contact_pack(db, event_id):
     """Install the complete pack into an empty event and publish its runtime."""
     clean_event_id = str(event_id).strip()

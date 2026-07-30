@@ -3,6 +3,7 @@ from streamlit_autorefresh import st_autorefresh
 
 from data.google_sheets import GoogleSheetsDB
 from data.runtime_database import RuntimeDatabaseError
+from engines.programme_hierarchy import current_module_activity, friendly_type
 from engines.stage_timer import remaining_seconds
 from screens.app_state import select_active_event
 
@@ -467,6 +468,9 @@ def show_leaderboard_display():
         ),
         stages[0] if stages else {},
     )
+    current_module, current_activity = current_module_activity(
+        stages, current_stage.get("StageNo", "")
+    )
     requested_mode = str(
         current_stage.get("DisplayMode", "")
         or state.get("DisplayMode", "")
@@ -516,6 +520,20 @@ def show_leaderboard_display():
             wallet_status = {}
 
     display_header(event, mode)
+    if current_module:
+        st.markdown(
+            f"""
+            <div style="text-align:center;margin:8px 0 18px;">
+              <div style="font-size:clamp(30px,5vw,64px);font-weight:900;">
+                {current_module.get('ModuleName', '')}
+              </div>
+              <div style="font-size:clamp(18px,2.4vw,30px);opacity:.82;">
+                {current_activity.get('StageName', '')} · {friendly_type(current_activity)}
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     if current_stage:
         timer = db.get_stage_timer(
             event_id,

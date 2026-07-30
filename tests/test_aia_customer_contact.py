@@ -76,7 +76,7 @@ class AIACustomerContactPackTests(unittest.TestCase):
         self.assertEqual(result["Missions"], len(AIA_CUSTOMER_CONTACT_MISSION_PLAN))
         self.assertEqual(result["Stages"], len(AIA_CUSTOMER_CONTACT_STAGES))
         self.assertEqual(result["MarketplaceItems"], len(AIA_CUSTOMER_CONTACT_MARKETPLACE))
-        self.assertEqual(db.current_stage["StageName"], "Registration")
+        self.assertEqual(db.current_stage["StageName"], "Arrival & Registration")
 
     def test_installer_refuses_to_replace_live_participants(self):
         db = FakeDatabase(players=[{"Name": "Adrian"}])

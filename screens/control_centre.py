@@ -5,6 +5,11 @@ from streamlit_autorefresh import st_autorefresh
 
 from data.google_sheets import GoogleSheetsDB
 from engines.stage_timer import remaining_seconds
+from engines.programme_hierarchy import (
+    build_programme_hierarchy,
+    current_module_activity,
+    friendly_type,
+)
 from screens.app_state import select_active_event
 from screens.live_event_console import (
     calculate_leaderboard,
@@ -222,6 +227,17 @@ def show_control_centre():
     state = db.get_event_state(event_id)
     index = _current_index(stages, state)
     stage = stages[index]
+    current_module, current_activity = current_module_activity(
+        stages, stage.get("StageNo", "")
+    )
+    programme_modules = build_programme_hierarchy(stages)
+    module_index = next(
+        (
+            position for position, module in enumerate(programme_modules)
+            if module.get("ModuleID") == current_module.get("ModuleID")
+        ),
+        0,
+    )
     metadata = db.event_metadata(db.get_event(event_id))
     stage_status = str(metadata.get("CurrentStageStatus", "READY"))
 
@@ -229,8 +245,9 @@ def show_control_centre():
         f"""
         <div class="control-hero">
           <div class="control-kicker">{html.escape(str(event.get("EventName", "")))}</div>
-          <div class="control-title">{html.escape(str(stage.get("StageName", "")))}</div>
-          <div>Stage {index + 1} of {len(stages)} · {html.escape(stage_status)}</div>
+          <div class="control-title">{html.escape(str(current_module.get("ModuleName", "")))}</div>
+          <div style="font-size:1.25rem">Current activity: {html.escape(str(current_activity.get("StageName", "")))}</div>
+          <div>{html.escape(friendly_type(current_activity))} · Activity {index + 1} of {len(stages)} · {html.escape(stage_status)}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -245,15 +262,15 @@ def show_control_centre():
         "Following current stage",
     )
 
-    previous, launch, next_col = st.columns([1, 2, 1])
+    previous, launch, next_col, end_module, next_module = st.columns([1, 2, 1, 1, 1])
     if previous.button(
-        "Previous Stage",
+        "Previous Activity",
         width="stretch",
         disabled=index == 0,
     ):
         _set_stage(db, event_id, stages[index - 1])
     if launch.button(
-        "Start Current Stage",
+        "Start Current Activity",
         type="primary",
         width="stretch",
     ):
@@ -267,11 +284,30 @@ def show_control_centre():
         db.update_event_metadata(event_id, {"CurrentStageStatus": "RUNNING"})
         st.rerun()
     if next_col.button(
-        "Next Stage",
+        "Next Activity",
         width="stretch",
         disabled=index >= len(stages) - 1,
     ):
         _set_stage(db, event_id, stages[index + 1])
+    if end_module.button(
+        "End Module",
+        width="stretch",
+    ):
+        db.update_stage_timer(
+            event_id,
+            stage.get("StageNo", ""),
+            "END",
+            stage.get("DurationMinutes", 0),
+        )
+        db.update_event_metadata(event_id, {"CurrentStageStatus": "ENDED"})
+        st.rerun()
+    if next_module.button(
+        "Next Module",
+        width="stretch",
+        disabled=module_index >= len(programme_modules) - 1,
+    ):
+        following = programme_modules[module_index + 1]["Activities"][0]
+        _set_stage(db, event_id, following)
 
     timer_col, broadcast_col = st.columns([1, 2])
     with timer_col:

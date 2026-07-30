@@ -10,6 +10,7 @@ from data.google_drive import get_photo_url, upload_photo
 from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+from engines.programme_hierarchy import current_module_activity, friendly_type
 
 
 COUNTRY_LANGUAGE_PROMPTS = {
@@ -1285,6 +1286,21 @@ def show_participant():
         "participant_runtime_state",
         {},
     )
+    hierarchy_module = {}
+    hierarchy_activity = {}
+    try:
+        hierarchy_module, hierarchy_activity = current_module_activity(
+            db.get_programme_stages(st.session_state["participant_event_id"]),
+            live_runtime_state.get("CurrentStageNo", ""),
+        )
+    except Exception:
+        hierarchy_module, hierarchy_activity = {}, {}
+    if hierarchy_module:
+        st.caption(
+            f"Current Module: {hierarchy_module.get('ModuleName', '')}  ·  "
+            f"Current Activity: {hierarchy_activity.get('StageName', '')}  ·  "
+            f"{friendly_type(hierarchy_activity)}"
+        )
 
     if road_hunt_active:
         mission = road_hunt_mission
