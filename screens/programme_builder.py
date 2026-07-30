@@ -420,6 +420,29 @@ def _save_modules(db, event_id, modules):
     db.save_programme_stages(event_id, flatten_programme_hierarchy(modules))
 
 
+def _add_activity(db, event_id, modules, module, name, minutes):
+    """Append and persist one activity through the existing stage storage."""
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise ValueError("Activity Name is required.")
+    for existing in module["Activities"]:
+        existing["StageType"] = encode_module_stage_type(
+            module["ModuleName"],
+            module["Day"],
+            friendly_type(existing),
+        )
+    activity = _new_activity(
+        module["ModuleName"],
+        module["Day"],
+        clean_name,
+        len(module["Activities"]) + 1,
+    )
+    activity["DurationMinutes"] = int(minutes)
+    module["Activities"].append(activity)
+    _save_modules(db, event_id, modules)
+    return activity
+
+
 DEFAULT_MODULES = [
     (1, "Arrival & Registration", ["Arrival & Registration"]),
     (1, "Energiser", ["Energiser"]),
@@ -573,7 +596,17 @@ def render_programme_first_builder(db):
                 _save_modules(db, event_id, modules)
                 st.rerun()
 
-            with st.expander("Edit · Expand module", expanded=False):
+            notice_key = f"activity_added_notice_{event_id}"
+            activity_added = (
+                st.session_state.get(notice_key) == module["ModuleName"]
+            )
+            with st.expander(
+                "Edit · Expand module",
+                expanded=activity_added,
+            ):
+                if activity_added:
+                    st.success("Activity added successfully")
+                    st.session_state.pop(notice_key, None)
                 name_col, day_col, start_col = st.columns([3, 1, 1])
                 edited_name = name_col.text_input(
                     "Module name", value=module["ModuleName"],
@@ -650,26 +683,42 @@ def render_programme_first_builder(db):
                     st.success("Internal flow saved to this event copy.")
                     st.rerun()
 
-                add_name, add_minutes, add_button = st.columns([3, 1, 1])
-                new_name = add_name.text_input(
-                    "New activity", placeholder="Activity name",
-                    key=f"new_activity_name_{event_id}_{index}",
-                )
-                new_minutes = add_minutes.number_input(
-                    "Minutes", min_value=1, value=15,
-                    key=f"new_activity_minutes_{event_id}_{index}",
-                )
-                if add_button.button("＋ Add Activity", key=f"add_activity_{event_id}_{index}"):
-                    if not new_name.strip():
-                        st.warning("Enter an activity name.")
-                    else:
-                        activity = _new_activity(
-                            module["ModuleName"], module["Day"], new_name.strip(), 1
-                        )
-                        activity["DurationMinutes"] = int(new_minutes)
-                        module["Activities"].append(activity)
-                        _save_modules(db, event_id, modules)
-                        st.rerun()
+                with st.form(
+                    f"add_activity_form_{event_id}_{module['ModuleID']}",
+                    clear_on_submit=True,
+                    border=True,
+                ):
+                    add_name, add_minutes = st.columns([3, 1])
+                    new_name = add_name.text_input(
+                        "Activity Name",
+                        placeholder="Enter activity name",
+                    )
+                    new_minutes = add_minutes.number_input(
+                        "Minutes",
+                        min_value=1,
+                        value=15,
+                    )
+                    add_submitted = st.form_submit_button(
+                        "＋ Add Activity",
+                        type="primary",
+                        width="stretch",
+                    )
+                    if add_submitted:
+                        if not new_name.strip():
+                            st.error(
+                                "Activity Name is required. Enter a name before adding."
+                            )
+                        else:
+                            _add_activity(
+                                db,
+                                event_id,
+                                modules,
+                                module,
+                                new_name,
+                                new_minutes,
+                            )
+                            st.session_state[notice_key] = module["ModuleName"]
+                            st.rerun()
 
                 activity_names = [
                     f"{position}. {item.get('StageName', 'Activity')}"
