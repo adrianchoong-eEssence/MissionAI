@@ -34,7 +34,7 @@ from engines.programme_hierarchy import (
 )
 from engines.recommendation_engine import RecommendationEngine
 from engines.transformation_engine import TransformationEngine
-from screens.app_state import select_active_event
+from screens.app_state import request_navigation, select_active_event
 
 
 def get_activity_name(activity):
@@ -958,6 +958,16 @@ def render_programme_first_builder(db):
                 elif module["ModuleName"].casefold() == "catalyst challenge":
                     st.divider()
                     render_catalyst_editor(db, event_id)
+                elif module["ModuleName"].casefold() == "mission ai":
+                    st.divider()
+                    if st.button(
+                        "Edit Missions",
+                        key=f"edit_missions_{event_id}_{index}",
+                        width="stretch",
+                    ):
+                        st.session_state["mission_studio_event_filter"] = event_id
+                        st.session_state["mission_studio_module"] = "Mission AI"
+                        request_navigation("Mission Studio")
 
 
 def render_filtered_mission_library(db):

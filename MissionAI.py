@@ -8,6 +8,7 @@ from screens.control_centre import show_control_centre
 from screens.create_event import show_create_event
 from screens.events_home import show_events_home
 from screens.leaderboard_display import show_leaderboard_display
+from screens.mission_setup import show_mission_setup
 from screens.programme_builder import show_programme_builder
 
 
@@ -17,6 +18,7 @@ apply_branding()
 PAGES = [
     "Events",
     "Create Event",
+    "Mission Studio",
     "Programme Builder",
     "Control Centre",
     "Projector",
@@ -50,6 +52,8 @@ if page == "Events":
     show_events_home()
 elif page == "Create Event":
     show_create_event()
+elif page == "Mission Studio":
+    show_mission_setup()
 elif page == "Programme Builder":
     show_programme_builder()
 elif page == "Control Centre":

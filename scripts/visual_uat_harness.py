@@ -8,11 +8,13 @@ import screens.create_event as create_event
 import screens.events_home as events_home
 import screens.leaderboard_display as leaderboard_display
 import screens.live_event_console as live_event_console
+import screens.mission_setup as mission_setup
+import screens.participant as participant
 import screens.programme_builder as programme_builder
 
 
 EVENT = {
-    "EventID": "EVT-UAT-01",
+    "EventID": "EVT-0004",
     "Client": "AIA Malaysia",
     "Department": "Customer Experience",
     "EventName": "Weekend Leadership Experience",
@@ -66,19 +68,48 @@ STAGES = [
 
 MISSIONS = [
     {
-        "EventID": "EVT-UAT-01",
+        "EventID": "EVT-0004",
         "MissionID": "M01",
         "TemplateID": "MT-0001",
         "Title": "Bridge of Trust",
-        "ParticipantInstructions": "Complete the trust challenge.",
+        "Module": "Mission AI",
+        "Category": "Customer Experience",
+        "Story": "A customer signal is hidden in the noise. Work together to uncover what matters.",
+        "Clue": "Listen beneath the words.",
+        "MainQuestion": "What outcome would restore the customer's confidence?",
+        "Answer": "Clear ownership and an immediate next step",
+        "ParticipantInstructions": "Identify the customer need and submit one concise response.",
         "FacilitatorInstructions": "Score each team.",
         "SubmissionType": "TEXT",
+        "EvidenceRequired": "Yes",
+        "EvidenceInstructions": "Submit one team response.",
         "ScoringRule": "Manual score",
         "Points": 100,
+        "CreditValue": 100,
+        "MaximumCredits": 100,
+        "TimeLimitMinutes": 10,
+        "CountdownEnabled": "Yes",
+        "AIRequired": "Yes",
+        "AIHelpEnabled": "Yes",
+        "AIPrompt": "Help the team identify the underlying customer need without giving the answer.",
+        "AIRole": "Customer insight coach",
+        "Hint1": "Separate facts from feelings.",
+        "Hint2": "Look for repeated customer effort.",
+        "Hint3": "Define one immediate ownership action.",
+        "CheckpointName": "Customer Signal Station",
+        "LocationDescription": "Main ballroom, checkpoint one.",
+        "Latitude": 3.1390,
+        "Longitude": 101.6869,
+        "GeofenceRadius": 50,
+        "GPSRequired": "Yes",
+        "QRRequired": "Yes",
+        "QRCodeValue": "EVT-0004:M01:SIGNAL",
+        "QRValidationRule": "Exact match",
+        "DisplayOrder": 1,
         "Status": "DRAFT",
     },
     {
-        "EventID": "EVT-UAT-01",
+        "EventID": "EVT-0004",
         "MissionID": "M02",
         "TemplateID": "MT-0002",
         "Title": "Mission AI",
@@ -159,7 +190,7 @@ class FakeDB:
             for number in range(1, 7)
         ]
 
-    def get_mission_templates(self):
+    def get_mission_templates(self, include_archived=False):
         return [
             {
                 "TemplateID": "MT-0001",
@@ -175,6 +206,24 @@ class FakeDB:
 
     def get_event_missions(self, event_id, include_closed=True):
         return [dict(row) for row in MISSIONS]
+
+    def get_mission(self, event_id, mission_id):
+        return next(
+            (dict(row) for row in MISSIONS if row["MissionID"] == mission_id),
+            None,
+        )
+
+    def upsert_event_mission(self, record):
+        return {"MissionID": record["MissionID"], "Action": "Updated"}
+
+    def generate_next_event_mission_id(self, event_id, prefix="M"):
+        return "M03"
+
+    def reorder_event_missions(self, event_id, mission_ids):
+        return {"Updated": len(mission_ids)}
+
+    def backfill_event_mission_editor_fields(self, event_id, mission_ids=None):
+        return {"EventID": event_id, "Updated": []}
 
     def get_programme_packs(self):
         return []
@@ -207,6 +256,7 @@ for module in (
     events_home,
     leaderboard_display,
     live_event_console,
+    mission_setup,
     programme_builder,
 ):
     module.GoogleSheetsDB = FakeDB
@@ -219,11 +269,13 @@ page = st.sidebar.radio(
     [
         "Events",
         "Create Event",
+        "Mission Studio",
         "Programme Builder",
         "Control Centre",
         "Projector",
         "Reports",
         "Administration",
+        "Participant Mission Card",
     ],
 )
 
@@ -231,6 +283,8 @@ if page == "Events":
     events_home.show_events_home()
 elif page == "Create Event":
     create_event.show_create_event()
+elif page == "Mission Studio":
+    mission_setup.show_mission_setup()
 elif page == "Programme Builder":
     programme_builder.show_programme_builder()
 elif page == "Control Centre":
@@ -239,6 +293,9 @@ elif page == "Projector":
     leaderboard_display.show_leaderboard_display()
 elif page == "Administration":
     administration.show_administration()
+elif page == "Participant Mission Card":
+    st.title(MISSIONS[0]["Title"])
+    participant.render_mission_content(MISSIONS[0])
 else:
     st.title("Results & Reports")
     st.info("Results appear here after the event.")

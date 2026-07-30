@@ -1,4 +1,5 @@
 import uuid
+import math
 from datetime import datetime
 
 import streamlit as st
@@ -667,10 +668,90 @@ def render_submission_form(db, mission, submission_type):
         render_nasi_form(db, mission)
     elif submission_type == "TEXT":
         render_text_form(db, mission)
+    elif submission_type == "QR":
+        render_qr_form(db, mission)
+    elif submission_type == "GPS":
+        render_gps_form(db, mission)
     elif submission_type == "NONE":
         st.info("No participant submission is required for this mission.")
     else:
         render_photo_form(db, mission)
+
+
+def render_qr_form(db, mission):
+    st.subheader("🔳 QR Validation")
+    submitted_value = st.text_input(
+        "QR Code Value",
+        help="Scan the checkpoint QR code, or enter its value.",
+    )
+    if st.button("Validate QR and Submit", width="stretch"):
+        expected = str(mission.get("QRCodeValue", "") or "").strip()
+        rule = str(mission.get("QRValidationRule", "Exact match") or "").lower()
+        candidate = submitted_value.strip()
+        valid = (
+            candidate.casefold() == expected.casefold()
+            if "case" in rule and "insensitive" in rule
+            else candidate == expected
+        )
+        if not expected:
+            st.error("This mission has no QR validation value configured.")
+        elif not valid:
+            st.error("That QR code is not valid for this mission.")
+        else:
+            save_structured_submission(
+                db, mission, "QR", metric1=candidate,
+                remarks="QR checkpoint validated.",
+            )
+            st.success("QR checkpoint validated.")
+            st.rerun()
+
+
+def _distance_metres(latitude1, longitude1, latitude2, longitude2):
+    radius = 6371000.0
+    lat1, lat2 = math.radians(latitude1), math.radians(latitude2)
+    dlat = math.radians(latitude2 - latitude1)
+    dlon = math.radians(longitude2 - longitude1)
+    value = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    )
+    return radius * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
+
+
+def render_gps_form(db, mission):
+    st.subheader("📍 GPS Validation")
+    st.caption(str(mission.get("LocationDescription", "") or ""))
+    st.info("Location is requested only when you press the button below.")
+    location = team_geolocation(
+        interval_seconds=20,
+        key=f"mission_gps_{mission.get('EventID')}_{mission.get('MissionID')}",
+    )
+    if location:
+        try:
+            latitude = float(location.get("latitude"))
+            longitude = float(location.get("longitude"))
+            target_latitude = float(mission.get("Latitude"))
+            target_longitude = float(mission.get("Longitude"))
+            radius = float(mission.get("GeofenceRadius", 50) or 50)
+            distance = _distance_metres(
+                latitude, longitude, target_latitude, target_longitude,
+            )
+        except (TypeError, ValueError):
+            st.error("The configured checkpoint location is incomplete.")
+            return
+        st.caption(f"Distance to checkpoint: {distance:.0f} metres")
+        if distance <= radius:
+            if st.button("Confirm Arrival and Submit", width="stretch"):
+                save_structured_submission(
+                    db, mission, "GPS",
+                    metric1=str(latitude), metric2=str(longitude),
+                    metric3=f"{distance:.1f}",
+                    remarks="GPS checkpoint validated.",
+                )
+                st.success("Checkpoint arrival confirmed.")
+                st.rerun()
+        else:
+            st.warning(f"Move within {radius:.0f} metres of the checkpoint.")
 
 
 def render_mission_content(mission):
@@ -713,6 +794,47 @@ def render_mission_content(mission):
         st.markdown("#### Instructions")
         st.info(instructions)
 
+    clue = str(mission.get("Clue", "") or "").strip()
+    question = str(mission.get("MainQuestion", "") or "").strip()
+    evidence = str(mission.get("SubmissionType", "") or "").strip().title()
+    evidence_instructions = str(
+        mission.get("EvidenceInstructions", "") or ""
+    ).strip()
+    if clue:
+        st.markdown("#### Treasure Hunt Clue")
+        st.info(clue)
+    if question:
+        st.markdown("#### Question")
+        st.write(question)
+    if yes_no_value(mission.get("EvidenceRequired", "Yes")):
+        st.markdown("#### Evidence Requirement")
+        st.write(f"**{evidence or 'Evidence'}**")
+        if evidence_instructions:
+            st.caption(evidence_instructions)
+
+    card1, card2 = st.columns(2)
+    with card1:
+        credits = mission.get("CreditValue", mission.get("Points", 0))
+        st.metric("Credits", _credit_number(credits))
+    with card2:
+        minutes = int(float(mission.get("TimeLimitMinutes", 0) or 0))
+        st.metric("Time Remaining", f"{minutes}:00" if minutes else "No limit")
+
+    hints = [
+        str(mission.get(name, "") or "").strip()
+        for name in ("Hint1", "Hint2", "Hint3")
+    ]
+    hints = [hint for hint in hints if hint]
+    if hints:
+        with st.expander("💡 Hint"):
+            st.write(hints[0])
+            penalty = mission.get("HintCreditPenalty", mission.get("HintPenalty", 0))
+            if penalty:
+                st.caption(f"Hint penalty: {_credit_number(penalty)} credits")
+
+    if mission_ai_help_enabled(mission):
+        st.info("🤖 AI Companion is enabled for this mission.")
+
     if display_document_url:
         st.link_button(
             "📄 Open Mission Document",
@@ -727,6 +849,10 @@ def _credit_number(value):
     except (TypeError, ValueError):
         number = 0.0
     return str(int(number)) if number.is_integer() else f"{number:.1f}"
+
+
+def yes_no_value(value):
+    return str(value or "").strip().upper() not in {"", "NO", "FALSE", "0", "OFF"}
 
 
 def render_marketplace(session_token):
@@ -1379,9 +1505,6 @@ def show_participant():
 
         st.success(mission.get("Title", "Mission"))
         render_mission_content(mission)
-
-        if mission.get("Clue"):
-            st.info("💡 " + str(mission["Clue"]))
 
         submission_type = normalise_submission_type(mission)
         existing_submission = find_existing_submission(

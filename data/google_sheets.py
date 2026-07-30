@@ -33,7 +33,18 @@ REQUIRED_WORKSHEETS = {
         "AIHelpEnabled", "TemplateID", "Story", "ParticipantInstructions",
         "FacilitatorInstructions", "LearningObjectives", "ScoringRule",
         "VideoURL", "ImageURL", "DocumentURL", "DebriefQuestions", "Version",
-        "UpdatedAt",
+        "UpdatedAt", "Module", "Category", "IsMandatory", "DisplayOrder",
+        "MainQuestion", "AlternativeAnswers", "FacilitatorEvaluationNotes",
+        "AIRequired", "AIPrompt", "AIRole", "AIHintPrompt", "MaxAIHints",
+        "AIUsageRules", "HintUnlockRules", "HintCreditPenalty",
+        "CheckpointName", "LocationDescription", "Latitude", "Longitude",
+        "GeofenceRadius", "GPSRequired", "QRRequired", "QRCodeValue",
+        "QRValidationRule", "EvidenceRequired", "EvidenceInstructions",
+        "MaximumUploads", "CreditValue", "MaximumCredits", "TimeBonus",
+        "HintPenalty", "WrongAnswerPenalty", "ManualReviewRequired",
+        "AutoApprovalAllowed", "TimeLimitMinutes", "AvailabilityStart",
+        "AvailabilityEnd", "CountdownEnabled", "ReferenceImageURL",
+        "LearningPoint", "FacilitatorDebriefNotes",
     ],
     "MissionTemplates": [
         "TemplateID", "Title", "Story", "ParticipantInstructions",
@@ -187,15 +198,7 @@ def get_worksheets():
 
     worksheets = {}
     for name, headers in REQUIRED_WORKSHEETS.items():
-        worksheet = existing.get(name)
-        if worksheet is None:
-            worksheet = workbook.add_worksheet(
-                title=name,
-                rows=500,
-                cols=max(len(headers), 10),
-            )
-            worksheet.append_row(headers)
-        worksheets[name] = worksheet
+        worksheets[name] = ensure_worksheet(workbook, name, headers)
 
     return worksheets
 
@@ -1621,7 +1624,13 @@ class GoogleSheetsDB:
                 mission for mission in missions
                 if str(mission.get("Status", "")).upper() != "CLOSED"
             ]
-        return missions
+        return sorted(
+            missions,
+            key=lambda row: (
+                int(float(row.get("DisplayOrder", 9999) or 9999)),
+                str(row.get("MissionID", "")),
+            ),
+        )
 
     def upsert_event_mission(self, record):
         payload = dict(record or {})
@@ -1696,6 +1705,120 @@ class GoogleSheetsDB:
         result = self.upsert_event_mission(record)
         result["TemplateID"] = str(template_id)
         return result
+
+    def generate_next_event_mission_id(self, event_id, prefix="M"):
+        highest = 0
+        for mission in self.get_event_missions(event_id):
+            match = re.fullmatch(
+                rf"{re.escape(str(prefix).upper())}(\d+)",
+                str(mission.get("MissionID", "")).strip().upper(),
+            )
+            if match:
+                highest = max(highest, int(match.group(1)))
+        return f"{str(prefix).upper()}{highest + 1:02d}"
+
+    def duplicate_event_mission(self, event_id, mission_id, new_mission_id=""):
+        source = self.get_mission(event_id, mission_id)
+        if not source:
+            raise ValueError(f"Mission {mission_id} was not found for {event_id}.")
+        duplicate = copy.deepcopy(source)
+        duplicate["MissionID"] = (
+            str(new_mission_id).strip().upper()
+            or self.generate_next_event_mission_id(event_id)
+        )
+        duplicate["Title"] = f"{source.get('Title', 'Mission')} (Copy)"
+        duplicate["Status"] = "DRAFT"
+        duplicate["DisplayOrder"] = len(self.get_event_missions(event_id)) + 1
+        result = self.upsert_event_mission(duplicate)
+        result["SourceMissionID"] = str(mission_id).strip().upper()
+        return result
+
+    def reorder_event_missions(self, event_id, mission_ids):
+        rows = get_sheet_records("Missions")
+        positions = {
+            str(mission_id).strip().upper(): position
+            for position, mission_id in enumerate(mission_ids, start=1)
+        }
+        headers = self.missions.row_values(1)
+        order_column = headers.index("DisplayOrder") + 1
+        updates = []
+        for row_number, row in enumerate(rows, start=2):
+            if str(row.get("EventID", "")) != str(event_id):
+                continue
+            mission_id = str(row.get("MissionID", "")).strip().upper()
+            if mission_id in positions:
+                cell = gspread.utils.rowcol_to_a1(row_number, order_column)
+                updates.append({
+                    "range": cell,
+                    "values": [[positions[mission_id]]],
+                })
+        if updates:
+            self.missions.batch_update(updates)
+            self.clear_cache()
+        return {"Updated": len(updates)}
+
+    def delete_event_mission(self, event_id, mission_id):
+        rows = get_sheet_records("Missions")
+        row_number = next(
+            (
+                index for index, row in enumerate(rows, start=2)
+                if str(row.get("EventID", "")) == str(event_id)
+                and str(row.get("MissionID", "")).strip().upper()
+                == str(mission_id).strip().upper()
+            ),
+            None,
+        )
+        if row_number is None:
+            raise ValueError(f"Mission {mission_id} was not found for {event_id}.")
+        self.missions.delete_rows(row_number)
+        self.clear_cache()
+        return {"MissionID": str(mission_id).strip().upper(), "Action": "Deleted"}
+
+    def backfill_event_mission_editor_fields(self, event_id, mission_ids=None):
+        wanted = {
+            str(mission_id).strip().upper()
+            for mission_id in (mission_ids or [])
+        }
+        updated = []
+        for order, source in enumerate(
+            self.get_event_missions(event_id), start=1,
+        ):
+            mission_id = str(source.get("MissionID", "")).strip().upper()
+            if wanted and mission_id not in wanted:
+                continue
+            payload = dict(source)
+            defaults = {
+                "Module": "Mission AI",
+                "Category": "Mission AI",
+                "IsMandatory": "Yes",
+                "DisplayOrder": order,
+                "MainQuestion": source.get(
+                    "ParticipantInstructions",
+                    source.get("Description", ""),
+                ),
+                "AIRequired": source.get("AIHelpEnabled", "No"),
+                "MaxAIHints": 3,
+                "EvidenceRequired": (
+                    "No"
+                    if str(source.get("SubmissionType", "")).upper() == "NONE"
+                    else "Yes"
+                ),
+                "MaximumUploads": 1,
+                "CreditValue": source.get("Points", 0),
+                "MaximumCredits": source.get("Points", 0),
+                "ManualReviewRequired": "Yes",
+                "AutoApprovalAllowed": "No",
+                "CountdownEnabled": "Yes",
+            }
+            changed = False
+            for key, value in defaults.items():
+                if str(payload.get(key, "")).strip() == "":
+                    payload[key] = value
+                    changed = True
+            if changed:
+                self.upsert_event_mission(payload)
+                updated.append(mission_id)
+        return {"EventID": str(event_id), "Updated": updated}
 
     def launch_event_mission(self, event_id, mission_id):
         rows = get_sheet_records("Missions")

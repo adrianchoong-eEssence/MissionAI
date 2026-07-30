@@ -26,6 +26,9 @@ class FakeWorksheet:
     def batch_update(self, payloads, **kwargs):
         self.batch_updated.extend(payloads)
 
+    def delete_rows(self, row_number):
+        self.updated.append({"deleted_row": row_number})
+
 
 class FakeRuntime:
     def __init__(self, configured=False, publish_ready=False):
@@ -250,6 +253,82 @@ class MissionStudioDataTests(unittest.TestCase):
             mission["_RuntimeStage"]["ParticipantMessage"],
             "Find the signal.",
         )
+
+    def test_event_mission_edit_persists_without_changing_master(self):
+        database = self.make_db()
+        master = {"TemplateID": "MT-ONE", "Title": "Master", "Clue": "Master clue"}
+        event = {
+            "EventID": "EVT-0004", "MissionID": "M01", "Title": "Event copy",
+            "TemplateID": "MT-ONE", "Clue": "Old event clue",
+        }
+        with patch("data.google_sheets.get_sheet_records", return_value=[event]):
+            database.upsert_event_mission({**event, "Clue": "Edited event clue"})
+        headers = REQUIRED_WORKSHEETS["Missions"]
+        saved = dict(zip(headers, database.missions.updated[0]["values"][0]))
+        self.assertEqual(saved["Clue"], "Edited event clue")
+        self.assertEqual(master["Clue"], "Master clue")
+
+    def test_two_events_can_have_different_m01_versions(self):
+        database = self.make_db()
+        rows = [
+            {"EventID": "EVT-A", "MissionID": "M01", "Title": "A", "Version": "A"},
+            {"EventID": "EVT-B", "MissionID": "M01", "Title": "B", "Version": "B"},
+        ]
+        with patch("data.google_sheets.get_sheet_records", return_value=rows):
+            self.assertEqual(database.get_event_missions("EVT-A")[0]["Version"], "A")
+            self.assertEqual(database.get_event_missions("EVT-B")[0]["Version"], "B")
+
+    def test_mission_order_is_event_specific(self):
+        database = self.make_db()
+        rows = [
+            {"EventID": "EVT-A", "MissionID": "M01"},
+            {"EventID": "EVT-A", "MissionID": "M02"},
+            {"EventID": "EVT-B", "MissionID": "M01"},
+        ]
+        with patch("data.google_sheets.get_sheet_records", return_value=rows):
+            result = database.reorder_event_missions("EVT-A", ["M02", "M01"])
+        self.assertEqual(result["Updated"], 2)
+        self.assertEqual(len(database.missions.batch_updated), 2)
+
+    def test_duplication_creates_event_copy_only(self):
+        database = self.make_db()
+        source = {
+            "EventID": "EVT-0004", "MissionID": "M01", "Title": "Signal",
+            "TemplateID": "MT-SIGNAL", "Clue": "Find it",
+        }
+        database.get_mission = lambda event_id, mission_id: dict(source)
+        database.get_event_missions = lambda event_id: [source]
+        captured = {}
+        database.upsert_event_mission = lambda record: (
+            captured.update(record) or {"MissionID": record["MissionID"], "Action": "Created"}
+        )
+        result = database.duplicate_event_mission("EVT-0004", "M01", "M05")
+        self.assertEqual(result["MissionID"], "M05")
+        self.assertEqual(captured["EventID"], "EVT-0004")
+        self.assertEqual(captured["TemplateID"], "MT-SIGNAL")
+        self.assertEqual(source["MissionID"], "M01")
+
+    def test_evt0004_backfill_preserves_existing_content(self):
+        database = self.make_db()
+        source = {
+            "EventID": "EVT-0004", "MissionID": "M01",
+            "Title": "Existing title", "Clue": "Existing clue",
+            "ParticipantInstructions": "Existing question", "Points": 75,
+            "SubmissionType": "TEXT",
+        }
+        database.get_event_missions = lambda event_id: [dict(source)]
+        captured = []
+        database.upsert_event_mission = lambda record: (
+            captured.append(dict(record))
+            or {"MissionID": record["MissionID"], "Action": "Updated"}
+        )
+        result = database.backfill_event_mission_editor_fields(
+            "EVT-0004", ["M01", "M02", "M03", "M04"],
+        )
+        self.assertEqual(result["Updated"], ["M01"])
+        self.assertEqual(captured[0]["Clue"], "Existing clue")
+        self.assertEqual(captured[0]["MainQuestion"], "Existing question")
+        self.assertEqual(captured[0]["CreditValue"], 75)
 
 
 if __name__ == "__main__":

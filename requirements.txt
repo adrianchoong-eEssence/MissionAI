@@ -8,3 +8,4 @@ pydeck
 openpyxl
 streamlit-autorefresh
 google-api-python-client
+qrcode[pil]
