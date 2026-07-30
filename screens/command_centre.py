@@ -1,5 +1,6 @@
 import streamlit as st
 
+from branding import experience_header, experience_title
 from data.google_sheets import GoogleSheetsDB
 from data.runtime_database import RuntimeDatabaseError
 from screens.app_state import request_navigation, select_active_event
@@ -45,6 +46,7 @@ def show_command_centre():
         key="command_centre_event",
     )
     event_id = str(event.get("EventID", ""))
+    experience_header(experience_title(event))
 
     teams = _safe_count(lambda: db.get_teams(event_id))
     missions = _safe_count(lambda: db.get_event_missions(event_id))
@@ -150,6 +152,7 @@ def show_results_reports():
         key="results_reports_event",
     )
     event_id = str(event.get("EventID", ""))
+    experience_header(experience_title(event))
     participants = _safe_number(
         lambda: db.get_participant_count(event_id)
     )

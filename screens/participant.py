@@ -4,6 +4,7 @@ from datetime import datetime
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
+from branding import experience_header, experience_title, footer
 from ai.facilitator import ask_facilitator
 from components.team_geolocation import team_geolocation
 from data.google_drive import get_photo_url, upload_photo
@@ -248,7 +249,7 @@ def render_team_assignment_card():
         <div style="
             padding:24px;
             border-radius:22px;
-            background:linear-gradient(135deg,#0f172a,#1e293b);
+            background:#082D58;
             color:white;
             text-align:center;
             margin-bottom:18px;
@@ -1180,8 +1181,6 @@ def render_road_hunt_navigator(session_token):
 
 
 def show_participant():
-    st.title("📱 EXOS Mission")
-
     db = GoogleSheetsDB()
     restore_session_from_query_params(db)
 
@@ -1189,16 +1188,7 @@ def show_participant():
         persist_session_in_query_params()
 
     if "participant_event_id" not in st.session_state:
-        st.markdown(
-            """
-            <div style="text-align:center;padding:18px 0 28px 0;">
-                <div style="font-size:20px;letter-spacing:3px;font-weight:700;">EXOS</div>
-                <div style="font-size:42px;font-weight:900;margin-top:8px;">Mission AI</div>
-                <div style="font-size:18px;opacity:.75;margin-top:8px;">Join your live mission experience</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        experience_header("Mission AI", welcome=True)
 
         join_code = st.text_input("Join Code").upper().strip()
         first_name = st.text_input("First / Given Name")
@@ -1258,8 +1248,15 @@ def show_participant():
             persist_session_in_query_params()
             st.rerun()
 
+        footer()
         return
 
+    experience_header(
+        experience_title(
+            {"EventName": st.session_state.get("participant_event_name", "")}
+        ),
+        welcome=True,
+    )
     st.success(f"Welcome {st.session_state['participant_name']}")
     st.caption(st.session_state["participant_event_name"])
     render_team_assignment_card()
@@ -1419,3 +1416,4 @@ def show_participant():
         if st.button("🚪 Leave Event", width="stretch"):
             reset_session()
             st.rerun()
+    footer()

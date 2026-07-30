@@ -54,7 +54,7 @@ def _find_current_index(stages, state):
 
 
 def _render_stage_card(stage, is_current=False):
-    border = "3px solid #22c55e" if is_current else "1px solid rgba(255,255,255,0.15)"
+    border = "3px solid #B59A37" if is_current else "1px solid rgba(255,255,255,0.15)"
     background = "rgba(34,197,94,0.15)" if is_current else "rgba(255,255,255,0.04)"
 
     st.markdown(
@@ -144,7 +144,7 @@ def show_show_control():
         <div style="
             padding:28px;
             border-radius:24px;
-            background:linear-gradient(135deg, rgba(37,99,235,0.18), rgba(34,197,94,0.18));
+            background:rgba(8,45,88,0.14);
             border:1px solid rgba(255,255,255,0.16);
         ">
             <div style="font-size:18px; opacity:0.75;">Stage {current_stage.get('StageNo')} of {len(stages)}</div>

@@ -1,6 +1,7 @@
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
+from branding import experience_title
 from data.google_sheets import GoogleSheetsDB
 from data.runtime_database import RuntimeDatabaseError
 from engines.programme_hierarchy import current_module_activity, friendly_type
@@ -47,6 +48,7 @@ def calculate_leaderboard(submissions):
 
 
 def display_header(event, mode):
+    title = experience_title(event)
     st.markdown(
         f"""
         <div style="text-align:center; padding-top:20px;">
@@ -54,13 +56,19 @@ def display_header(event, mode):
                 EXOS
             </div>
             <div style="font-size:72px; font-weight:900; margin-top:10px;">
-                Mission AI
+                {title}
             </div>
             <div style="font-size:28px; margin-top:8px; opacity:0.85;">
                 {event.get("EventName", "")}
             </div>
             <div style="font-size:22px; margin-top:14px; opacity:0.7;">
                 {mode}
+            </div>
+            <div style="font-size:16px; letter-spacing:3px; margin-top:14px; opacity:0.72;">
+                eEssence eXperiential OS
+            </div>
+            <div style="font-size:14px; letter-spacing:2px; margin-top:8px; opacity:0.66;">
+                by eEssence
             </div>
         </div>
         """,
@@ -414,7 +422,7 @@ def show_leaderboard_display():
         """
         <style>
             .stApp {
-                background: radial-gradient(circle at top, #1f2937 0%, #0f172a 45%, #020617 100%);
+                background: #082D58;
                 color: white;
             }
             header {visibility: hidden;}
@@ -425,7 +433,7 @@ def show_leaderboard_display():
                 max-width: 1400px;
             }
             [data-testid="stSidebar"] {
-                background: #0f172a;
+                background: #082D58;
             }
         </style>
         """,

@@ -203,9 +203,9 @@ def show_control_centre():
         """
         <style>
         .control-hero {padding:24px;border-radius:22px;
-          background:linear-gradient(135deg,#10251f,#17372c);
+          background:#082D58;
           border:1px solid rgba(184,255,61,.24);margin-bottom:18px}
-        .control-kicker {color:#b8ff3d;font-size:.78rem;font-weight:800;
+        .control-kicker {color:#B59A37;font-size:.78rem;font-weight:800;
           letter-spacing:.14em;text-transform:uppercase}
         .control-title {font-size:clamp(2.1rem,4vw,4rem);font-weight:900;
           letter-spacing:-.04em;line-height:1;margin:.35rem 0}

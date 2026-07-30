@@ -1,5 +1,6 @@
 import streamlit as st
 
+from branding import apply_branding, configure_page, footer
 from screens.administration import APP_VERSION, show_administration
 from screens.app_state import ACTIVE_EVENT_KEY, NAVIGATION_REQUEST_KEY
 from screens.command_centre import show_results_reports
@@ -10,11 +11,8 @@ from screens.leaderboard_display import show_leaderboard_display
 from screens.programme_builder import show_programme_builder
 
 
-st.set_page_config(
-    page_title="EXOS",
-    page_icon="🚀",
-    layout="wide",
-)
+configure_page(layout="wide")
+apply_branding()
 
 PAGES = [
     "Events",
@@ -37,8 +35,7 @@ def apply_navigation_request():
 
 apply_navigation_request()
 
-st.sidebar.title("EXOS")
-st.sidebar.caption("Event Operating System")
+st.sidebar.caption("eEssence eXperiential OS")
 page = st.sidebar.radio("Workspace", PAGES, key="main_navigation")
 
 active_event_id = str(st.session_state.get(ACTIVE_EVENT_KEY, ""))
@@ -63,3 +60,5 @@ elif page == "Reports":
     show_results_reports()
 else:
     show_administration()
+
+footer(report=page == "Reports")

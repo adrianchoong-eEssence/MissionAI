@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="EXOS icon">
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="#082D58"/>
+  <path d="M236 260 Q512 60 788 260" fill="none" stroke="#FFFFFF" stroke-width="64"/>
+  <path d="M236 764 Q512 964 788 764" fill="none" stroke="#B59A37" stroke-width="64"/>
+  <path d="M286 306 L404 306 L744 714 L626 714 Z" fill="#FFFFFF"/>
+  <path d="M620 306 L738 306 L398 714 L280 714 Z" fill="#B59A37"/>
+</svg>

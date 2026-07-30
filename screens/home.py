@@ -33,4 +33,4 @@ def show_home(go_to):
     st.divider()
 
     st.caption("Mission AI Studio")
-    st.caption("Powered by eEssence")
+    st.caption("by eEssence")
