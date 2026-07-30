@@ -1,10 +1,12 @@
 import streamlit as st
 
+from branding import experience_header
 from data.google_sheets import GoogleSheetsDB
 from screens.app_state import remember_active_event, request_navigation
 
 
 def show_events_home():
+    experience_header("Event Operating System", subtitle="")
     st.title("Events")
     st.caption("Create a new event or continue from where you left off.")
     db = GoogleSheetsDB()

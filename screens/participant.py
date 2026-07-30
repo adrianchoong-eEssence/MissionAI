@@ -1188,7 +1188,7 @@ def show_participant():
         persist_session_in_query_params()
 
     if "participant_event_id" not in st.session_state:
-        experience_header("Mission AI", welcome=True)
+        experience_header("Mission AI")
 
         join_code = st.text_input("Join Code").upper().strip()
         first_name = st.text_input("First / Given Name")
@@ -1255,7 +1255,7 @@ def show_participant():
         experience_title(
             {"EventName": st.session_state.get("participant_event_name", "")}
         ),
-        welcome=True,
+        welcome=False,
     )
     st.success(f"Welcome {st.session_state['participant_name']}")
     st.caption(st.session_state["participant_event_name"])

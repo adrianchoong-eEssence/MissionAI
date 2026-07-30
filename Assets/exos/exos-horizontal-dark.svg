@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-label="EXOS — eEssence eXperiential OS">
   <rect width="1200" height="360" fill="none"/>
-  <g font-family="Eurostile, Microgramma D Extended, Montserrat, Arial, sans-serif" font-weight="700">
-    <text x="75" y="210" font-size="205" letter-spacing="18" fill="#FFFFFF">E</text>
-    <text x="590" y="210" font-size="205" letter-spacing="18" fill="#FFFFFF">OS</text>
+  <g font-family="Eurostile, Arial Narrow, Arial, sans-serif" font-weight="700">
+    <text x="108" y="210" font-size="205" letter-spacing="4" fill="#FFFFFF">E</text>
+    <text x="505" y="210" font-size="205" letter-spacing="4" fill="#FFFFFF">OS</text>
   </g>
-  <path d="M332 63 Q472 -35 592 63" fill="none" stroke="#FFFFFF" stroke-width="22"/>
-  <path d="M334 237 Q468 337 594 237" fill="none" stroke="#B59A37" stroke-width="22"/>
-  <path d="M360 90 L410 90 L570 212 L518 212 Z" fill="#FFFFFF"/>
-  <path d="M520 90 L570 90 L410 212 L358 212 Z" fill="#B59A37"/>
-  <text x="600" y="310" text-anchor="middle" font-family="Eurostile, Microgramma D Extended, Montserrat, Arial, sans-serif" font-size="41" letter-spacing="11" fill="#FFFFFF">
+  <path d="M250 63 Q386 -28 520 63" fill="none" stroke="#FFFFFF" stroke-width="22"/>
+  <path d="M250 237 Q386 328 520 237" fill="none" stroke="#B59A37" stroke-width="22"/>
+  <path d="M277 90 L327 90 L493 212 L441 212 Z" fill="#FFFFFF"/>
+  <path d="M443 90 L493 90 L327 212 L275 212 Z" fill="#B59A37"/>
+  <text x="600" y="310" text-anchor="middle" font-family="Eurostile, Arial Narrow, Arial, sans-serif" font-size="41" letter-spacing="11" fill="#FFFFFF">
     <tspan fill="#FFFFFF">e</tspan><tspan fill="#B59A37">E</tspan><tspan>ssence e</tspan><tspan fill="#FFFFFF">X</tspan><tspan>periential OS</tspan>
   </text>
 </svg>

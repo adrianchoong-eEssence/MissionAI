@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import time
+import html
 import json
 
 import pandas as pd
@@ -529,18 +530,50 @@ def render_programme_first_builder(db):
             if int(module.get("Day", 1)) == day
         ]
         for index, module in day_modules:
-            activity_label = (
-                "activity" if module["ActivityCount"] == 1 else "activities"
+            st.markdown(
+                f"""
+                <div style="
+                    border:1px solid rgba(8,45,88,.16);
+                    border-left:7px solid #B59A37;
+                    border-radius:16px;
+                    padding:22px 24px 18px;
+                    margin:18px 0 8px;
+                    background:#FFFFFF;
+                    box-shadow:0 10px 28px rgba(8,45,88,.06);
+                ">
+                  <div style="font-size:.76rem;font-weight:800;letter-spacing:.15em;
+                              color:#B59A37;text-transform:uppercase;">
+                    Module {index + 1} · {html.escape(str(module.get("StartTime", "—")))}
+                  </div>
+                  <div style="font-size:1.65rem;font-weight:800;color:#082D58;
+                              margin:.35rem 0 .65rem;line-height:1.1;">
+                    {html.escape(str(module["ModuleName"]))}
+                  </div>
+                  <div style="display:flex;gap:28px;color:#082D58;font-size:1rem;">
+                    <span><strong>{module["DurationMinutes"]}</strong> minutes</span>
+                    <span><strong>{module["ActivityCount"]}</strong> activities</span>
+                    <span><strong>Day {module["Day"]}</strong></span>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
-            with st.expander(
-                (
-                    f"{index + 1}. {module['ModuleName']}  ·  "
-                    f"{module.get('StartTime', '—')}  ·  "
-                    f"{module['DurationMinutes']} min  ·  "
-                    f"{module['ActivityCount']} {activity_label}"
-                ),
-                expanded=False,
-            ):
+            edit_col, up_col, down_col, remove_col = st.columns([3, 1, 1, 1])
+            edit_col.caption("Edit and expand the complete module agenda below.")
+            if up_col.button("↑ Move", disabled=index == 0, key=f"mod_up_{event_id}_{index}"):
+                modules[index - 1], modules[index] = modules[index], modules[index - 1]
+                _save_modules(db, event_id, modules)
+                st.rerun()
+            if down_col.button("↓ Move", disabled=index == len(modules) - 1, key=f"mod_down_{event_id}_{index}"):
+                modules[index + 1], modules[index] = modules[index], modules[index + 1]
+                _save_modules(db, event_id, modules)
+                st.rerun()
+            if remove_col.button("Delete", key=f"mod_remove_{event_id}_{index}"):
+                modules.pop(index)
+                _save_modules(db, event_id, modules)
+                st.rerun()
+
+            with st.expander("Edit · Expand module", expanded=False):
                 name_col, day_col, start_col = st.columns([3, 1, 1])
                 edited_name = name_col.text_input(
                     "Module name", value=module["ModuleName"],
@@ -554,8 +587,7 @@ def render_programme_first_builder(db):
                     "Start", value=str(module.get("StartTime", "")),
                     key=f"module_start_{event_id}_{index}",
                 )
-                save_col, up_col, down_col, remove_col = st.columns([2, 1, 1, 1])
-                if save_col.button("Save Module", type="primary", key=f"mod_save_{event_id}_{index}"):
+                if st.button("Save Module", type="primary", key=f"mod_save_{event_id}_{index}"):
                     module["ModuleName"] = edited_name.strip() or "Untitled Module"
                     module["Day"] = int(edited_day)
                     for activity_position, activity in enumerate(module["Activities"]):
@@ -566,19 +598,6 @@ def render_programme_first_builder(db):
                         )
                     _save_modules(db, event_id, modules)
                     st.rerun()
-                if up_col.button("Move Up", disabled=index == 0, key=f"mod_up_{event_id}_{index}"):
-                    modules[index - 1], modules[index] = modules[index], modules[index - 1]
-                    _save_modules(db, event_id, modules)
-                    st.rerun()
-                if down_col.button("Move Down", disabled=index == len(modules) - 1, key=f"mod_down_{event_id}_{index}"):
-                    modules[index + 1], modules[index] = modules[index], modules[index + 1]
-                    _save_modules(db, event_id, modules)
-                    st.rerun()
-                if remove_col.button("Remove", key=f"mod_remove_{event_id}_{index}"):
-                    modules.pop(index)
-                    _save_modules(db, event_id, modules)
-                    st.rerun()
-
                 st.markdown("#### Activities")
                 rows = [{
                     "Order": position,

@@ -1,3 +1,5 @@
+import html
+
 import streamlit as st
 
 from branding import experience_header, experience_title
@@ -46,7 +48,8 @@ def show_command_centre():
         key="command_centre_event",
     )
     event_id = str(event.get("EventID", ""))
-    experience_header(experience_title(event))
+    programme_name = experience_title(event)
+    experience_header(programme_name, subtitle="Programme Name")
 
     teams = _safe_count(lambda: db.get_teams(event_id))
     missions = _safe_count(lambda: db.get_event_missions(event_id))
@@ -152,7 +155,8 @@ def show_results_reports():
         key="results_reports_event",
     )
     event_id = str(event.get("EventID", ""))
-    experience_header(experience_title(event))
+    programme_name = experience_title(event)
+    experience_header(programme_name, subtitle="Programme Name")
     participants = _safe_number(
         lambda: db.get_participant_count(event_id)
     )
@@ -172,6 +176,12 @@ def show_results_reports():
             str(row.get("Status", "")).upper() == "APPROVED"
             for row in submissions
         ),
+    )
+    st.markdown("#### Programme Name")
+    st.markdown(
+        f"<div style='font-size:1.5rem;font-weight:800;color:#082D58;"
+        f"margin-bottom:1.2rem'>{html.escape(programme_name)}</div>",
+        unsafe_allow_html=True,
     )
 
     if submissions:
@@ -196,6 +206,4 @@ def show_results_reports():
     else:
         st.info("No submissions have been received for this event.")
 
-    st.info(
-        "PDF client reporting will be added here after the live Mission AI workflow is completed."
-    )
+    st.info("Report exports use the selected programme name and EXOS identity.")

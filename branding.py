@@ -22,7 +22,7 @@ EXOS_PAPER = "#FFFFFF"
 PLATFORM_NAME = "EXOS"
 PLATFORM_EXPANSION = "eEssence eXperiential OS"
 COMPANY_NAME = "eEssence"
-BROWSER_TITLE = "EXOS | eEssence eXperiential OS"
+BROWSER_TITLE = "EXOS"
 
 
 def asset_path(name: str) -> str:
@@ -37,9 +37,10 @@ def _data_uri(path: Path) -> str:
 def experience_title(event: dict | None = None, fallback: str = "Mission AI") -> str:
     """Resolve the experience, never the platform, from an event record."""
     row = event or {}
+    generic_names = {"team building", "countries", "programme", "event"}
     for key in ("ExperienceName", "ProgrammeName", "ProgrammeType"):
         value = str(row.get(key, "") or "").strip()
-        if value:
+        if value and value.casefold() not in generic_names:
             return value
     name = str(row.get("EventName", "") or "").strip()
     for known in (
@@ -96,7 +97,12 @@ def apply_branding(*, dark: bool = False) -> None:
           }}
           html {{ color-scheme:light; }}
           .stApp {{ background:#FFFFFF; color:{EXOS_NAVY}; }}
-          [data-testid="stSidebar"] {{ background:#FFFFFF; color:{EXOS_NAVY}; }}
+          .block-container {{padding-top:2.2rem; padding-bottom:3rem;}}
+          h1 {{font-size:clamp(2.35rem,4vw,4rem) !important; letter-spacing:-.035em;}}
+          h2, h3 {{letter-spacing:-.02em;}}
+          [data-testid="stSidebar"] {{
+            background:#FFFFFF; color:{EXOS_NAVY}; min-width:290px;
+          }}
           input, textarea, select {{
             background:#FFFFFF !important; color:{EXOS_NAVY} !important;
           }}
@@ -107,14 +113,38 @@ def apply_branding(*, dark: bool = False) -> None:
             background:{EXOS_NAVY}; border-color:{EXOS_NAVY}; color:#FFFFFF;
           }}
           .stButton > button p {{ color:#FFFFFF !important; }}
-          #MainMenu, [data-testid="stStatusWidget"], footer {{visibility:hidden;}}
-          [data-testid="stHeader"] {{background:transparent;}}
+          #MainMenu, [data-testid="stStatusWidget"], footer,
+          [data-testid="stHeader"], [data-testid="stToolbar"] {{visibility:hidden;}}
           [data-testid="stSidebar"] {{
-            border-right:1px solid rgba(8,45,88,.12);
+            border-right:2px solid rgba(8,45,88,.12);
           }}
           [data-testid="stSidebar"] > div:first-child::before {{
-            content:""; display:block; width:172px; height:54px;
-            margin:22px auto 8px; background:url('{logo}') center/contain no-repeat;
+            content:""; display:block; width:220px; height:82px;
+            margin:24px auto 18px; background:url('{logo}') center/contain no-repeat;
+          }}
+          [data-testid="stSidebar"] [role="radiogroup"] {{
+            gap:.48rem; padding:.25rem .25rem .75rem;
+          }}
+          [data-testid="stSidebar"] [role="radiogroup"] label {{
+            min-height:48px; padding:.68rem .85rem; border-radius:10px;
+            border:1px solid transparent; font-size:1.08rem; font-weight:650;
+          }}
+          [data-testid="stSidebar"] [role="radiogroup"] label:hover {{
+            background:rgba(8,45,88,.06);
+          }}
+          [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{
+            background:{EXOS_NAVY}; border-color:{EXOS_NAVY};
+          }}
+          [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p {{
+            color:#FFFFFF !important;
+          }}
+          [data-testid="stSidebar"] p {{font-size:1rem; line-height:1.35;}}
+          [data-testid="stMetric"] {{
+            border:1px solid rgba(8,45,88,.12); border-radius:14px;
+            padding:1rem 1.15rem; background:#FFFFFF;
+          }}
+          [data-testid="stVerticalBlockBorderWrapper"] {{
+            border-color:rgba(8,45,88,.14) !important; border-radius:16px !important;
           }}
           .exos-kicker {{
             color:{EXOS_BLUE}; font-size:.76rem; font-weight:800;
@@ -147,6 +177,12 @@ def apply_branding(*, dark: bool = False) -> None:
         <script>
           const d = window.parent.document;
           d.title = {json.dumps(BROWSER_TITLE)};
+          const titleNode=d.querySelector('title');
+          if (titleNode) {{
+            new MutationObserver(() => {{
+              if (d.title !== 'EXOS') d.title='EXOS';
+            }}).observe(titleNode, {{childList:true,characterData:true,subtree:true}});
+          }}
           let icon = d.querySelector("link[rel~='icon']");
           if (!icon) {{ icon=d.createElement('link'); icon.rel='icon'; d.head.appendChild(icon); }}
           icon.href = {json.dumps(favicon)};
@@ -156,13 +192,15 @@ def apply_branding(*, dark: bool = False) -> None:
           let apple = d.querySelector("meta[name='apple-mobile-web-app-title']");
           if (!apple) {{ apple=d.createElement('meta'); apple.name='apple-mobile-web-app-title'; d.head.appendChild(apple); }}
           apple.content = 'EXOS';
+          let appName = d.querySelector("meta[name='application-name']");
+          if (!appName) {{ appName=d.createElement('meta'); appName.name='application-name'; d.head.appendChild(appName); }}
+          appName.content = 'EXOS';
           if (!window.parent.sessionStorage.getItem('exosSplashSeen')) {{
             window.parent.sessionStorage.setItem('exosSplashSeen', '1');
             const splash=d.createElement('div');
             splash.id='exos-splash';
-            splash.innerHTML='<div style="font:800 64px Arial;letter-spacing:.16em">EX<span style="color:{EXOS_BLUE}">O</span>S</div>'
-              + '<div style="margin-top:18px;letter-spacing:.18em;font:15px Arial">eEssence eXperiential OS</div>'
-              + '<div style="margin-top:38px;opacity:.72;font:12px Eurostile,Arial;letter-spacing:.12em">by eEssence</div>';
+            splash.innerHTML='<div style="font:800 64px Eurostile,Arial;letter-spacing:.06em">E<span style="color:{EXOS_GOLD}">X</span>OS</div>'
+              + '<div style="margin-top:18px;letter-spacing:.18em;font:15px Eurostile,Arial">eEssence eXperiential OS</div>';
             splash.style.cssText='position:fixed;inset:0;z-index:999999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:{EXOS_NAVY};color:white;transition:opacity .35s ease';
             d.body.appendChild(splash);
             setTimeout(() => {{ splash.style.opacity='0'; setTimeout(() => splash.remove(), 380); }}, 850);
@@ -179,16 +217,22 @@ def experience_header(
     *,
     welcome: bool = False,
     subtitle: str = "Today's Experience",
+    signature: bool = False,
 ) -> None:
     heading = "Welcome to EXOS" if welcome else "EXOS"
+    subtitle_html = (
+        f"""<div style="margin-top:1.35rem;color:inherit;opacity:.68;font-size:.86rem;
+                      letter-spacing:.14em;text-transform:uppercase;">{html.escape(subtitle)}</div>"""
+        if subtitle
+        else ""
+    )
     st.markdown(
         f"""
         <div class="exos-hero">
           <div class="exos-kicker">{html.escape(heading)}</div>
-          <div style="margin-top:1.35rem;color:inherit;opacity:.68;font-size:.86rem;
-                      letter-spacing:.14em;text-transform:uppercase;">{html.escape(subtitle)}</div>
+          {subtitle_html}
           <div class="exos-experience">{html.escape(title)}</div>
-          <div class="exos-powered">by eEssence</div>
+          {"<div class='exos-powered'>by eEssence</div>" if signature else ""}
         </div>
         """,
         unsafe_allow_html=True,
