@@ -299,12 +299,18 @@ def render_event_mission_editor(db):
     ]
 
     st.markdown("### Event Missions")
-    for mission in missions:
+    for row_index, mission in enumerate(missions):
         cols = st.columns([1, 4, 1, 1])
         cols[0].write(str(mission.get("MissionID", "")))
         cols[1].write(str(mission.get("Title", "")))
         cols[2].write(str(mission.get("Status", "")))
-        if cols[3].button("Open", key=f"open_event_mission_{event_id}_{mission.get('MissionID')}"):
+        if cols[3].button(
+            "Open",
+            key=(
+                f"open_event_mission_{event_id}_"
+                f"{mission.get('MissionID')}_{row_index}"
+            ),
+        ):
             st.session_state["mission_studio_selected_mission"] = str(mission.get("MissionID", ""))
             st.rerun()
 
