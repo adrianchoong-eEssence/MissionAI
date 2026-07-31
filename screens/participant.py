@@ -893,21 +893,28 @@ EVA_PORTRAIT_REFERENCE = (
 
 EVA_EXPEDITION_OPENING_TRANSMISSION = """CONNECTION ESTABLISHED
 
+EVA ONLINE
+
 Commander...
 
-My name is EVA.
+I am EVA.
 
-I will remain with your expedition throughout this mission.
+Expedition Virtual Assistant.
 
-I cannot solve every challenge for you.
+My purpose is to analyse recovered intelligence, verify discoveries and support your expedition.
 
-I can only interpret the intelligence you recover.
+I cannot complete this mission for you.
 
-Your choices will determine whether your expedition succeeds.
+Only your team can.
 
-Recover Intelligence.
+Every verified discovery strengthens our understanding of The Labyrinth.
+
+Recover intelligence.
 Earn Intelligence Credits.
-Complete your mission.
+
+Return safely.
+
+Mission timer is now active.
 
 Good luck, Commander."""
 
