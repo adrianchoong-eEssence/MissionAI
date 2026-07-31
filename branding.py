@@ -56,15 +56,25 @@ def experience_title(event: dict | None = None, fallback: str = "Mission AI") ->
     return fallback
 
 
-def configure_page(layout: str = "wide") -> None:
+def configure_page(
+    layout: str = "wide",
+    *,
+    initial_sidebar_state: str = "auto",
+) -> None:
     st.set_page_config(
         page_title=BROWSER_TITLE,
         page_icon=asset_path("exos-favicon-32.png"),
         layout=layout,
+        initial_sidebar_state=initial_sidebar_state,
     )
 
 
-def apply_branding(*, dark: bool = False, participant_pwa: bool = False) -> None:
+def apply_branding(
+    *,
+    dark: bool = False,
+    participant_pwa: bool = False,
+    lock_sidebar: bool = False,
+) -> None:
     """Install visual tokens plus title, favicon and install metadata."""
     logo = _data_uri(ASSETS / ("exos-horizontal-dark.svg" if dark else "exos-horizontal-light.svg"))
     manifest = {
@@ -85,6 +95,29 @@ def apply_branding(*, dark: bool = False, participant_pwa: bool = False) -> None
     ).decode()
     manifest_href = manifest_uri
     favicon = _data_uri(ASSETS / "exos-favicon-32.png")
+    locked_sidebar_css = (
+        f"""
+          [data-testid="stSidebar"],
+          [data-testid="stSidebar"][aria-expanded="false"] {{
+            display:block !important;
+            visibility:visible !important;
+            transform:translateX(0) !important;
+            margin-left:0 !important;
+            min-width:290px !important;
+            width:290px !important;
+            flex:0 0 290px !important;
+          }}
+          [data-testid="stSidebarCollapseButton"],
+          [data-testid="stExpandSidebarButton"],
+          [data-testid="collapsedControl"] {{
+            display:none !important;
+            visibility:hidden !important;
+            pointer-events:none !important;
+          }}
+        """
+        if lock_sidebar
+        else ""
+    )
 
     st.markdown(
         f"""
@@ -149,6 +182,7 @@ def apply_branding(*, dark: bool = False, participant_pwa: bool = False) -> None
             color:#FFFFFF !important;
           }}
           [data-testid="stSidebar"] p {{font-size:1rem; line-height:1.35;}}
+          {locked_sidebar_css}
           [data-testid="stMetric"] {{
             border:1px solid rgba(8,45,88,.12); border-radius:14px;
             padding:1rem 1.15rem; background:#FFFFFF;

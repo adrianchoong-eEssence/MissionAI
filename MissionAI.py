@@ -13,8 +13,8 @@ from screens.mission_setup import show_mission_setup
 from screens.programme_builder import show_programme_builder
 
 
-configure_page(layout="wide")
-apply_branding()
+configure_page(layout="wide", initial_sidebar_state="expanded")
+apply_branding(lock_sidebar=True)
 
 PAGES = [
     "Events",
