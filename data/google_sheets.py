@@ -1,5 +1,6 @@
 import gspread
 import copy
+import hashlib
 import json
 import streamlit as st
 from google.oauth2.service_account import Credentials
@@ -80,6 +81,10 @@ REQUIRED_WORKSHEETS = {
         "PackID", "PackName", "Description", "SourceEventID",
         "TeamsJSON", "MissionsJSON", "StagesJSON", "MarketplaceJSON",
         "CreditWalletEnabled", "Status", "Version", "CreatedAt", "UpdatedAt",
+    ],
+    "Assets": [
+        "AssetID", "Category", "Name", "MediaReference", "FileName",
+        "ContentType", "CreatedAt", "UpdatedAt",
     ],
 }
 
@@ -268,10 +273,261 @@ class GoogleSheetsDB:
         self.programme_stages = worksheets["ProgrammeStages"]
         self.event_state = worksheets["EventState"]
         self.programme_packs = worksheets["ProgrammePacks"]
+        self.assets = worksheets["Assets"]
 
     def clear_cache(self):
         get_sheet_records.clear()
         get_sheet_participant_count.clear()
+
+    # -------------------------
+    # Asset Library
+    # -------------------------
+
+    def get_assets(self, category=""):
+        wanted = str(category or "").strip().casefold()
+        assets = list(get_sheet_records("Assets"))
+        if wanted:
+            assets = [
+                asset for asset in assets
+                if str(asset.get("Category", "")).strip().casefold() == wanted
+            ]
+        return sorted(
+            assets,
+            key=lambda asset: (
+                str(asset.get("Name", "")).strip().casefold(),
+                str(asset.get("AssetID", "")).strip(),
+            ),
+        )
+
+    @staticmethod
+    def _catalogue_asset_id(category, name, reference):
+        prefix = re.sub(r"[^A-Z0-9]+", "-", str(category).upper()).strip("-")
+        identity = f"{category}|{name}|{reference}".encode("utf-8")
+        digest = hashlib.sha1(identity).hexdigest()[:12].upper()
+        return f"{prefix}-{digest}"
+
+    def ensure_existing_assets_catalogued(self):
+        existing_references = {
+            str(asset.get("MediaReference", "")).strip()
+            for asset in self.get_assets()
+            if str(asset.get("MediaReference", "")).strip()
+        }
+        candidates = {}
+        records = (
+            list(get_sheet_records("Missions"))
+            + list(get_sheet_records("MissionTemplates"))
+        )
+        for record in records:
+            character_name = str(record.get("CharacterSource", "")).strip()
+            portrait = str(record.get("CharacterPortraitURL", "")).strip()
+            if character_name and character_name.casefold() != "none" and portrait:
+                candidates.setdefault(
+                    portrait,
+                    ("Characters", character_name),
+                )
+
+            title = str(record.get("Title", "")).strip() or "Mission Image"
+            reference = str(record.get("ReferenceImageURL", "")).strip()
+            if reference:
+                candidates.setdefault(
+                    reference,
+                    ("Mission Images", title),
+                )
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        added = 0
+        for reference, (category, name) in candidates.items():
+            if reference in existing_references:
+                continue
+            asset_id = self._catalogue_asset_id(category, name, reference)
+            self._append_record(
+                self.assets,
+                {
+                    "AssetID": asset_id,
+                    "Category": category,
+                    "Name": name,
+                    "MediaReference": reference,
+                    "CreatedAt": now,
+                    "UpdatedAt": now,
+                },
+            )
+            existing_references.add(reference)
+            added += 1
+        if added:
+            self.clear_cache()
+        return {"Added": added}
+
+    def create_asset(self, category, name, uploaded_file):
+        clean_category = str(category or "").strip()
+        clean_name = str(name or "").strip()
+        if clean_category not in {
+            "Characters", "Mission Images", "Logos", "Backgrounds",
+        }:
+            raise ValueError("Select a valid Asset Library category.")
+        if not clean_name:
+            raise ValueError("Asset name is required.")
+        if uploaded_file is None:
+            raise ValueError("Choose an image to upload.")
+
+        asset_id = self._catalogue_asset_id(
+            clean_category,
+            clean_name,
+            datetime.now().isoformat(),
+        )
+        from data.mission_media import upload_library_asset
+
+        reference = upload_library_asset(uploaded_file, asset_id)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._append_record(
+            self.assets,
+            {
+                "AssetID": asset_id,
+                "Category": clean_category,
+                "Name": clean_name,
+                "MediaReference": reference,
+                "FileName": str(getattr(uploaded_file, "name", "") or ""),
+                "ContentType": str(getattr(uploaded_file, "type", "") or ""),
+                "CreatedAt": now,
+                "UpdatedAt": now,
+            },
+        )
+        self.clear_cache()
+        return {"AssetID": asset_id, "MediaReference": reference}
+
+    def update_asset(self, asset_id, name="", uploaded_file=None):
+        wanted = str(asset_id or "").strip()
+        assets = list(get_sheet_records("Assets"))
+        row_number = next(
+            (
+                index for index, asset in enumerate(assets, start=2)
+                if str(asset.get("AssetID", "")).strip() == wanted
+            ),
+            None,
+        )
+        if row_number is None:
+            raise ValueError(f"Asset {wanted} was not found.")
+
+        payload = dict(assets[row_number - 2])
+        clean_name = str(name or payload.get("Name", "")).strip()
+        if not clean_name:
+            raise ValueError("Asset name is required.")
+        payload["Name"] = clean_name
+        if uploaded_file is not None:
+            from data.mission_media import upload_library_asset
+
+            previous_reference = str(
+                payload.get("MediaReference", "") or ""
+            ).strip()
+            payload["MediaReference"] = upload_library_asset(
+                uploaded_file,
+                wanted,
+                current_reference=previous_reference,
+            )
+            payload["FileName"] = str(
+                getattr(uploaded_file, "name", "") or ""
+            )
+            payload["ContentType"] = str(
+                getattr(uploaded_file, "type", "") or ""
+            )
+            if payload["MediaReference"] != previous_reference:
+                self._replace_asset_reference(
+                    previous_reference,
+                    payload["MediaReference"],
+                )
+        payload["UpdatedAt"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        headers = self.assets.row_values(1)
+        values = [payload.get(header, "") for header in headers]
+        end_cell = gspread.utils.rowcol_to_a1(row_number, len(headers))
+        self.assets.update(
+            values=[values],
+            range_name=f"A{row_number}:{end_cell}",
+        )
+        self.clear_cache()
+        return {"AssetID": wanted, "Action": "Updated"}
+
+    def _replace_asset_reference(self, previous_reference, new_reference):
+        if not previous_reference or previous_reference == new_reference:
+            return 0
+        updated = 0
+        for sheet_name, worksheet in (
+            ("Missions", self.missions),
+            ("MissionTemplates", self.mission_templates),
+        ):
+            headers = worksheet.row_values(1)
+            updates = []
+            for row_number, record in enumerate(
+                get_sheet_records(sheet_name),
+                start=2,
+            ):
+                for field in (
+                    "ImageURL",
+                    "ReferenceImageURL",
+                    "CharacterPortraitURL",
+                ):
+                    if (
+                        field in headers
+                        and str(record.get(field, "")).strip()
+                        == previous_reference
+                    ):
+                        column = headers.index(field) + 1
+                        updates.append({
+                            "range": gspread.utils.rowcol_to_a1(
+                                row_number,
+                                column,
+                            ),
+                            "values": [[new_reference]],
+                        })
+                        updated += 1
+            if updates:
+                worksheet.batch_update(updates)
+        return updated
+
+    def delete_asset(self, asset_id):
+        wanted = str(asset_id or "").strip()
+        assets = list(get_sheet_records("Assets"))
+        row_number = next(
+            (
+                index for index, asset in enumerate(assets, start=2)
+                if str(asset.get("AssetID", "")).strip() == wanted
+            ),
+            None,
+        )
+        if row_number is None:
+            raise ValueError(f"Asset {wanted} was not found.")
+
+        asset = assets[row_number - 2]
+        reference = str(asset.get("MediaReference", "")).strip()
+        used_by = []
+        for sheet_name in ("Missions", "MissionTemplates"):
+            for record in get_sheet_records(sheet_name):
+                if reference and reference in {
+                    str(record.get("ImageURL", "")).strip(),
+                    str(record.get("ReferenceImageURL", "")).strip(),
+                    str(record.get("CharacterPortraitURL", "")).strip(),
+                }:
+                    used_by.append(
+                        str(
+                            record.get("MissionID")
+                            or record.get("TemplateID")
+                            or record.get("Title")
+                            or "record"
+                        )
+                    )
+        if used_by:
+            raise ValueError(
+                "This asset is still used by "
+                + ", ".join(sorted(set(used_by))[:8])
+                + ". Replace those selections before deleting it."
+            )
+
+        self.assets.delete_rows(row_number)
+        if reference:
+            from data.mission_media import delete_mission_media_references
+
+            delete_mission_media_references([reference])
+        self.clear_cache()
+        return {"AssetID": wanted, "Action": "Deleted"}
 
     # -------------------------
     # Events

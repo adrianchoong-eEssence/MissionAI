@@ -9,7 +9,6 @@ import streamlit as st
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
 from data.mission_media import (
     get_mission_media_url,
-    upload_character_portrait,
     upload_mission_media,
 )
 from screens.app_state import active_event_index
@@ -28,17 +27,6 @@ SUBMISSION_TYPES = [
 ]
 
 EVIDENCE_TYPES = ["TEXT", "PHOTO", "VIDEO", "AUDIO", "QR", "GPS", "MULTIPLE"]
-CHARACTER_SOURCES = [
-    "None",
-    "EVA",
-    "Commander Orion",
-    "Captain Amelia Ross",
-    "Dr Marcus Hale",
-    "Unknown Signal",
-    "The King",
-]
-
-
 def yes_no(value, default="No"):
     return "Yes" if str(value or default).strip().upper() in {
         "YES", "TRUE", "1", "ON", "ACTIVE", "MANDATORY",
@@ -324,6 +312,9 @@ def _mission_editor(db, event_id, selected):
 def _experience_designer(db, event_id, selected):
     mission_id = str(selected.get("MissionID", "")).strip().upper()
     key = f"experience_{event_id}_{mission_id}"
+    db.ensure_existing_assets_catalogued()
+    character_assets = db.get_assets("Characters")
+    mission_image_assets = db.get_assets("Mission Images")
     st.markdown(
         """
         <style>
@@ -368,22 +359,43 @@ def _experience_designer(db, event_id, selected):
             companion_prompt = str(selected.get("AIPrompt", ""))
             time_limit = safe_int(selected.get("TimeLimitMinutes"), 10)
             if mission_type == "Observe":
-                reference_upload = st.file_uploader(
-                    "Replace Image" if reference else "Upload Reference Image",
-                    type=["jpg", "jpeg", "png", "webp", "heic"],
-                    key=f"{key}_reference_upload",
-                    help="Supported formats: JPG, PNG, WEBP, and HEIC where supported.",
+                image_by_id = {
+                    str(asset.get("AssetID", "")): asset
+                    for asset in mission_image_assets
+                }
+                image_options = [""] + list(image_by_id)
+                current_image_id = next(
+                    (
+                        asset_id for asset_id, asset in image_by_id.items()
+                        if str(asset.get("MediaReference", "")).strip()
+                        == reference.strip()
+                    ),
+                    "",
                 )
-                remove_reference = st.checkbox(
-                    "Remove Image",
-                    value=False,
-                    key=f"{key}_remove_reference",
-                    disabled=not bool(reference),
+                selected_image_id = st.selectbox(
+                    "Select Mission Image",
+                    image_options,
+                    index=image_options.index(current_image_id),
+                    format_func=lambda asset_id: (
+                        "None"
+                        if not asset_id
+                        else str(image_by_id[asset_id].get("Name", "Untitled"))
+                    ),
+                    key=f"{key}_reference_asset",
+                    help="Add or replace reusable images in Administration → Asset Library.",
                 )
-                reference_preview = (
-                    reference_image_preview_source(reference, reference_upload)
-                    if reference_upload is not None or not remove_reference
+                resolved_selected_reference = (
+                    str(
+                        image_by_id[selected_image_id].get(
+                            "MediaReference",
+                            "",
+                        )
+                    ).strip()
+                    if selected_image_id
                     else ""
+                )
+                reference_preview = reference_image_preview_source(
+                    resolved_selected_reference
                 )
                 if reference_preview:
                     try:
@@ -405,14 +417,14 @@ def _experience_designer(db, event_id, selected):
                 )
                 type_guidance = st.text_area("Observation Instructions", value=str(selected.get("EvidenceInstructions", "")), key=f"{key}_observe")
             elif mission_type == "Think":
-                reference_upload, remove_reference = None, False
+                resolved_selected_reference = reference
                 reference_preview = reference_image_preview_source(reference)
                 crop_framing_note = str(selected.get("CropFramingNote", ""))
                 companion_prompt = st.text_area("AI Companion Prompt", value=companion_prompt, key=f"{key}_think_ai")
                 reasoning = st.text_area("Reasoning Prompt", value=reasoning, key=f"{key}_reason")
                 type_guidance = str(selected.get("EvidenceInstructions", ""))
             else:
-                reference_upload, remove_reference = None, False
+                resolved_selected_reference = reference
                 reference_preview = reference_image_preview_source(reference)
                 crop_framing_note = str(selected.get("CropFramingNote", ""))
                 interaction = st.text_area("Interaction", value=interaction, key=f"{key}_interaction")
@@ -448,50 +460,57 @@ def _experience_designer(db, event_id, selected):
                 stored_character = str(
                     selected.get("CharacterSource", "None") or "None"
                 ).strip()
-                stored_character = (
-                    stored_character
-                    if stored_character in CHARACTER_SOURCES
-                    else "None"
-                )
-                character_source = st.selectbox(
-                    "Character Source",
-                    CHARACTER_SOURCES,
-                    index=CHARACTER_SOURCES.index(stored_character),
-                    key=f"{key}_character_source",
-                )
-                portrait_reference = str(
+                stored_portrait = str(
                     selected.get("CharacterPortraitURL", "") or ""
                 ).strip()
-                if (
-                    character_source != stored_character
-                    and character_source != "None"
-                ):
-                    portrait_reference = db.get_character_portrait(
-                        character_source
-                    )
-                if character_source == "None":
-                    portrait_reference = ""
-                portrait_upload = st.file_uploader(
-                    "Replace Portrait"
-                    if portrait_reference
-                    else "Character Portrait Upload",
-                    type=["jpg", "jpeg", "png", "webp", "heic"],
-                    key=f"{key}_character_portrait_upload",
-                    help="Upload from device. JPG, PNG, WEBP, and HEIC where supported.",
+                character_by_id = {
+                    str(asset.get("AssetID", "")): asset
+                    for asset in character_assets
+                }
+                character_options = [""] + list(character_by_id)
+                current_character_id = next(
+                    (
+                        asset_id
+                        for asset_id, asset in character_by_id.items()
+                        if (
+                            str(asset.get("MediaReference", "")).strip()
+                            == stored_portrait
+                            or (
+                                not stored_portrait
+                                and str(asset.get("Name", "")).strip()
+                                == stored_character
+                            )
+                        )
+                    ),
+                    "",
                 )
-                remove_portrait = st.checkbox(
-                    "Remove Portrait",
-                    value=False,
-                    disabled=not bool(portrait_reference),
-                    key=f"{key}_remove_character_portrait",
+                selected_character_id = st.selectbox(
+                    "Select Character",
+                    character_options,
+                    index=character_options.index(current_character_id),
+                    format_func=lambda asset_id: (
+                        "None"
+                        if not asset_id
+                        else str(
+                            character_by_id[asset_id].get("Name", "Untitled")
+                        )
+                    ),
+                    key=f"{key}_character_asset",
+                    help="Manage reusable portraits in Administration → Asset Library.",
                 )
-                portrait_preview = (
-                    reference_image_preview_source(
-                        portrait_reference,
-                        portrait_upload,
-                    )
-                    if portrait_upload is not None or not remove_portrait
-                    else ""
+                selected_character = (
+                    character_by_id.get(selected_character_id, {})
+                    if selected_character_id
+                    else {}
+                )
+                character_source = str(
+                    selected_character.get("Name", "None") or "None"
+                ).strip()
+                portrait_reference = str(
+                    selected_character.get("MediaReference", "") or ""
+                ).strip()
+                portrait_preview = reference_image_preview_source(
+                    portrait_reference
                 )
                 if portrait_preview:
                     try:
@@ -516,7 +535,6 @@ def _experience_designer(db, event_id, selected):
             hints = "\n".join(str(selected.get(f"Hint{i}", "") or "") for i in range(1, 4)).strip()
             character_source = str(selected.get("CharacterSource", "None") or "None")
             portrait_reference = str(selected.get("CharacterPortraitURL", "") or "")
-            portrait_upload, remove_portrait = None, False
             portrait_preview = get_mission_media_url(portrait_reference)
 
         with st.expander("06 · Facilitator · Hidden from participants"):
@@ -552,27 +570,8 @@ def _experience_designer(db, event_id, selected):
         if not title.strip() or not mission.strip():
             st.error("Story Title and Experience are required.")
             return
-        resolved_reference = "" if remove_reference else reference
-        if reference_upload is not None:
-            try:
-                resolved_reference = upload_mission_media(
-                    reference_upload,
-                    f"{event_id}-{mission_id}",
-                    "image",
-                )
-            except Exception as error:
-                st.error(f"Reference image upload failed: {error}")
-                return
-        resolved_portrait = "" if remove_portrait else portrait_reference
-        if portrait_upload is not None and character_source != "None":
-            try:
-                resolved_portrait = upload_character_portrait(
-                    portrait_upload,
-                    character_source,
-                )
-            except Exception as error:
-                st.error(f"Character portrait upload failed: {error}")
-                return
+        resolved_reference = resolved_selected_reference
+        resolved_portrait = portrait_reference
         hint_values = [line.strip() for line in hints.splitlines() if line.strip()][:3]
         payload = dict(selected)
         payload.update({

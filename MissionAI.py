@@ -2,6 +2,7 @@ import streamlit as st
 
 from branding import apply_branding, configure_page, footer
 from screens.administration import APP_VERSION, show_administration
+from screens.asset_library import show_asset_library
 from screens.app_state import ACTIVE_EVENT_KEY, NAVIGATION_REQUEST_KEY
 from screens.command_centre import show_results_reports
 from screens.control_centre import show_control_centre
@@ -24,6 +25,7 @@ PAGES = [
     "Projector",
     "Reports",
     "Administration",
+    "Asset Library",
 ]
 PAGE_LABELS = {
     "Mission Studio": "Experience Studio",
@@ -70,7 +72,9 @@ elif page == "Projector":
     show_leaderboard_display()
 elif page == "Reports":
     show_results_reports()
-else:
+elif page == "Administration":
     show_administration()
+else:
+    show_asset_library()
 
 footer(report=page == "Reports")

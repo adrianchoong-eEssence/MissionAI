@@ -87,6 +87,33 @@ def upload_character_portrait(uploaded_file, character_source):
     return REFERENCE_PREFIX + storage_path
 
 
+def upload_library_asset(uploaded_file, asset_id, current_reference=""):
+    """Store or replace one reusable Asset Library object."""
+    if uploaded_file is None:
+        return ""
+    file_bytes = uploaded_file.getvalue()
+    if not file_bytes:
+        raise ValueError("The selected asset file is empty.")
+    if len(file_bytes) > MEDIA_LIMITS["image"]:
+        raise ValueError("The asset file exceeds the 10 MB limit.")
+
+    asset_segment = _safe_segment(str(asset_id).lower(), "unassigned-asset")
+    storage_path = (
+        _storage_path(current_reference)
+        or f"assets/{asset_segment}/file"
+    )
+    content_type = str(
+        getattr(uploaded_file, "type", "") or "application/octet-stream"
+    )
+    get_runtime_database().upload_mission_media(
+        storage_path=storage_path,
+        media_bytes=file_bytes,
+        content_type=content_type,
+    )
+    get_mission_media_url.clear()
+    return REFERENCE_PREFIX + storage_path
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def get_mission_media_url(reference, expires_in=1800):
     value = str(reference or "").strip()
