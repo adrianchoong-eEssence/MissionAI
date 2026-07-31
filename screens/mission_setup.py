@@ -1,6 +1,7 @@
 import base64
 import html
 import io
+import json
 import re
 import urllib.request
 
@@ -45,18 +46,6 @@ def reference_image_preview_source(reference, uploaded_file=None):
     return get_mission_media_url(reference)
 
 
-class _ImageUpload:
-    """Small UploadedFile-compatible wrapper for generated image bytes."""
-
-    def __init__(self, image_bytes, name="reference-image.png"):
-        self._image_bytes = image_bytes
-        self.name = name
-        self.type = "image/png"
-
-    def getvalue(self):
-        return self._image_bytes
-
-
 def crop_reference_image(image_bytes, crop_box):
     """Crop an image using a validated pixel box and return browser-safe PNG."""
     image = Image.open(io.BytesIO(image_bytes))
@@ -78,6 +67,14 @@ def assign_reference_image(db, mission, reference):
     """Persist one existing media reference without changing other fields."""
     payload = dict(mission)
     payload["ReferenceImageURL"] = str(reference or "").strip()
+    return db.upsert_event_mission(payload)
+
+
+def assign_reference_crop(db, mission, asset_id, coordinates):
+    """Persist non-destructive crop metadata against the original asset."""
+    payload = dict(mission)
+    payload["OriginalAssetID"] = str(asset_id or "").strip()
+    payload["CropCoordinates"] = json.dumps(coordinates, separators=(",", ":"))
     return db.upsert_event_mission(payload)
 
 
@@ -232,8 +229,8 @@ def _reference_image_editor(
                 st.info("Choose or upload a library image before replacing it.")
     with crop_col:
         with st.popover("Crop Image", width="stretch"):
-            if not current_reference:
-                st.info("Choose an image before cropping.")
+            if not current_reference or not current_asset_id:
+                st.info("Choose a Mission Image asset before cropping.")
             else:
                 try:
                     source_bytes = _reference_image_bytes(current_reference)
@@ -242,49 +239,62 @@ def _reference_image_editor(
                 except Exception:
                     st.warning("This image could not be opened for cropping.")
                 else:
-                    st.caption("Adjust the framing. A new reusable crop is created automatically.")
-                    left_pct, right_pct = st.slider(
-                        "Horizontal crop (%)",
-                        0, 100, (0, 100),
-                        key=f"{key}_crop_horizontal",
+                    from streamlit_cropper import st_cropper
+
+                    st.caption("Drag to pan. Drag handles to resize. Use Zoom for tighter framing.")
+                    zoom = st.slider("Zoom", 100, 400, 100, 10, key=f"{key}_crop_zoom")
+                    pan_x = st.slider("Pan horizontally", -100, 100, 0, key=f"{key}_crop_pan_x")
+                    pan_y = st.slider("Pan vertically", -100, 100, 0, key=f"{key}_crop_pan_y")
+                    crop_width = max(1, round(width * 100 / zoom))
+                    crop_height = max(1, round(height * 100 / zoom))
+                    left = max(0, min(width - crop_width, round((width - crop_width) * (pan_x + 100) / 200)))
+                    top = max(0, min(height - crop_height, round((height - crop_height) * (pan_y + 100) / 200)))
+                    defaults = (left, left + crop_width, top, top + crop_height)
+                    rect = st_cropper(
+                        source_image,
+                        realtime_update=True,
+                        default_coords=defaults,
+                        box_color="#D4AF37",
+                        return_type="box",
+                        key=f"{key}_interactive_crop_{zoom}_{pan_x}_{pan_y}",
                     )
-                    top_pct, bottom_pct = st.slider(
-                        "Vertical crop (%)",
-                        0, 100, (0, 100),
-                        key=f"{key}_crop_vertical",
+                    reset_col, save_col = st.columns(2)
+                    with reset_col:
+                        if st.button("Reset Crop", key=f"{key}_reset_crop", width="stretch"):
+                            for suffix in ("crop_zoom", "crop_pan_x", "crop_pan_y"):
+                                st.session_state.pop(f"{key}_{suffix}", None)
+                            st.rerun()
+                    coordinates = {
+                        "x": round(rect["left"] / width, 6),
+                        "y": round(rect["top"] / height, 6),
+                        "width": round(rect["width"] / width, 6),
+                        "height": round(rect["height"] / height, 6),
+                    }
+                    cropped_bytes = crop_reference_image(
+                        source_bytes,
+                        (
+                            rect["left"], rect["top"],
+                            rect["left"] + rect["width"],
+                            rect["top"] + rect["height"],
+                        ),
                     )
-                    valid_crop = right_pct > left_pct and bottom_pct > top_pct
-                    box = (
-                        round(width * left_pct / 100),
-                        round(height * top_pct / 100),
-                        round(width * right_pct / 100),
-                        round(height * bottom_pct / 100),
-                    )
-                    if valid_crop:
-                        cropped_bytes = crop_reference_image(source_bytes, box)
-                        st.image(cropped_bytes, caption="Crop preview", width="stretch")
-                    else:
-                        cropped_bytes = b""
-                        st.error("The crop must have visible width and height.")
-                    if st.button(
-                        "Save Crop and Use",
-                        type="primary",
-                        disabled=not valid_crop,
-                        key=f"{key}_save_crop",
-                        width="stretch",
-                    ):
+                    st.image(cropped_bytes, caption="Crop preview", width="stretch")
+                    with save_col:
+                        save_crop = st.button(
+                            "Save Crop",
+                            type="primary",
+                            key=f"{key}_save_crop",
+                            width="stretch",
+                        )
+                    if save_crop:
                         try:
-                            result = db.create_asset(
-                                "Mission Images",
-                                f"{title or 'Experience'} — Crop",
-                                _ImageUpload(cropped_bytes),
+                            assign_reference_crop(
+                                db, mission_record, current_asset_id, coordinates,
                             )
                         except Exception as error:
                             st.error(str(error))
                         else:
-                            st.session_state[state_key] = result["MediaReference"]
-                            st.session_state[source_key] = reference
-                            st.rerun()
+                            st.success("Crop saved. Original asset unchanged.")
     with remove_col:
         if st.button(
             "Remove Image",

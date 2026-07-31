@@ -7,5 +7,6 @@ pandas
 pydeck
 openpyxl
 streamlit-autorefresh
+streamlit-cropper==0.3.1
 google-api-python-client
 qrcode[pil]

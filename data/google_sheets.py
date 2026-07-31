@@ -50,7 +50,8 @@ REQUIRED_WORKSHEETS = {
         "Interaction", "ReasoningPrompt", "Difficulty",
         "EstimatedTimeMinutes", "MissionCompleteMessage",
         "AIRestrictions", "FacilitatorIntent", "LearningIntent", "SafetyNotes",
-        "CropFramingNote", "CharacterSource", "CharacterPortraitURL",
+        "CropFramingNote", "OriginalAssetID", "CropCoordinates",
+        "CharacterSource", "CharacterPortraitURL",
     ],
     "MissionTemplates": [
         "TemplateID", "Title", "Story", "ParticipantInstructions",

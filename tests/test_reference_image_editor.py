@@ -1,8 +1,13 @@
 import io
+import json
 
 from PIL import Image
 
-from screens.mission_setup import assign_reference_image, crop_reference_image
+from screens.mission_setup import (
+    assign_reference_crop,
+    assign_reference_image,
+    crop_reference_image,
+)
 
 
 def _png(width=200, height=100):
@@ -51,3 +56,20 @@ def test_uploaded_asset_reference_is_assigned_without_mutating_other_fields():
     assert db.payload["Title"] == "The Paris Fragment"
     assert db.payload["CreditValue"] == "100"
     assert mission["ReferenceImageURL"] == "old-reference"
+
+
+def test_crop_saves_only_original_asset_id_and_coordinates():
+    class DB:
+        def upsert_event_mission(self, payload):
+            self.payload = payload
+            return payload
+
+    db = DB()
+    mission = {"EventID": "EVT-0004", "MissionID": "LAB01", "ReferenceImageURL": "original"}
+    coords = {"x": 0.1, "y": 0.2, "width": 0.5, "height": 0.4}
+
+    assign_reference_crop(db, mission, "MISSION-IMAGES-001", coords)
+
+    assert db.payload["OriginalAssetID"] == "MISSION-IMAGES-001"
+    assert json.loads(db.payload["CropCoordinates"]) == coords
+    assert db.payload["ReferenceImageURL"] == "original"
