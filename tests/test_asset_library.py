@@ -260,7 +260,7 @@ def test_experience_studio_uses_visual_reference_image_editor():
 
     assert '"Select Character"' in source
     assert '"Select Mission Image"' not in source
-    assert '"Choose Image"' in source
+    assert '"Choose From Asset Library"' in source
     assert "Asset Library · Mission Images" in source
     assert '"Selected" if asset_id == current_asset_id else "Choose"' in source
     assert "st.session_state[state_key] = selected_reference" in source
@@ -268,4 +268,7 @@ def test_experience_studio_uses_visual_reference_image_editor():
     assert '"Replace Image"' in source
     assert '"Crop Image"' in source
     assert '"Remove Image"' in source
+    assert source.index("_reference_image_editor(", source.index("time_limit =")) < source.index(
+        'if mission_type == "Observe"', source.index("time_limit =")
+    )
     assert "Character Portrait Upload" not in source

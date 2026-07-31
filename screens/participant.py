@@ -1004,8 +1004,11 @@ def render_mission_content(mission):
             st.warning("The experience image could not be displayed.")
 
     if (
-        str(mission.get("MissionType", "") or "").strip().casefold()
-        == "observe"
+        (
+            str(mission.get("MissionType", "") or "").strip().casefold()
+            == "observe"
+            or _is_bayu_event()
+        )
         and display_reference_image_url
     ):
         st.markdown("#### Reference Image")

@@ -251,6 +251,7 @@ def test_required_bayu_participant_copy_and_history_fix_are_present():
     assert "Only your Team Leader can submit evidence for the team." in source
     assert "check #" not in source
     assert 'if str(st.query_params.get(key, "")) != str(value)' in source
+    assert "or _is_bayu_event()" in source
 
 
 def test_current_team_leader_grants_only_the_selected_participant():

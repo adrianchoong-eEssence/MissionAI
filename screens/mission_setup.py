@@ -190,7 +190,7 @@ def _reference_image_editor(
 
     choose_col, upload_col = st.columns(2)
     with choose_col:
-        with st.popover("Choose Image", width="stretch"):
+        with st.popover("Choose From Asset Library", width="stretch"):
             st.markdown("**Asset Library · Mission Images**")
             st.caption("Select an existing image. EXOS references the asset without duplicating it.")
             if not image_by_id:
@@ -724,17 +724,17 @@ def _experience_designer(db, event_id, selected):
             reasoning = str(selected.get("ReasoningPrompt", ""))
             companion_prompt = str(selected.get("AIPrompt", ""))
             time_limit = safe_int(selected.get("TimeLimitMinutes"), 10)
-            if mission_type == "Observe":
-                resolved_selected_reference, reference_preview = (
-                    _reference_image_editor(
-                        db,
-                        key,
-                        title,
-                        reference,
-                        mission_image_assets,
-                        selected,
-                    )
+            resolved_selected_reference, reference_preview = (
+                _reference_image_editor(
+                    db,
+                    key,
+                    title,
+                    reference,
+                    mission_image_assets,
+                    selected,
                 )
+            )
+            if mission_type == "Observe":
                 crop_framing_note = st.text_input(
                     "Crop / Framing Note",
                     value=str(selected.get("CropFramingNote", "")),
@@ -743,15 +743,11 @@ def _experience_designer(db, event_id, selected):
                 )
                 type_guidance = st.text_area("Observation Instructions", value=str(selected.get("EvidenceInstructions", "")), key=f"{key}_observe")
             elif mission_type == "Think":
-                resolved_selected_reference = reference
-                reference_preview = reference_image_preview_source(reference)
                 crop_framing_note = str(selected.get("CropFramingNote", ""))
                 companion_prompt = st.text_area("AI Companion Prompt", value=companion_prompt, key=f"{key}_think_ai")
                 reasoning = st.text_area("Reasoning Prompt", value=reasoning, key=f"{key}_reason")
                 type_guidance = str(selected.get("EvidenceInstructions", ""))
             else:
-                resolved_selected_reference = reference
-                reference_preview = reference_image_preview_source(reference)
                 crop_framing_note = str(selected.get("CropFramingNote", ""))
                 interaction = st.text_area("Interaction", value=interaction, key=f"{key}_interaction")
                 time_limit = st.slider("Time Limit (minutes)", 0, 180, min(time_limit, 180), key=f"{key}_time")
@@ -881,7 +877,7 @@ def _experience_designer(db, event_id, selected):
         st.markdown('<div class="studio-step">Live Preview</div>', unsafe_allow_html=True)
         st.caption("Participant view · updates as you edit")
         clean = lambda value: html.escape(str(value or "")).replace("\n", "<br>")
-        image = f'<img src="{clean(reference_preview)}" alt="Reference" style="width:100%;height:auto;border-radius:12px;margin-top:10px">' if reference_preview and mission_type == "Observe" else ""
+        image = f'<img src="{clean(reference_preview)}" alt="Reference" style="width:100%;height:auto;border-radius:12px;margin-top:10px">' if reference_preview else ""
         character_card = (
             f'<div class="character-preview"><img src="{clean(portrait_preview)}" '
             f'alt="{clean(character_source)}"><strong>{clean(character_source)}</strong>'
