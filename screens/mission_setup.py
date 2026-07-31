@@ -74,6 +74,13 @@ def crop_reference_image(image_bytes, crop_box):
     return output.getvalue()
 
 
+def assign_reference_image(db, mission, reference):
+    """Persist one existing media reference without changing other fields."""
+    payload = dict(mission)
+    payload["ReferenceImageURL"] = str(reference or "").strip()
+    return db.upsert_event_mission(payload)
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _reference_image_bytes(reference):
     preview_url = get_mission_media_url(reference)
@@ -85,7 +92,14 @@ def _reference_image_bytes(reference):
         return response.read()
 
 
-def _reference_image_editor(db, key, title, reference, image_assets):
+def _reference_image_editor(
+    db,
+    key,
+    title,
+    reference,
+    image_assets,
+    mission_record,
+):
     """Render a visual Asset Library-backed reference image workflow."""
     state_key = f"{key}_reference_value"
     source_key = f"{key}_reference_source"
@@ -168,9 +182,22 @@ def _reference_image_editor(db, key, title, reference, image_assets):
                 except Exception as error:
                     st.error(str(error))
                 else:
-                    st.session_state[state_key] = result["MediaReference"]
-                    st.session_state[source_key] = reference
-                    st.rerun()
+                    try:
+                        assign_reference_image(
+                            db,
+                            mission_record,
+                            result["MediaReference"],
+                        )
+                    except Exception as error:
+                        st.error(
+                            "The image was added to the Asset Library, but "
+                            f"could not be assigned to this Experience: {error}"
+                        )
+                    else:
+                        st.session_state[state_key] = result["MediaReference"]
+                        st.session_state[source_key] = result["MediaReference"]
+                        st.success("Image uploaded and assigned to this Experience.")
+                        st.rerun()
 
     replace_col, crop_col, remove_col = st.columns(3)
     with replace_col:
@@ -612,6 +639,7 @@ def _experience_designer(db, event_id, selected):
                         title,
                         reference,
                         mission_image_assets,
+                        selected,
                     )
                 )
                 crop_framing_note = st.text_input(
