@@ -100,6 +100,29 @@ _LAST_SUCCESSFUL_SHEET_RECORDS = {}
 _PARTICIPANT_COUNT_LOCK = threading.RLock()
 _SHEET_RECORDS_LOCK = threading.RLock()
 
+BAYU_COUNTRY_TEAMS = (
+    {"TeamID": "BAYU-KR", "TeamName": "🇰🇷 Korea", "Country": "Korea", "Language": "Korean"},
+    {"TeamID": "BAYU-JP", "TeamName": "🇯🇵 Japan", "Country": "Japan", "Language": "Japanese"},
+    {"TeamID": "BAYU-TH", "TeamName": "🇹🇭 Thailand", "Country": "Thailand", "Language": "Thai"},
+    {"TeamID": "BAYU-PH", "TeamName": "🇵🇭 Philippines", "Country": "Philippines", "Language": "Filipino"},
+    {"TeamID": "BAYU-MY", "TeamName": "🇲🇾 Malaysia", "Country": "Malaysia", "Language": "Malay"},
+    {"TeamID": "BAYU-IN", "TeamName": "🇮🇳 India", "Country": "India", "Language": "Hindi"},
+)
+
+
+def bayu_country_teams():
+    return [
+        {"EventID": "EVT-0004", "Score": 0, "Status": "Active", **team}
+        for team in BAYU_COUNTRY_TEAMS
+    ]
+
+
+def _country_from_participant_status(status):
+    value = str(status or "")
+    if "COUNTRY:" not in value:
+        return ""
+    return value.split("COUNTRY:", 1)[1].split("|", 1)[0].strip()
+
 
 def _sheet_status_code(error):
     response = getattr(error, "response", None)
@@ -1672,6 +1695,8 @@ class GoogleSheetsDB:
         self.clear_cache()
 
     def get_teams(self, event_id):
+        if str(event_id).strip() == "EVT-0004":
+            return bayu_country_teams()
         return [
             team
             for team in get_sheet_records("Teams")
@@ -1768,7 +1793,48 @@ class GoogleSheetsDB:
     def join_player_by_code(self, join_code, name, country=""):
         if self.runtime.is_configured:
             event = self.get_event_by_join_code(join_code)
-            teams = self.get_teams(event.get("EventID", "")) if event else []
+            event_id = str((event or {}).get("EventID", "")).strip()
+            teams = self.get_teams(event_id) if event else []
+            if event_id == "EVT-0004":
+                player = self.runtime.join_player(join_code, name)
+                existing_country = str(player.get("Country", "") or "").strip()
+                if not existing_country:
+                    existing_country = _country_from_participant_status(
+                        player.get("Status", "")
+                    )
+                canonical = {
+                    str(team["Country"]).casefold(): team for team in teams
+                }
+                if existing_country.casefold() in canonical:
+                    selected = canonical[existing_country.casefold()]
+                else:
+                    players = self.runtime.get_players(event_id)
+                    counts = {str(team["TeamName"]): 0 for team in teams}
+                    current_token = str(player.get("SessionToken", ""))
+                    for row in players:
+                        if str(row.get("SessionToken", "")) == current_token:
+                            continue
+                        team_name = str(row.get("Team", ""))
+                        if team_name in counts:
+                            counts[team_name] += 1
+                    selected = min(
+                        teams,
+                        key=lambda team: (
+                            counts[str(team["TeamName"])],
+                            next(
+                                index for index, item in enumerate(teams)
+                                if item["TeamName"] == team["TeamName"]
+                            ),
+                        ),
+                    )
+                    self.runtime.assign_participant_country_team(
+                        player.get("SessionToken", ""),
+                        selected["TeamName"],
+                        selected["Country"],
+                    )
+                player["Team"] = selected["TeamName"]
+                player["Country"] = selected["Country"]
+                return player
             matching = [
                 team for team in teams
                 if str(team.get("Country", "")).strip().casefold()
@@ -1807,12 +1873,22 @@ class GoogleSheetsDB:
         # Existing participant rejoins
         existing_player = self.get_player(event_id, clean_name)
         if existing_player:
+            existing_team = str(existing_player.get("Team", ""))
+            existing_country = next(
+                (
+                    str(team.get("Country", ""))
+                    for team in self.get_teams(event_id)
+                    if str(team.get("TeamName", "")) == existing_team
+                ),
+                "",
+            )
             return {
                 "EventID": existing_player.get("EventID", event_id),
                 "Name": existing_player.get("Name", clean_name),
                 "Team": existing_player.get("Team", ""),
                 "Points": existing_player.get("Points", 0),
                 "Status": existing_player.get("Status", "Waiting"),
+                "Country": existing_player.get("Country", existing_country),
             }
 
         teams = self.get_teams(event_id)
@@ -1855,7 +1931,21 @@ class GoogleSheetsDB:
             == str(country or "").strip().casefold()
         ]
         # ---------- Assign Team ----------
+        selected_team = (
+            min(
+                teams,
+                key=lambda candidate: sum(
+                    1 for row in self.get_players()
+                    if str(row.get("EventID", "")) == "EVT-0004"
+                    and str(row.get("Team", "")) == str(candidate["TeamName"])
+                ),
+            )
+            if str(event_id) == "EVT-0004"
+            else None
+        )
         team = (
+            selected_team["TeamName"] if selected_team
+            else
             matching[0]["TeamName"] if country and matching
             else teams[next_team_index % len(teams)]["TeamName"]
         )
@@ -1891,8 +1981,35 @@ class GoogleSheetsDB:
             "Team": team,
             "Points": 0,
             "Status": "Waiting",
-            "Country": country,
+            "Country": (
+                selected_team.get("Country", "") if selected_team else country
+            ),
         }
+
+    def get_country_team_summary(self, event_id):
+        teams = self.get_teams(event_id)
+        players = [
+            row for row in self.get_players()
+            if str(row.get("EventID", "")) == str(event_id)
+        ]
+        rows = []
+        for team in teams:
+            team_name = str(team.get("TeamName", ""))
+            members = [
+                row for row in players
+                if str(row.get("Team", "")) == team_name
+            ]
+            leader = next((row for row in members if row.get("IsLeader")), {})
+            country = str(team.get("Country", ""))
+            flag = team_name.split(" ", 1)[0] if team_name else ""
+            rows.append({
+                "Country": country,
+                "Flag": flag,
+                "Assigned Team": team_name,
+                "Current Team Leader": leader.get("Name", "Not selected"),
+                "Participant Count": len(members),
+            })
+        return rows
 
     def get_team_roster(self, event_id, team_name):
         if self.runtime.can_publish:

@@ -4,7 +4,7 @@ from unittest.mock import patch
 import streamlit as st
 
 from data.runtime_database import SupabaseRuntimeDB
-from data.google_sheets import GoogleSheetsDB
+from data.google_sheets import GoogleSheetsDB, bayu_country_teams
 from screens.live_event_console import approval_score
 from screens.participant import (
     EVA_EXPEDITION_OPENING_TRANSMISSION,
@@ -182,7 +182,7 @@ def test_existing_team_leader_prevents_a_second_claim():
     assert result == {"Claimed": False, "LeaderName": "Existing Leader"}
 
 
-def test_country_join_overrides_round_robin_with_configured_team_mapping():
+def test_bayu_join_auto_assigns_the_least_populated_country():
     class Runtime:
         is_configured = True
         can_publish = True
@@ -196,19 +196,36 @@ def test_country_join_overrides_round_robin_with_configured_team_mapping():
         def assign_participant_country_team(self, token, team, country):
             self.assignment = (token, team, country)
 
+        @staticmethod
+        def get_players(event_id):
+            return [
+                {"Team": "🇰🇷 Korea", "SessionToken": "K1"},
+                {"Team": "🇰🇷 Korea", "SessionToken": "K2"},
+                {"Team": "🇯🇵 Japan", "SessionToken": "J1"},
+            ]
+
     db = GoogleSheetsDB.__new__(GoogleSheetsDB)
     db.runtime = Runtime()
     db.get_event_by_join_code = lambda code: {"EventID": "EVT-0004"}
-    db.get_teams = lambda event_id: [
-        {"TeamName": "Team Malaysia", "Country": "Malaysia"},
-        {"TeamName": "Team Japan", "Country": "Japan"},
+
+    player = db.join_player_by_code("12DYLD", "Adrian Choong")
+
+    assert player["Team"] == "🇹🇭 Thailand"
+    assert player["Country"] == "Thailand"
+    assert db.runtime.assignment == ("TOKEN", "🇹🇭 Thailand", "Thailand")
+
+
+def test_bayu_country_catalogue_contains_exactly_the_approved_six():
+    teams = bayu_country_teams()
+
+    assert [(row["Country"], row["TeamName"].split(" ", 1)[0]) for row in teams] == [
+        ("Korea", "🇰🇷"),
+        ("Japan", "🇯🇵"),
+        ("Thailand", "🇹🇭"),
+        ("Philippines", "🇵🇭"),
+        ("Malaysia", "🇲🇾"),
+        ("India", "🇮🇳"),
     ]
-
-    player = db.join_player_by_code("12DYLD", "Adrian Choong", "Malaysia")
-
-    assert player["Team"] == "Team Malaysia"
-    assert player["Country"] == "Malaysia"
-    assert db.runtime.assignment == ("TOKEN", "Team Malaysia", "Malaysia")
 
 
 def test_required_bayu_participant_copy_and_history_fix_are_present():

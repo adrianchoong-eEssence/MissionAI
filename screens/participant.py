@@ -28,10 +28,12 @@ from screens.mission_setup import cropped_reference_image, mission_module_name
 
 
 COUNTRY_LANGUAGE_PROMPTS = {
+    "Korea": "Find everyone from your country. Speak the language.",
     "Japan": "Find your team. You may greet them with: Konnichiwa.",
     "Malaysia": "Find your team. You may greet them with: Apa khabar.",
     "France": "Find your team. You may greet them with: Bonjour.",
     "India": "Find your team. You may greet them with: Namaste.",
+    "Philippines": "Find everyone from your country. Speak the language.",
     "Thailand": "Find your team. You may greet them with: Sawadee.",
     "China": "Find your team. You may greet them with: Ni hao.",
 }
@@ -266,7 +268,28 @@ def render_team_assignment_card(db):
     )
     st.session_state["participant_is_leader"] = bool(own_record.get("IsLeader"))
 
-    st.markdown(
+    if str(st.session_state.get("participant_event_id", "")) == "EVT-0004":
+        flags = {
+            "Korea": "🇰🇷", "Japan": "🇯🇵", "Thailand": "🇹🇭",
+            "Philippines": "🇵🇭", "Malaysia": "🇲🇾", "India": "🇮🇳",
+        }
+        flag = flags.get(country, "")
+        st.markdown(
+            f"""
+            <div style="padding:28px;border-radius:22px;background:#082D58;color:white;text-align:center;margin-bottom:18px;">
+              <div style="font-size:18px;font-weight:800;letter-spacing:.18em;">YOUR COUNTRY</div>
+              <div style="font-size:92px;line-height:1.15;margin:10px 0;">{flag}</div>
+              <div style="font-size:42px;font-weight:900;">{country}</div>
+              <div style="font-size:21px;margin-top:18px;line-height:1.5;">
+                Find everyone from your country.<br>Speak the language.<br><br>
+                Once your team has assembled, choose ONE Team Leader.
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
         f"""
         <div style="
             padding:24px;
@@ -283,7 +306,7 @@ def render_team_assignment_card(db):
         </div>
         """,
         unsafe_allow_html=True,
-    )
+        )
     if roster:
         st.markdown("#### Team Members")
         for member in roster:
@@ -1981,17 +2004,25 @@ def show_participant():
         last_name = st.text_input("Last / Family Name")
         join_event = db.get_event_by_join_code(join_code) if join_code else None
         country_options = []
+        is_bayu_join = bool(
+            join_event
+            and str(join_event.get("EventID", "")) == "EVT-0004"
+        )
         if join_event:
             country_options = list(dict.fromkeys(
                 str(team.get("Country", "")).strip()
                 for team in db.get_teams(join_event.get("EventID", ""))
                 if str(team.get("Country", "")).strip()
             ))
-        country = st.selectbox(
-            "Country",
-            country_options or ["Enter a valid Join Code first"],
-            disabled=not country_options,
-        )
+        country = ""
+        if not is_bayu_join:
+            country = st.selectbox(
+                "Country",
+                country_options or ["Enter a valid Join Code first"],
+                disabled=not country_options,
+            )
+        elif join_event:
+            st.info("Your country will be assigned automatically when you join.")
 
         if st.button("🚀 Join Event", width="stretch"):
             if not join_code:
@@ -2003,7 +2034,7 @@ def show_participant():
             if not last_name.strip():
                 st.warning("Enter your last / family name")
                 st.stop()
-            if not country_options:
+            if not is_bayu_join and not country_options:
                 st.warning("Enter a valid Join Code and select your country.")
                 st.stop()
 

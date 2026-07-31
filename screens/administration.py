@@ -150,6 +150,14 @@ def show_administration():
     db = GoogleSheetsDB()
 
     st.divider()
+    st.subheader("EVT-0004 Country Assignment")
+    st.dataframe(
+        db.get_country_team_summary("EVT-0004"),
+        hide_index=True,
+        width="stretch",
+    )
+
+    st.divider()
     render_event_reset(db)
 
     st.divider()

@@ -154,6 +154,13 @@ def _render_registration(db, event_id):
         db.update_event_metadata(event_id, {"RegistrationOpen": not is_open})
         st.rerun()
     formation.info("Launch Group Formation with the Next Stage control.")
+    if str(event_id) == "EVT-0004":
+        st.markdown("#### Country Assignment")
+        st.dataframe(
+            db.get_country_team_summary(event_id),
+            hide_index=True,
+            width="stretch",
+        )
 
 
 def _render_mission_board(db, event_id):
