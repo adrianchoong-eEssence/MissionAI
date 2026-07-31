@@ -116,7 +116,8 @@ def _reference_image_editor(db, key, title, reference, image_assets):
     choose_col, upload_col = st.columns(2)
     with choose_col:
         with st.popover("Choose Image", width="stretch"):
-            st.caption("Choose a reusable image from the Asset Library.")
+            st.markdown("**Asset Library · Mission Images**")
+            st.caption("Select an existing image. EXOS references the asset without duplicating it.")
             if not image_by_id:
                 st.info("No Mission Images are available yet.")
             else:
@@ -131,7 +132,9 @@ def _reference_image_editor(db, key, title, reference, image_assets):
                                 st.image(asset_preview, width="stretch")
                             st.caption(str(asset.get("Name", "Untitled image")))
                             if st.button(
-                                "Choose",
+                                "Selected" if asset_id == current_asset_id else "Choose",
+                                type="primary" if asset_id == current_asset_id else "secondary",
+                                disabled=asset_id == current_asset_id,
                                 key=f"{key}_choose_{asset_id}",
                                 width="stretch",
                             ):

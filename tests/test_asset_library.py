@@ -224,6 +224,9 @@ def test_experience_studio_uses_visual_reference_image_editor():
     assert '"Select Character"' in source
     assert '"Select Mission Image"' not in source
     assert '"Choose Image"' in source
+    assert "Asset Library · Mission Images" in source
+    assert '"Selected" if asset_id == current_asset_id else "Choose"' in source
+    assert "st.session_state[state_key] = selected_reference" in source
     assert '"Upload New Image"' in source
     assert '"Replace Image"' in source
     assert '"Crop Image"' in source
