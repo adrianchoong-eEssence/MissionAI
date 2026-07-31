@@ -2015,11 +2015,10 @@ def show_participant():
                 if str(team.get("Country", "")).strip()
             ))
         country = ""
-        if not is_bayu_join:
+        if join_event and not is_bayu_join:
             country = st.selectbox(
                 "Country",
-                country_options or ["Enter a valid Join Code first"],
-                disabled=not country_options,
+                country_options,
             )
         elif join_event:
             st.info("Your country will be assigned automatically when you join.")
