@@ -883,7 +883,28 @@ def render_mission_content(mission):
             st.caption(evidence_instructions)
 
 
-def render_ai_response_after_submission(mission, submission=None):
+EVA_PORTRAIT_REFERENCE = (
+    "supabase://exos-mission-media/characters/eva/portrait"
+)
+
+
+def bayu_ai_portrait_reference(db=None):
+    """Return the one stored hologram used by EVT-0004 AI companions."""
+    if db is not None:
+        try:
+            portrait = str(db.get_character_portrait("EVA") or "").strip()
+            if portrait:
+                return portrait
+        except Exception:
+            pass
+    return EVA_PORTRAIT_REFERENCE
+
+
+def render_ai_response_after_submission(
+    mission,
+    submission=None,
+    ai_portrait_reference="",
+):
     """Show the authored character response only after evidence is submitted."""
     if submission is not None and str(
         submission.get("Status", "PENDING")
@@ -899,7 +920,9 @@ def render_ai_response_after_submission(mission, submission=None):
         (mission or {}).get("CharacterSource", "") or "Headquarters"
     ).strip()
     portrait_reference = str(
-        (mission or {}).get("CharacterPortraitURL", "") or ""
+        ai_portrait_reference
+        or (mission or {}).get("CharacterPortraitURL", "")
+        or ""
     ).strip()
     st.markdown("#### AI Response")
     if render_character_card(character_name, portrait_reference, response):
@@ -1100,6 +1123,8 @@ def render_ai_facilitator(db, mission, runtime_session):
     portrait_reference = str(
         (mission or {}).get("CharacterPortraitURL", "") or ""
     ).strip()
+    if _is_bayu_event():
+        portrait_reference = bayu_ai_portrait_reference(db)
     session_token = st.session_state.get("participant_session_token", "")
     mission_id = str((mission or {}).get("MissionID", "")).strip()
 
@@ -1524,7 +1549,7 @@ def render_bridge_of_trust():
 
 
 def render_mission_ai_briefing(db):
-    portrait = db.get_character_portrait("EVA")
+    portrait = bayu_ai_portrait_reference(db)
     st.markdown("## Mission AI Briefing")
     if not render_character_card(
         "EVA", portrait, EVA_LABYRINTH_BRIEFING,
@@ -1598,7 +1623,11 @@ def render_bayu_experience_board(db):
                     )
                 elif status == "Approved":
                     st.success(f"Approved · +{_credit_number(credits)} Intelligence Credits")
-                    render_ai_response_after_submission(selected, existing)
+                    render_ai_response_after_submission(
+                        selected,
+                        existing,
+                        ai_portrait_reference=bayu_ai_portrait_reference(db),
+                    )
                 else:
                     st.error("Evidence rejected. Your Team Leader may resubmit when enabled.")
                 return
@@ -1888,7 +1917,13 @@ def show_participant():
         st.divider()
         if existing_submission:
             render_existing_submission(existing_submission)
-            render_ai_response_after_submission(mission, existing_submission)
+            render_ai_response_after_submission(
+                mission,
+                existing_submission,
+                ai_portrait_reference=(
+                    bayu_ai_portrait_reference(db) if _is_bayu_event() else ""
+                ),
+            )
             if not runtime_session:
                 st_autorefresh(interval=5000, key="submitted_mission_refresh")
         else:

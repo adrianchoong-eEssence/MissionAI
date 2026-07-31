@@ -6,8 +6,10 @@ from data.google_sheets import GoogleSheetsDB
 from screens.live_event_console import approval_score
 from screens.participant import (
     BRIDGE_OF_TRUST_TRANSMISSION,
+    EVA_PORTRAIT_REFERENCE,
     EVA_LABYRINTH_BRIEFING,
     _bayu_submission_status,
+    bayu_ai_portrait_reference,
     bayu_morning_experiences,
     render_ai_response_after_submission,
 )
@@ -58,6 +60,52 @@ def test_ai_response_is_hidden_until_facilitator_approval():
         )
     assert shown is False
     markdown.assert_not_called()
+
+
+def test_bayu_ai_companions_reuse_the_single_existing_eva_portrait():
+    class AssetDB:
+        @staticmethod
+        def get_character_portrait(character_name):
+            assert character_name == "EVA"
+            return EVA_PORTRAIT_REFERENCE
+
+    references = {
+        name: bayu_ai_portrait_reference(AssetDB())
+        for name in (
+            "EVA", "Alpha", "Bravo", "Luna", "Delta", "Charlie",
+            "Echo", "Foxtrot", "Unmapped Companion",
+        )
+    }
+
+    assert set(references.values()) == {EVA_PORTRAIT_REFERENCE}
+
+
+def test_bayu_ai_portrait_has_safe_reference_when_catalogue_read_fails():
+    class UnavailableAssetDB:
+        @staticmethod
+        def get_character_portrait(character_name):
+            raise RuntimeError("temporary catalogue failure")
+
+    assert bayu_ai_portrait_reference(UnavailableAssetDB()) == EVA_PORTRAIT_REFERENCE
+
+
+def test_bayu_ai_response_keeps_label_but_uses_shared_hologram():
+    mission = {
+        "CharacterSource": "Alpha",
+        "CharacterPortraitURL": "supabase://other-alpha-portrait",
+        "MissionCompleteMessage": "Intelligence uploaded.",
+    }
+    with patch("screens.participant.render_character_card", return_value=True) as card:
+        shown = render_ai_response_after_submission(
+            mission,
+            {"Status": "APPROVED"},
+            ai_portrait_reference=EVA_PORTRAIT_REFERENCE,
+        )
+
+    assert shown is True
+    card.assert_called_once_with(
+        "Alpha", EVA_PORTRAIT_REFERENCE, "Intelligence uploaded.",
+    )
 
 
 def test_runtime_country_assignment_and_roster_preserve_one_reference_team():
