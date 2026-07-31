@@ -140,9 +140,10 @@ def restore_session_from_query_params(db):
             st.session_state["participant_session_token"] = runtime_player.get(
                 "SessionToken", session_token
             )
-            st.session_state["ai_name"] = ai.get("Name", "Atlas")
-            st.session_state["ai_personality"] = ai.get("Personality", "")
-            st.session_state["ai_greeting"] = ai.get("Greeting", "")
+            apply_participant_ai_identity(
+                ai,
+                runtime_player.get("EventID", ""),
+            )
             return
 
     if db.runtime.is_configured:
@@ -189,9 +190,7 @@ def restore_session_from_query_params(db):
         str(st.query_params.get("event_name", "EXOS Event")),
     )
     st.session_state["participant_session_token"] = ""
-    st.session_state["ai_name"] = ai.get("Name", "Atlas")
-    st.session_state["ai_personality"] = ai.get("Personality", "")
-    st.session_state["ai_greeting"] = ai.get("Greeting", "")
+    apply_participant_ai_identity(ai, event_id)
 
 
 def persist_session_in_query_params():
@@ -892,6 +891,49 @@ EVA_PORTRAIT_REFERENCE = (
     "supabase://exos-mission-media/characters/eva/portrait"
 )
 
+EVA_EXPEDITION_OPENING_TRANSMISSION = """CONNECTION ESTABLISHED
+
+Commander...
+
+My name is EVA.
+
+I will remain with your expedition throughout this mission.
+
+I cannot solve every challenge for you.
+
+I can only interpret the intelligence you recover.
+
+Your choices will determine whether your expedition succeeds.
+
+Recover Intelligence.
+Earn Intelligence Credits.
+Complete your mission.
+
+Good luck, Commander."""
+
+
+def participant_ai_identity(ai, event_id):
+    """Resolve the participant companion without changing stored team AI data."""
+    identity = dict(ai or {})
+    if str(event_id or "").strip() == "EVT-0004":
+        identity.update(
+            {
+                "Name": "EVA",
+                "Role": "Expedition Virtual Assistant",
+                "Greeting": EVA_EXPEDITION_OPENING_TRANSMISSION,
+                "PortraitURL": EVA_PORTRAIT_REFERENCE,
+            }
+        )
+    return identity
+
+
+def apply_participant_ai_identity(ai, event_id):
+    """Store the event-scoped companion identity in participant session state."""
+    identity = participant_ai_identity(ai, event_id)
+    st.session_state["ai_name"] = identity.get("Name", "Atlas")
+    st.session_state["ai_personality"] = identity.get("Personality", "")
+    st.session_state["ai_greeting"] = identity.get("Greeting", "")
+
 
 def bayu_ai_portrait_reference(db=None):
     """Return the one stored hologram used by EVT-0004 AI companions."""
@@ -1129,6 +1171,8 @@ def render_ai_facilitator(db, mission, runtime_session):
         (mission or {}).get("CharacterPortraitURL", "") or ""
     ).strip()
     if _is_bayu_event():
+        facilitator_name = "EVA"
+        character_name = "EVA"
         portrait_reference = bayu_ai_portrait_reference(db)
     session_token = st.session_state.get("participant_session_token", "")
     mission_id = str((mission or {}).get("MissionID", "")).strip()
@@ -1866,9 +1910,7 @@ def show_participant():
             st.session_state["participant_session_token"] = player.get(
                 "SessionToken", ""
             )
-            st.session_state["ai_name"] = ai.get("Name", "Atlas")
-            st.session_state["ai_personality"] = ai.get("Personality", "")
-            st.session_state["ai_greeting"] = ai.get("Greeting", "")
+            apply_participant_ai_identity(ai, player["EventID"])
             persist_session_in_query_params()
             st.rerun()
 

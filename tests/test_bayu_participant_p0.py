@@ -5,11 +5,13 @@ from data.runtime_database import SupabaseRuntimeDB
 from data.google_sheets import GoogleSheetsDB
 from screens.live_event_console import approval_score
 from screens.participant import (
+    EVA_EXPEDITION_OPENING_TRANSMISSION,
     EVA_PORTRAIT_REFERENCE,
     EVA_LABYRINTH_BRIEFING,
     _bayu_submission_status,
     bayu_ai_portrait_reference,
     bayu_morning_experiences,
+    participant_ai_identity,
     render_ai_response_after_submission,
 )
 
@@ -86,6 +88,30 @@ def test_bayu_ai_portrait_has_safe_reference_when_catalogue_read_fails():
             raise RuntimeError("temporary catalogue failure")
 
     assert bayu_ai_portrait_reference(UnavailableAssetDB()) == EVA_PORTRAIT_REFERENCE
+
+
+def test_evt0004_replaces_luna_with_eva_without_mutating_stored_identity():
+    luna = {
+        "Name": "Luna",
+        "Personality": "Warm expedition guide",
+        "Greeting": "Hello Team. I'm Luna...",
+        "PortraitURL": "supabase://characters/luna",
+    }
+
+    identity = participant_ai_identity(luna, "EVT-0004")
+
+    assert identity["Name"] == "EVA"
+    assert identity["Role"] == "Expedition Virtual Assistant"
+    assert identity["PortraitURL"] == EVA_PORTRAIT_REFERENCE
+    assert identity["Greeting"] == EVA_EXPEDITION_OPENING_TRANSMISSION
+    assert "Luna" not in identity["Greeting"]
+    assert luna["Name"] == "Luna"
+
+
+def test_non_bayu_event_keeps_its_existing_ai_companion():
+    luna = {"Name": "Luna", "Greeting": "Hello Team. I'm Luna..."}
+
+    assert participant_ai_identity(luna, "EVT-0099") == luna
 
 
 def test_bayu_ai_response_keeps_label_but_uses_shared_hologram():
