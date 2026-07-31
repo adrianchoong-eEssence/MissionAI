@@ -824,7 +824,7 @@ def render_mission_content(mission):
         try:
             cropped_image = cropped_reference_image(
                 reference_image_url,
-                mission.get("CropCoordinates", ""),
+                mission,
             )
             st.image(
                 cropped_image or display_reference_image_url,

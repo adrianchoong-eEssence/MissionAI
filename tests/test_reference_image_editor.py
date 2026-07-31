@@ -61,7 +61,7 @@ def test_uploaded_asset_reference_is_assigned_without_mutating_other_fields():
     assert mission["ReferenceImageURL"] == "old-reference"
 
 
-def test_crop_saves_only_original_asset_id_and_coordinates():
+def test_crop_saves_explicit_non_destructive_metadata():
     class DB:
         def upsert_event_mission(self, payload):
             self.payload = payload
@@ -71,10 +71,17 @@ def test_crop_saves_only_original_asset_id_and_coordinates():
     mission = {"EventID": "EVT-0004", "MissionID": "LAB01", "ReferenceImageURL": "original"}
     coords = {"x": 0.1, "y": 0.2, "width": 0.5, "height": 0.4}
 
-    assign_reference_crop(db, mission, "MISSION-IMAGES-001", coords)
+    assign_reference_crop(
+        db, mission, "MISSION-IMAGES-001", coords, zoom=180, rotation=0,
+    )
 
-    assert db.payload["OriginalAssetID"] == "MISSION-IMAGES-001"
-    assert json.loads(db.payload["CropCoordinates"]) == coords
+    assert db.payload["OriginalImageID"] == "MISSION-IMAGES-001"
+    assert db.payload["CropX"] == 0.1
+    assert db.payload["CropY"] == 0.2
+    assert db.payload["CropWidth"] == 0.5
+    assert db.payload["CropHeight"] == 0.4
+    assert db.payload["Zoom"] == 180
+    assert db.payload["Rotation"] == 0
     assert db.payload["ReferenceImageURL"] == "original"
 
 
@@ -85,6 +92,10 @@ def test_saved_crop_coordinates_reopen_and_invalid_values_are_rejected():
         "x": 0.1, "y": 0.2, "width": 0.5, "height": 0.4,
     }
     assert reference_crop_coordinates('{"x":0.8,"y":0,"width":0.5,"height":1}') is None
+    assert reference_crop_coordinates({
+        "CropX": "0.1", "CropY": "0.2",
+        "CropWidth": "0.5", "CropHeight": "0.4",
+    }) == {"x": 0.1, "y": 0.2, "width": 0.5, "height": 0.4}
 
 
 def test_participant_crop_is_rendered_from_original_asset_bytes():

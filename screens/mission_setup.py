@@ -70,18 +70,36 @@ def assign_reference_image(db, mission, reference):
     return db.upsert_event_mission(payload)
 
 
-def assign_reference_crop(db, mission, asset_id, coordinates):
+def assign_reference_crop(db, mission, asset_id, coordinates, zoom=100, rotation=0):
     """Persist non-destructive crop metadata against the original asset."""
     payload = dict(mission)
-    payload["OriginalAssetID"] = str(asset_id or "").strip()
-    payload["CropCoordinates"] = json.dumps(coordinates, separators=(",", ":"))
+    payload.update({
+        "OriginalImageID": str(asset_id or "").strip(),
+        "CropX": coordinates["x"],
+        "CropY": coordinates["y"],
+        "CropWidth": coordinates["width"],
+        "CropHeight": coordinates["height"],
+        "Zoom": int(zoom),
+        "Rotation": int(rotation),
+    })
     return db.upsert_event_mission(payload)
 
 
 def reference_crop_coordinates(value):
     """Return validated normalized crop coordinates or no crop."""
     try:
-        coordinates = json.loads(str(value or ""))
+        if isinstance(value, dict) and any(
+            str(value.get(name, "")).strip()
+            for name in ("CropX", "CropY", "CropWidth", "CropHeight")
+        ):
+            coordinates = {
+                "x": value["CropX"], "y": value["CropY"],
+                "width": value["CropWidth"], "height": value["CropHeight"],
+            }
+        elif isinstance(value, dict):
+            coordinates = json.loads(str(value.get("CropCoordinates", "") or ""))
+        else:
+            coordinates = json.loads(str(value or ""))
         result = {
             name: float(coordinates[name])
             for name in ("x", "y", "width", "height")
@@ -281,19 +299,23 @@ def _reference_image_editor(
                     from streamlit_cropper import st_cropper
 
                     st.caption("Drag to pan. Drag handles to resize. Use Zoom for tighter framing.")
-                    stored_crop = reference_crop_coordinates(
-                        mission_record.get("CropCoordinates", "")
-                    ) if str(mission_record.get("OriginalAssetID", "")) == current_asset_id else None
+                    original_image_id = str(
+                        mission_record.get("OriginalImageID", "")
+                        or mission_record.get("OriginalAssetID", "")
+                    )
+                    stored_crop = reference_crop_coordinates(mission_record) \
+                        if original_image_id == current_asset_id else None
                     use_full_key = f"{key}_crop_use_full"
                     if st.session_state.get(use_full_key) or not stored_crop:
                         stored_crop = {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0}
-                    zoom = st.slider("Zoom", 100, 400, 100, 10, key=f"{key}_crop_zoom")
+                    stored_zoom = max(100, min(400, safe_int(mission_record.get("Zoom"), 100)))
+                    zoom = st.slider("Zoom", 100, 400, stored_zoom, 10, key=f"{key}_crop_zoom")
                     pan_x = st.slider("Pan horizontally", -100, 100, 0, key=f"{key}_crop_pan_x")
                     pan_y = st.slider("Pan vertically", -100, 100, 0, key=f"{key}_crop_pan_y")
                     base_width = stored_crop["width"] * width
                     base_height = stored_crop["height"] * height
-                    crop_width = max(1, round(base_width * 100 / zoom))
-                    crop_height = max(1, round(base_height * 100 / zoom))
+                    crop_width = max(1, round(base_width * stored_zoom / zoom))
+                    crop_height = max(1, round(base_height * stored_zoom / zoom))
                     base_center_x = (stored_crop["x"] + stored_crop["width"] / 2) * width
                     base_center_y = (stored_crop["y"] + stored_crop["height"] / 2) * height
                     center_x = base_center_x + pan_x * max(0, width - crop_width) / 200
@@ -342,6 +364,7 @@ def _reference_image_editor(
                         try:
                             assign_reference_crop(
                                 db, mission_record, current_asset_id, coordinates,
+                                zoom=zoom, rotation=0,
                             )
                         except Exception as error:
                             st.error(str(error))
