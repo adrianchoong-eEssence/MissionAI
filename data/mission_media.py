@@ -60,6 +60,33 @@ def upload_mission_media(uploaded_file, template_id, media_kind):
     return REFERENCE_PREFIX + storage_path
 
 
+def upload_character_portrait(uploaded_file, character_source):
+    """Upsert one reusable portrait object for a named character."""
+    if uploaded_file is None:
+        return ""
+    file_bytes = uploaded_file.getvalue()
+    if not file_bytes:
+        raise ValueError("The selected portrait file is empty.")
+    if len(file_bytes) > MEDIA_LIMITS["image"]:
+        raise ValueError("The portrait file exceeds the 10 MB limit.")
+
+    character_segment = _safe_segment(
+        str(character_source).lower(),
+        "unassigned-character",
+    )
+    storage_path = f"characters/{character_segment}/portrait"
+    content_type = str(
+        getattr(uploaded_file, "type", "") or "application/octet-stream"
+    )
+    get_runtime_database().upload_mission_media(
+        storage_path=storage_path,
+        media_bytes=file_bytes,
+        content_type=content_type,
+    )
+    get_mission_media_url.clear()
+    return REFERENCE_PREFIX + storage_path
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def get_mission_media_url(reference, expires_in=1800):
     value = str(reference or "").strip()

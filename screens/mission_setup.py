@@ -7,7 +7,11 @@ import pandas as pd
 import streamlit as st
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
-from data.mission_media import get_mission_media_url, upload_mission_media
+from data.mission_media import (
+    get_mission_media_url,
+    upload_character_portrait,
+    upload_mission_media,
+)
 from screens.app_state import active_event_index
 
 
@@ -24,6 +28,15 @@ SUBMISSION_TYPES = [
 ]
 
 EVIDENCE_TYPES = ["TEXT", "PHOTO", "VIDEO", "AUDIO", "QR", "GPS", "MULTIPLE"]
+CHARACTER_SOURCES = [
+    "None",
+    "EVA",
+    "Commander Orion",
+    "Captain Amelia Ross",
+    "Dr Marcus Hale",
+    "Unknown Signal",
+    "The King",
+]
 
 
 def yes_no(value, default="No"):
@@ -325,6 +338,8 @@ def _experience_designer(db, event_id, selected):
         .mission-label{font-size:.65rem;letter-spacing:.15em;font-weight:800;color:#557089;text-transform:uppercase;margin:8px 0 5px}
         .evidence-row{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #dce3eb;padding-top:15px;margin-top:15px}
         .credit-pill{background:#082D58;color:#fff;border-radius:20px;padding:7px 11px;font-weight:800}
+        .character-preview{margin-top:14px;padding:12px;border-radius:15px;background:linear-gradient(145deg,#071d38,#0b4771);color:#fff;text-align:center}
+        .character-preview img{display:block;width:100%;max-height:230px;object-fit:contain;border-radius:11px;margin-bottom:8px}
         </style>
         """,
         unsafe_allow_html=True,
@@ -430,6 +445,67 @@ def _experience_designer(db, event_id, selected):
         if ai_enabled:
             with st.container(border=True):
                 st.markdown('<div class="studio-step">05 · AI Companion</div>', unsafe_allow_html=True)
+                stored_character = str(
+                    selected.get("CharacterSource", "None") or "None"
+                ).strip()
+                stored_character = (
+                    stored_character
+                    if stored_character in CHARACTER_SOURCES
+                    else "None"
+                )
+                character_source = st.selectbox(
+                    "Character Source",
+                    CHARACTER_SOURCES,
+                    index=CHARACTER_SOURCES.index(stored_character),
+                    key=f"{key}_character_source",
+                )
+                portrait_reference = str(
+                    selected.get("CharacterPortraitURL", "") or ""
+                ).strip()
+                if (
+                    character_source != stored_character
+                    and character_source != "None"
+                ):
+                    portrait_reference = db.get_character_portrait(
+                        character_source
+                    )
+                if character_source == "None":
+                    portrait_reference = ""
+                portrait_upload = st.file_uploader(
+                    "Replace Portrait"
+                    if portrait_reference
+                    else "Character Portrait Upload",
+                    type=["jpg", "jpeg", "png", "webp", "heic"],
+                    key=f"{key}_character_portrait_upload",
+                    help="Upload from device. JPG, PNG, WEBP, and HEIC where supported.",
+                )
+                remove_portrait = st.checkbox(
+                    "Remove Portrait",
+                    value=False,
+                    disabled=not bool(portrait_reference),
+                    key=f"{key}_remove_character_portrait",
+                )
+                portrait_preview = (
+                    reference_image_preview_source(
+                        portrait_reference,
+                        portrait_upload,
+                    )
+                    if portrait_upload is not None or not remove_portrait
+                    else ""
+                )
+                if portrait_preview:
+                    try:
+                        st.image(
+                            portrait_preview,
+                            caption=f"{character_source} portrait",
+                            width="stretch",
+                        )
+                    except Exception:
+                        st.warning(
+                            "This portrait is saved, but this browser cannot "
+                            "preview its format. JPG, PNG, or WEBP gives the "
+                            "widest support."
+                        )
                 ai_role = st.text_input("Role", value=str(selected.get("AIRole", "")), key=f"{key}_ai_role")
                 ai_prompt = st.text_area("Prompt", value=companion_prompt, key=f"{key}_ai_prompt")
                 restrictions = st.text_area("Restrictions", value=str(selected.get("AIRestrictions") or selected.get("AIUsageRules", "")), key=f"{key}_restrictions")
@@ -438,6 +514,10 @@ def _experience_designer(db, event_id, selected):
             ai_role, ai_prompt = str(selected.get("AIRole", "")), companion_prompt
             restrictions = str(selected.get("AIRestrictions") or selected.get("AIUsageRules", ""))
             hints = "\n".join(str(selected.get(f"Hint{i}", "") or "") for i in range(1, 4)).strip()
+            character_source = str(selected.get("CharacterSource", "None") or "None")
+            portrait_reference = str(selected.get("CharacterPortraitURL", "") or "")
+            portrait_upload, remove_portrait = None, False
+            portrait_preview = get_mission_media_url(portrait_reference)
 
         with st.expander("06 · Facilitator · Hidden from participants"):
             facilitator = st.text_area("Facilitator Intent", value=str(selected.get("FacilitatorIntent") or selected.get("FacilitatorInstructions", "")), key=f"{key}_facilitator")
@@ -450,6 +530,13 @@ def _experience_designer(db, event_id, selected):
         st.caption("Participant view · updates as you edit")
         clean = lambda value: html.escape(str(value or "")).replace("\n", "<br>")
         image = f'<img src="{clean(reference_preview)}" alt="Reference" style="width:100%;height:auto;border-radius:12px;margin-top:10px">' if reference_preview and mission_type == "Observe" else ""
+        character_card = (
+            f'<div class="character-preview"><img src="{clean(portrait_preview)}" '
+            f'alt="{clean(character_source)}"><strong>{clean(character_source)}</strong>'
+            f'<div>Secure contact channel</div></div>'
+            if ai_enabled and character_source != "None" and portrait_preview
+            else ""
+        )
         st.markdown(
             f"""<div class="phone"><div class="phone-screen"><div class="phone-top"><span class="phone-notch"></span></div>
             <div class="phone-body"><div class="transmission">Incoming transmission</div><h2>{clean(title) or "Untitled experience"}</h2>
@@ -457,7 +544,7 @@ def _experience_designer(db, event_id, selected):
             <div class="mission-card"><div class="mission-label">Narrative</div><p>{clean(narrative) or "Your narrative will appear here."}</p>
             <div class="mission-label">Experience</div><p><strong>{clean(mission) or "Your experience will appear here."}</strong></p>
             <div class="evidence-row"><span><span class="mission-label">Evidence</span><br>{clean(evidence.title())}</span>
-            <span class="credit-pill">+{credits} Credits</span></div></div></div></div></div>""",
+            <span class="credit-pill">+{credits} Credits</span></div></div>{character_card}</div></div></div>""",
             unsafe_allow_html=True,
         )
 
@@ -475,6 +562,16 @@ def _experience_designer(db, event_id, selected):
                 )
             except Exception as error:
                 st.error(f"Reference image upload failed: {error}")
+                return
+        resolved_portrait = "" if remove_portrait else portrait_reference
+        if portrait_upload is not None and character_source != "None":
+            try:
+                resolved_portrait = upload_character_portrait(
+                    portrait_upload,
+                    character_source,
+                )
+            except Exception as error:
+                st.error(f"Character portrait upload failed: {error}")
                 return
         hint_values = [line.strip() for line in hints.splitlines() if line.strip()][:3]
         payload = dict(selected)
@@ -496,6 +593,8 @@ def _experience_designer(db, event_id, selected):
             "AIRequired": "Yes" if ai_enabled else "No", "AIHelpEnabled": "Yes" if ai_enabled else "No",
             "AIRole": ai_role.strip(), "AIPrompt": ai_prompt.strip(),
             "AIRestrictions": restrictions.strip(), "AIUsageRules": restrictions.strip(),
+            "CharacterSource": character_source,
+            "CharacterPortraitURL": resolved_portrait.strip(),
             "Hint1": hint_values[0] if len(hint_values) > 0 else "",
             "Hint2": hint_values[1] if len(hint_values) > 1 else "",
             "Hint3": hint_values[2] if len(hint_values) > 2 else "",

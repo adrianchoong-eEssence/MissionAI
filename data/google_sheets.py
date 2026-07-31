@@ -49,7 +49,7 @@ REQUIRED_WORKSHEETS = {
         "Interaction", "ReasoningPrompt", "Difficulty",
         "EstimatedTimeMinutes", "MissionCompleteMessage",
         "AIRestrictions", "FacilitatorIntent", "LearningIntent", "SafetyNotes",
-        "CropFramingNote",
+        "CropFramingNote", "CharacterSource", "CharacterPortraitURL",
     ],
     "MissionTemplates": [
         "TemplateID", "Title", "Story", "ParticipantInstructions",
@@ -57,6 +57,7 @@ REQUIRED_WORKSHEETS = {
         "ScoringRule", "Points", "VideoURL", "ImageURL", "DocumentURL",
         "Clue", "Answer", "Hint1", "Hint2", "Hint3", "DebriefQuestions",
         "AIHelpEnabled", "Status", "Version", "UpdatedAt",
+        "CharacterSource", "CharacterPortraitURL",
     ],
     "Teams": ["EventID", "TeamID", "TeamName", "Country", "Language", "Score", "Status"],
     "AIFacilitators": ["Name", "Personality", "Greeting"],
@@ -482,6 +483,7 @@ class GoogleSheetsDB:
                 mission.get(field, "")
                 for field in (
                     "ImageURL", "ReferenceImageURL", "VideoURL", "DocumentURL",
+                    "CharacterPortraitURL",
                 )
             )
         for submission in worksheets.get("Submissions", []) or []:
@@ -520,6 +522,7 @@ class GoogleSheetsDB:
                 str(mission.get(field, "")).strip()
                 for field in (
                     "ImageURL", "ReferenceImageURL", "VideoURL", "DocumentURL",
+                    "CharacterPortraitURL",
                 )
             )
         for template in get_sheet_records("MissionTemplates"):
@@ -527,6 +530,7 @@ class GoogleSheetsDB:
                 str(template.get(field, "")).strip()
                 for field in (
                     "ImageURL", "VideoURL", "DocumentURL",
+                    "CharacterPortraitURL",
                 )
             )
         mission_paths = [
@@ -1778,6 +1782,21 @@ class GoogleSheetsDB:
             ),
         )
 
+    def get_character_portrait(self, character_source):
+        wanted = str(character_source or "").strip().casefold()
+        if not wanted or wanted == "none":
+            return ""
+        records = (
+            list(get_sheet_records("Missions"))
+            + list(get_sheet_records("MissionTemplates"))
+        )
+        for record in records:
+            source = str(record.get("CharacterSource", "")).strip().casefold()
+            portrait = str(record.get("CharacterPortraitURL", "")).strip()
+            if source == wanted and portrait:
+                return portrait
+        return ""
+
     def upsert_event_mission(self, record):
         payload = dict(record or {})
         event_id = str(payload.get("EventID", "")).strip()
@@ -2075,6 +2094,16 @@ class GoogleSheetsDB:
             if not isinstance(mission, dict) or not mission:
                 return None
             mission = dict(mission)
+            try:
+                latest = self.get_mission(
+                    event_id,
+                    mission.get("MissionID", ""),
+                ) or {}
+            except Exception:
+                latest = {}
+            for field in ("CharacterSource", "CharacterPortraitURL"):
+                if field in latest:
+                    mission[field] = latest.get(field, "")
             mission["_RuntimeStage"] = runtime_state.get("Stage", {})
             mission["_RuntimeStateVersion"] = runtime_state.get(
                 "StateVersion",

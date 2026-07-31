@@ -1,5 +1,6 @@
 import uuid
 import math
+import html
 from datetime import datetime
 
 import streamlit as st
@@ -954,20 +955,75 @@ def mission_ai_help_enabled(mission):
     return value not in {"NO", "FALSE", "0", "OFF"}
 
 
+def render_character_card(character_name, portrait_reference, message=""):
+    """Render a portrait-led hologram card, or return False for text fallback."""
+    portrait_url = get_mission_media_url(portrait_reference)
+    if not portrait_url:
+        return False
+    safe_name = html.escape(str(character_name or "AI Companion"))
+    safe_url = html.escape(str(portrait_url), quote=True)
+    safe_message = html.escape(str(message or "")).replace("\n", "<br>")
+    message_html = (
+        f'<div class="exos-character-message">{safe_message}</div>'
+        if safe_message
+        else '<div class="exos-character-status">Secure contact channel online</div>'
+    )
+    st.markdown(
+        f"""
+        <style>
+        .exos-character-card{{
+          position:relative;overflow:hidden;margin:12px 0 18px;padding:16px;
+          border:1px solid rgba(85,220,255,.55);border-radius:20px;
+          background:linear-gradient(145deg,rgba(5,20,43,.98),rgba(7,69,104,.94));
+          box-shadow:0 0 28px rgba(53,201,255,.2),inset 0 0 25px rgba(53,201,255,.08);
+          color:#f7fcff;
+        }}
+        .exos-character-card:after{{
+          content:"";position:absolute;inset:0;pointer-events:none;opacity:.13;
+          background:repeating-linear-gradient(0deg,transparent 0 4px,#65dcff 5px);
+        }}
+        .exos-character-layout{{display:grid;grid-template-columns:minmax(130px,42%) 1fr;gap:16px;align-items:center;position:relative;z-index:1}}
+        .exos-character-portrait{{width:100%;height:230px;object-fit:contain;border-radius:14px;background:radial-gradient(circle,#165d7d 0,#071a32 70%)}}
+        .exos-character-name{{font-size:1.3rem;font-weight:900;letter-spacing:.04em;color:#80e8ff}}
+        .exos-character-status{{margin-top:8px;text-transform:uppercase;font-size:.72rem;letter-spacing:.14em;color:#b9ddea}}
+        .exos-character-message{{margin-top:10px;font-size:1rem;line-height:1.55;color:#fff}}
+        @media(max-width:640px){{.exos-character-layout{{grid-template-columns:1fr}}.exos-character-portrait{{height:260px}}}}
+        </style>
+        <div class="exos-character-card">
+          <div class="exos-character-layout">
+            <img class="exos-character-portrait" src="{safe_url}" alt="{safe_name}">
+            <div><div class="exos-character-name">{safe_name}</div>{message_html}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    return True
+
+
 def render_ai_facilitator(db, mission, runtime_session):
     facilitator_name = st.session_state["ai_name"]
+    character_name = str(
+        (mission or {}).get("CharacterSource", "") or facilitator_name
+    ).strip()
+    if character_name.casefold() == "none":
+        character_name = facilitator_name
+    portrait_reference = str(
+        (mission or {}).get("CharacterPortraitURL", "") or ""
+    ).strip()
     session_token = st.session_state.get("participant_session_token", "")
     mission_id = str((mission or {}).get("MissionID", "")).strip()
 
     st.divider()
-    st.subheader(f"🤖 {facilitator_name}")
+    if not render_character_card(character_name, portrait_reference):
+        st.subheader(f"🤖 {character_name}")
 
     if st.session_state["ai_greeting"]:
         st.info(st.session_state["ai_greeting"])
 
     if not mission or not mission_id:
         st.caption(
-            f"{facilitator_name} will be ready when the facilitator launches a mission."
+            f"{character_name} will be ready when the facilitator launches an experience."
         )
         return
 
@@ -1000,6 +1056,12 @@ def render_ai_facilitator(db, mission, runtime_session):
             if str(row.get("Role", "")).lower() == "user"
             else "assistant"
         )
+        if role == "assistant" and render_character_card(
+            character_name,
+            portrait_reference,
+            row.get("Message", ""),
+        ):
+            continue
         with st.chat_message(role):
             st.markdown(row.get("Message", ""))
 
@@ -1072,7 +1134,7 @@ def render_ai_facilitator(db, mission, runtime_session):
     elif not mission_ai_help_enabled(mission):
         st.caption("AI help is disabled for this experience.")
 
-    prompt = st.chat_input(f"Ask {facilitator_name}...")
+    prompt = st.chat_input(f"Ask {character_name}...")
     if not prompt:
         return
 
