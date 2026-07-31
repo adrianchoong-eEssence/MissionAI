@@ -113,3 +113,54 @@ def test_participant_crop_is_rendered_from_original_asset_bytes():
 
 def test_no_crop_metadata_uses_full_image_fallback():
     assert cropped_reference_image("original-reference", {}) is None
+
+
+def test_two_experiences_share_original_but_render_different_persisted_crops():
+    source = Image.new("RGB", (200, 100), "#cc3300")
+    source.paste("#0033cc", (100, 0, 200, 100))
+    source_output = io.BytesIO()
+    source.save(source_output, format="PNG")
+    original_bytes = source_output.getvalue()
+    original_before = bytes(original_bytes)
+    asset_id = "MISSION-IMAGE-SHARED"
+    reference = "supabase://exos-mission-media/assets/shared/file"
+
+    class DB:
+        records = {}
+
+        def upsert_event_mission(self, payload):
+            self.records[payload["MissionID"]] = dict(payload)
+            return payload
+
+    db = DB()
+    first = {"EventID": "EVT-UAT", "MissionID": "EXP-01", "ReferenceImageURL": reference}
+    second = {"EventID": "EVT-UAT", "MissionID": "EXP-02", "ReferenceImageURL": reference}
+    assign_reference_crop(
+        db, first, asset_id,
+        {"x": 0.0, "y": 0.0, "width": 0.5, "height": 1.0},
+        zoom=200,
+    )
+    assign_reference_crop(
+        db, second, asset_id,
+        {"x": 0.5, "y": 0.0, "width": 0.5, "height": 1.0},
+        zoom=200,
+    )
+
+    # Simulate refresh/reopen by reading fresh record copies.
+    refreshed_first = dict(db.records["EXP-01"])
+    refreshed_second = dict(db.records["EXP-02"])
+    with patch(
+        "screens.mission_setup._reference_image_bytes",
+        return_value=original_bytes,
+    ):
+        first_clue = cropped_reference_image(reference, refreshed_first)
+        second_clue = cropped_reference_image(reference, refreshed_second)
+
+    assert refreshed_first["OriginalImageID"] == asset_id
+    assert refreshed_second["OriginalImageID"] == asset_id
+    assert refreshed_first["ReferenceImageURL"] == reference
+    assert refreshed_second["ReferenceImageURL"] == reference
+    assert first_clue != second_clue
+    assert Image.open(io.BytesIO(first_clue)).size == (100, 100)
+    assert Image.open(io.BytesIO(second_clue)).size == (100, 100)
+    assert original_bytes == original_before
