@@ -301,6 +301,24 @@ class MissionStudioDataTests(unittest.TestCase):
                 "The Paris Fragment",
             )
 
+    def test_initialisation_refreshes_stale_cached_worksheet_mapping(self):
+        current = {name: object() for name in REQUIRED_WORKSHEETS}
+        stale = dict(current)
+        stale.pop("Assets")
+
+        with patch(
+            "data.google_sheets.get_worksheets",
+            side_effect=[stale, current],
+        ) as get_worksheets, patch(
+            "data.google_sheets.get_runtime_database",
+            return_value=None,
+        ):
+            database = GoogleSheetsDB()
+
+        self.assertEqual(get_worksheets.call_count, 2)
+        get_worksheets.clear.assert_called_once_with()
+        self.assertIs(database.assets, current["Assets"])
+
     def test_labyrinth_module_is_available_for_all_seventeen_records(self):
         rows = [
             {

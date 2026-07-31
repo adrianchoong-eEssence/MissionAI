@@ -260,6 +260,12 @@ def get_sheet_participant_count(event_id):
 class GoogleSheetsDB:
     def __init__(self):
         worksheets = get_worksheets()
+        # Streamlit can retain the cached worksheet mapping across a hot
+        # deployment. Refresh it when a newly required worksheet is absent.
+        missing_worksheets = set(REQUIRED_WORKSHEETS).difference(worksheets)
+        if missing_worksheets:
+            get_worksheets.clear()
+            worksheets = get_worksheets()
         self.runtime = get_runtime_database()
         self._participant_count_warnings = {}
         self.participants = worksheets["Participants"]
