@@ -9,6 +9,148 @@ from engines.stage_timer import remaining_seconds
 from screens.app_state import select_active_event
 
 
+PROJECTOR_STYLES = """
+<style>
+    .stApp {
+        background: #061f3d;
+        color: #ffffff;
+    }
+    header, footer {visibility: hidden;}
+    .block-container {
+        padding: clamp(18px, 2.2vh, 32px) clamp(28px, 4vw, 72px);
+        max-width: 1600px;
+    }
+    [data-testid="stSidebar"] {
+        background: #061f3d;
+    }
+    [data-testid="stMain"] {
+        color: #ffffff;
+    }
+    .projector-header {
+        text-align: center;
+        padding-top: clamp(8px, 1.4vh, 20px);
+    }
+    .projector-kicker {
+        color: #ffffff;
+        font-size: clamp(34px, 2.8vw, 46px);
+        font-weight: 850;
+        letter-spacing: .16em;
+        line-height: 1.15;
+    }
+    .projector-event-title {
+        color: #ffffff;
+        font-size: clamp(76px, 6.6vw, 112px);
+        font-weight: 950;
+        line-height: 1.04;
+        margin: 14px auto 0;
+        max-width: 1400px;
+        overflow-wrap: anywhere;
+        text-wrap: balance;
+    }
+    .projector-event-name {
+        color: #f4f8ff;
+        font-size: clamp(32px, 2.8vw, 46px);
+        font-weight: 650;
+        line-height: 1.3;
+        margin-top: 16px;
+        overflow-wrap: anywhere;
+    }
+    .projector-mode {
+        color: #e7f0ff;
+        font-size: clamp(27px, 2.2vw, 36px);
+        font-weight: 650;
+        line-height: 1.35;
+        margin-top: 18px;
+    }
+    .projector-brand {
+        color: #dce9fb;
+        font-size: clamp(19px, 1.5vw, 25px);
+        font-weight: 650;
+        letter-spacing: .13em;
+        line-height: 1.4;
+        margin-top: 16px;
+    }
+    .projector-brand-by {
+        color: #d3e2f7;
+        font-size: clamp(18px, 1.35vw, 23px);
+        font-weight: 650;
+        letter-spacing: .1em;
+        line-height: 1.4;
+        margin-top: 8px;
+    }
+    .projector-panel {
+        color: #ffffff;
+        text-align: center;
+        margin: clamp(36px, 6vh, 76px) auto 0;
+        max-width: 1450px;
+    }
+    .projector-label {
+        color: #eef5ff;
+        font-size: clamp(40px, 3.6vw, 58px);
+        font-weight: 800;
+        line-height: 1.2;
+    }
+    .projector-mission-title {
+        color: #ffffff;
+        font-size: clamp(84px, 8vw, 132px);
+        font-weight: 950;
+        line-height: 1.03;
+        margin: 22px auto 0;
+        max-width: 1450px;
+        overflow-wrap: anywhere;
+        text-wrap: balance;
+    }
+    .projector-body {
+        color: #ffffff;
+        font-size: clamp(38px, 3.25vw, 54px);
+        font-weight: 560;
+        line-height: 1.55;
+        margin: 42px auto 0;
+        max-width: 1280px;
+        overflow-wrap: break-word;
+        white-space: normal;
+        text-wrap: pretty;
+    }
+    .projector-support {
+        color: #e7f0ff;
+        font-size: clamp(31px, 2.6vw, 43px);
+        font-weight: 620;
+        line-height: 1.45;
+        margin: 44px auto 0;
+        max-width: 1280px;
+        overflow-wrap: break-word;
+    }
+    .projector-metric {
+        color: #ffffff;
+        font-size: clamp(112px, 11vw, 176px);
+        font-weight: 950;
+        line-height: 1;
+        margin-top: 28px;
+    }
+    .projector-primary {
+        color: #ffffff;
+        font-size: clamp(58px, 5vw, 82px);
+        font-weight: 900;
+        line-height: 1.15;
+        overflow-wrap: anywhere;
+        text-wrap: balance;
+    }
+    .projector-secondary {
+        color: #f0f6ff;
+        font-size: clamp(36px, 3vw, 50px);
+        font-weight: 650;
+        line-height: 1.45;
+        overflow-wrap: break-word;
+    }
+    @media (max-aspect-ratio: 4/3) {
+        .projector-event-title { font-size: clamp(66px, 7vw, 96px); }
+        .projector-mission-title { font-size: clamp(72px, 8vw, 112px); }
+        .projector-body { font-size: clamp(34px, 3.5vw, 48px); }
+    }
+</style>
+"""
+
+
 def auto_refresh(seconds=5):
     st_autorefresh(
         interval=seconds * 1000,
@@ -51,23 +193,23 @@ def display_header(event, mode):
     title = experience_title(event)
     st.markdown(
         f"""
-        <div style="text-align:center; padding-top:20px;">
-            <div style="font-size:32px; letter-spacing:4px; font-weight:700;">
+        <div class="projector-header">
+            <div class="projector-kicker">
                 EXOS
             </div>
-            <div style="font-size:72px; font-weight:900; margin-top:10px;">
+            <div class="projector-event-title">
                 {title}
             </div>
-            <div style="font-size:28px; margin-top:8px; opacity:0.85;">
+            <div class="projector-event-name">
                 {event.get("EventName", "")}
             </div>
-            <div style="font-size:22px; margin-top:14px; opacity:0.7;">
+            <div class="projector-mode">
                 {mode}
             </div>
-            <div style="font-size:16px; letter-spacing:3px; margin-top:14px; opacity:0.72;">
+            <div class="projector-brand">
                 eEssence eXperiential OS
             </div>
-            <div style="font-size:14px; letter-spacing:2px; margin-top:8px; opacity:0.66;">
+            <div class="projector-brand-by">
                 by eEssence
             </div>
         </div>
@@ -82,20 +224,20 @@ def display_registration(event, db, event_id):
 
     st.markdown(
         f"""
-        <div style="text-align:center; margin-top:80px;">
-            <div style="font-size:56px; font-weight:800;">
+        <div class="projector-panel">
+            <div class="projector-primary">
                 Registration Open
             </div>
-            <div style="font-size:120px; font-weight:900; margin-top:40px;">
+            <div class="projector-metric">
                 {participants}
             </div>
-            <div style="font-size:34px;">
+            <div class="projector-secondary">
                 Participants Checked In
             </div>
-            <div style="font-size:36px; margin-top:40px;">
+            <div class="projector-secondary" style="margin-top:32px;">
                 {teams} Teams Forming
             </div>
-            <div style="font-size:26px; margin-top:60px; opacity:0.75;">
+            <div class="projector-support">
                 Scan the QR Code • Enter Join Code • Join Your Team
             </div>
         </div>
@@ -108,11 +250,11 @@ def display_current_mission(mission):
     if not mission:
         st.markdown(
             """
-            <div style="text-align:center; margin-top:120px;">
-                <div style="font-size:64px; font-weight:900;">
+            <div class="projector-panel">
+                <div class="projector-primary">
                     Waiting for Experience Launch
                 </div>
-                <div style="font-size:28px; margin-top:30px; opacity:0.75;">
+                <div class="projector-support">
                     Stand by. Your next challenge will appear shortly.
                 </div>
             </div>
@@ -123,17 +265,17 @@ def display_current_mission(mission):
 
     st.markdown(
         f"""
-        <div style="text-align:center; margin-top:70px;">
-            <div style="font-size:42px; opacity:0.8;">
+        <div class="projector-panel">
+            <div class="projector-label">
                 Current Experience
             </div>
-            <div style="font-size:82px; font-weight:900; margin-top:20px;">
+            <div class="projector-mission-title">
                 {mission.get("Title", "Experience")}
             </div>
-            <div style="font-size:34px; max-width:1100px; margin:45px auto 0 auto; line-height:1.4;">
+            <div class="projector-body">
                 {mission.get("Description", "")}
             </div>
-            <div style="font-size:28px; margin-top:50px; opacity:0.8;">
+            <div class="projector-support">
                 Complete the mission. Submit your evidence. Support your team.
             </div>
         </div>
@@ -418,27 +560,7 @@ def display_winner(leaderboard):
 
 
 def show_leaderboard_display():
-    st.markdown(
-        """
-        <style>
-            .stApp {
-                background: #082D58;
-                color: white;
-            }
-            header {visibility: hidden;}
-            footer {visibility: hidden;}
-            .block-container {
-                padding-top: 2rem;
-                padding-bottom: 2rem;
-                max-width: 1400px;
-            }
-            [data-testid="stSidebar"] {
-                background: #082D58;
-            }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown(PROJECTOR_STYLES, unsafe_allow_html=True)
 
     db = GoogleSheetsDB()
     events = db.get_events()
