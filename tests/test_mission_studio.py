@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
-from screens.mission_setup import mission_module_name
+from screens.mission_setup import mission_module_name, reference_image_preview_source
 from screens.mission_setup import EVIDENCE_TYPES
 
 
@@ -287,8 +287,22 @@ class MissionStudioDataTests(unittest.TestCase):
             "Interaction", "ReasoningPrompt", "Difficulty",
             "EstimatedTimeMinutes", "MissionCompleteMessage",
             "AIRestrictions", "FacilitatorIntent", "LearningIntent", "SafetyNotes",
+            "CropFramingNote",
         ):
             self.assertIn(field, headers)
+
+    def test_uploaded_reference_image_is_available_for_live_preview(self):
+        class FakeUpload:
+            type = "image/png"
+
+            @staticmethod
+            def getvalue():
+                return b"paris-image"
+
+        preview = reference_image_preview_source("", FakeUpload())
+
+        self.assertTrue(preview.startswith("data:image/png;base64,"))
+        self.assertNotIn("paris-image", preview)
 
     def test_experience_evidence_supports_participant_media(self):
         for evidence in ("PHOTO", "VIDEO", "TEXT", "AUDIO", "MULTIPLE"):

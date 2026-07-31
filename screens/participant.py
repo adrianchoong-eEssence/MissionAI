@@ -766,6 +766,9 @@ def render_mission_content(mission):
     ).strip()
     video_url = str(mission.get("VideoURL", "") or "").strip()
     image_url = str(mission.get("ImageURL", "") or "").strip()
+    reference_image_url = str(
+        mission.get("ReferenceImageURL", "") or ""
+    ).strip()
     document_url = str(mission.get("DocumentURL", "") or "").strip()
 
     if transmission:
@@ -778,6 +781,7 @@ def render_mission_content(mission):
 
     display_video_url = get_mission_media_url(video_url)
     display_image_url = get_mission_media_url(image_url)
+    display_reference_image_url = get_mission_media_url(reference_image_url)
     display_document_url = get_mission_media_url(document_url)
 
     if display_video_url:
@@ -796,6 +800,21 @@ def render_mission_content(mission):
             st.image(display_image_url, width="stretch")
         except Exception:
             st.warning("The mission image could not be displayed.")
+
+    if (
+        str(mission.get("MissionType", "") or "").strip().casefold()
+        == "observe"
+        and display_reference_image_url
+    ):
+        st.markdown("#### Reference Image")
+        try:
+            st.image(
+                display_reference_image_url,
+                width="stretch",
+            )
+            st.caption("Tap the image to enlarge where supported.")
+        except Exception:
+            st.warning("The reference image could not be displayed.")
 
     if instructions:
         st.markdown("#### Mission")

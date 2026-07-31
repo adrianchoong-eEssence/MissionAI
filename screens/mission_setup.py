@@ -1,3 +1,4 @@
+import base64
 import html
 import io
 import re
@@ -29,6 +30,16 @@ def yes_no(value, default="No"):
     return "Yes" if str(value or default).strip().upper() in {
         "YES", "TRUE", "1", "ON", "ACTIVE", "MANDATORY",
     } else "No"
+
+
+def reference_image_preview_source(reference, uploaded_file=None):
+    if uploaded_file is not None:
+        content_type = str(
+            getattr(uploaded_file, "type", "") or "application/octet-stream"
+        )
+        encoded = base64.b64encode(uploaded_file.getvalue()).decode("ascii")
+        return f"data:{content_type};base64,{encoded}"
+    return get_mission_media_url(reference)
 
 
 def make_qr_png(value):
@@ -342,13 +353,53 @@ def _experience_designer(db, event_id, selected):
             companion_prompt = str(selected.get("AIPrompt", ""))
             time_limit = safe_int(selected.get("TimeLimitMinutes"), 10)
             if mission_type == "Observe":
-                reference = st.text_input("Reference Image", value=reference, key=f"{key}_reference")
+                reference_upload = st.file_uploader(
+                    "Replace Image" if reference else "Upload Reference Image",
+                    type=["jpg", "jpeg", "png", "webp", "heic"],
+                    key=f"{key}_reference_upload",
+                    help="Supported formats: JPG, PNG, WEBP, and HEIC where supported.",
+                )
+                remove_reference = st.checkbox(
+                    "Remove Image",
+                    value=False,
+                    key=f"{key}_remove_reference",
+                    disabled=not bool(reference),
+                )
+                reference_preview = (
+                    reference_image_preview_source(reference, reference_upload)
+                    if reference_upload is not None or not remove_reference
+                    else ""
+                )
+                if reference_preview:
+                    try:
+                        st.image(
+                            reference_preview,
+                            caption="Reference image preview",
+                            width="stretch",
+                        )
+                    except Exception:
+                        st.warning(
+                            "This image is saved, but this browser cannot preview "
+                            "its format. JPG, PNG, or WEBP gives the widest support."
+                        )
+                crop_framing_note = st.text_input(
+                    "Crop / Framing Note",
+                    value=str(selected.get("CropFramingNote", "")),
+                    placeholder="Full image, tight crop, detail crop, silhouette, or partial object",
+                    key=f"{key}_crop_framing",
+                )
                 type_guidance = st.text_area("Observation Instructions", value=str(selected.get("EvidenceInstructions", "")), key=f"{key}_observe")
             elif mission_type == "Think":
+                reference_upload, remove_reference = None, False
+                reference_preview = reference_image_preview_source(reference)
+                crop_framing_note = str(selected.get("CropFramingNote", ""))
                 companion_prompt = st.text_area("AI Companion Prompt", value=companion_prompt, key=f"{key}_think_ai")
                 reasoning = st.text_area("Reasoning Prompt", value=reasoning, key=f"{key}_reason")
                 type_guidance = str(selected.get("EvidenceInstructions", ""))
             else:
+                reference_upload, remove_reference = None, False
+                reference_preview = reference_image_preview_source(reference)
+                crop_framing_note = str(selected.get("CropFramingNote", ""))
                 interaction = st.text_area("Interaction", value=interaction, key=f"{key}_interaction")
                 time_limit = st.slider("Time Limit (minutes)", 0, 180, min(time_limit, 180), key=f"{key}_time")
                 type_guidance = str(selected.get("EvidenceInstructions", ""))
@@ -398,7 +449,7 @@ def _experience_designer(db, event_id, selected):
         st.markdown('<div class="studio-step">Live Preview</div>', unsafe_allow_html=True)
         st.caption("Participant view · updates as you edit")
         clean = lambda value: html.escape(str(value or "")).replace("\n", "<br>")
-        image = f'<img src="{clean(reference)}" alt="Reference" style="width:100%;border-radius:12px;margin-top:10px">' if reference and mission_type == "Observe" else ""
+        image = f'<img src="{clean(reference_preview)}" alt="Reference" style="width:100%;height:auto;border-radius:12px;margin-top:10px">' if reference_preview and mission_type == "Observe" else ""
         st.markdown(
             f"""<div class="phone"><div class="phone-screen"><div class="phone-top"><span class="phone-notch"></span></div>
             <div class="phone-body"><div class="transmission">Incoming transmission</div><h2>{clean(title) or "Untitled experience"}</h2>
@@ -414,6 +465,17 @@ def _experience_designer(db, event_id, selected):
         if not title.strip() or not mission.strip():
             st.error("Story Title and Mission are required.")
             return
+        resolved_reference = "" if remove_reference else reference
+        if reference_upload is not None:
+            try:
+                resolved_reference = upload_mission_media(
+                    reference_upload,
+                    f"{event_id}-{mission_id}",
+                    "image",
+                )
+            except Exception as error:
+                st.error(f"Reference image upload failed: {error}")
+                return
         hint_values = [line.strip() for line in hints.splitlines() if line.strip()][:3]
         payload = dict(selected)
         payload.update({
@@ -423,7 +485,9 @@ def _experience_designer(db, event_id, selected):
             "Transmission": transmission.strip(), "Clue": transmission.strip(),
             "MissionType": mission_type, "ParticipantInstructions": mission.strip(),
             "MainQuestion": mission.strip(), "Interaction": interaction.strip(),
-            "ReasoningPrompt": reasoning.strip(), "ReferenceImageURL": reference.strip(),
+            "ReasoningPrompt": reasoning.strip(),
+            "ReferenceImageURL": resolved_reference.strip(),
+            "CropFramingNote": crop_framing_note.strip(),
             "EvidenceRequired": "Yes", "SubmissionType": evidence,
             "EvidenceInstructions": evidence_instructions.strip(),
             "CreditValue": int(credits), "Points": int(credits), "MaximumCredits": int(credits),

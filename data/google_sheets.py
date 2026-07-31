@@ -49,6 +49,7 @@ REQUIRED_WORKSHEETS = {
         "Interaction", "ReasoningPrompt", "Difficulty",
         "EstimatedTimeMinutes", "MissionCompleteMessage",
         "AIRestrictions", "FacilitatorIntent", "LearningIntent", "SafetyNotes",
+        "CropFramingNote",
     ],
     "MissionTemplates": [
         "TemplateID", "Title", "Story", "ParticipantInstructions",
