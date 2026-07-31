@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+from scripts.build_bayu_labyrinth_sheet_requests import (
+    character_portrait_reference,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 PACK_PATH = ROOT / "content_packs" / "bayu_beach_labyrinth_v1.json"
@@ -72,6 +75,30 @@ def test_every_experience_has_only_approved_character_and_existing_image():
         assert experience["ai_response"].strip()
         assert f"+{experience['credits']} Intelligence Credits" in experience["ai_response"]
         assert (ROOT / experience["reference_image"]).is_file()
+        assert character_portrait_reference(experience["character"]).startswith(
+            "supabase://exos-mission-media/characters/"
+        )
+
+
+def test_character_portraits_reuse_five_deterministic_storage_objects():
+    references = {
+        character_portrait_reference(experience["character"])
+        for experience in load_pack()["experiences"]
+    }
+
+    assert references == {
+        "supabase://exos-mission-media/characters/eva/portrait",
+        "supabase://exos-mission-media/characters/headquarters/portrait",
+        (
+            "supabase://exos-mission-media/characters/"
+            "captain-amelia-ross/portrait"
+        ),
+        "supabase://exos-mission-media/characters/dr-marcus-hale/portrait",
+        (
+            "supabase://exos-mission-media/characters/"
+            "unknown-transmission/portrait"
+        ),
+    }
 
 
 def test_experience_one_uses_approved_copy_and_paris_crop():

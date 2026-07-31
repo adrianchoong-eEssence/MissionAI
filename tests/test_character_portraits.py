@@ -3,6 +3,10 @@ from unittest.mock import patch
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
 from data.mission_media import upload_character_portrait
+from screens.participant import (
+    render_ai_response_after_submission,
+    render_mission_content,
+)
 
 
 class UploadedPortrait:
@@ -119,6 +123,58 @@ class CharacterPortraitTests(unittest.TestCase):
             mission["CharacterPortraitURL"],
             "supabase://exos-mission-media/characters/eva/portrait",
         )
+
+    @patch("screens.participant.render_character_card", return_value=True)
+    @patch("screens.participant.st")
+    def test_character_portrait_and_transmission_render_together(
+        self,
+        streamlit,
+        render_card,
+    ):
+        mission = {
+            "Transmission": "SIGNAL RESTORED",
+            "CharacterSource": "EVA",
+            "CharacterPortraitURL": (
+                "supabase://exos-mission-media/characters/eva/portrait"
+            ),
+            "Story": "",
+            "ParticipantInstructions": "",
+            "EvidenceRequired": "No",
+        }
+
+        render_mission_content(mission)
+
+        render_card.assert_any_call(
+            "EVA",
+            "supabase://exos-mission-media/characters/eva/portrait",
+            "SIGNAL RESTORED",
+        )
+        streamlit.info.assert_not_called()
+
+    @patch("screens.participant.render_character_card", return_value=True)
+    @patch("screens.participant.st")
+    def test_ai_response_uses_same_portrait_after_submission(
+        self,
+        streamlit,
+        render_card,
+    ):
+        mission = {
+            "MissionCompleteMessage": "Evidence verified.",
+            "CharacterSource": "EVA",
+            "CharacterPortraitURL": (
+                "supabase://exos-mission-media/characters/eva/portrait"
+            ),
+        }
+
+        rendered = render_ai_response_after_submission(mission)
+
+        self.assertTrue(rendered)
+        render_card.assert_called_once_with(
+            "EVA",
+            "supabase://exos-mission-media/characters/eva/portrait",
+            "Evidence verified.",
+        )
+        streamlit.success.assert_not_called()
 
 
 if __name__ == "__main__":

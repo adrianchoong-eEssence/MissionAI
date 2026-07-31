@@ -760,6 +760,12 @@ def render_mission_content(mission):
     transmission = str(
         mission.get("Transmission", "") or mission.get("Clue", "") or ""
     ).strip()
+    character_name = str(
+        mission.get("CharacterSource", "") or "Headquarters"
+    ).strip()
+    portrait_reference = str(
+        mission.get("CharacterPortraitURL", "") or ""
+    ).strip()
     instructions = str(
         mission.get("ParticipantInstructions", "")
         or mission.get("Description", "")
@@ -774,7 +780,13 @@ def render_mission_content(mission):
 
     if transmission:
         st.markdown("#### Transmission")
-        st.info(transmission)
+        if not render_character_card(
+            character_name,
+            portrait_reference,
+            transmission,
+        ):
+            st.markdown(f"**{character_name}**")
+            st.info(transmission)
 
     if story:
         st.markdown("#### Narrative")
@@ -830,6 +842,29 @@ def render_mission_content(mission):
         st.write(f"**{evidence or 'Evidence'}**")
         if evidence_instructions:
             st.caption(evidence_instructions)
+
+
+def render_ai_response_after_submission(mission):
+    """Show the authored character response only after evidence is submitted."""
+    response = str(
+        (mission or {}).get("MissionCompleteMessage", "") or ""
+    ).strip()
+    if not response:
+        return False
+
+    character_name = str(
+        (mission or {}).get("CharacterSource", "") or "Headquarters"
+    ).strip()
+    portrait_reference = str(
+        (mission or {}).get("CharacterPortraitURL", "") or ""
+    ).strip()
+    st.markdown("#### AI Response")
+    if render_character_card(character_name, portrait_reference, response):
+        return True
+
+    st.markdown(f"**{character_name}**")
+    st.success(response)
+    return True
 
     card1, card2 = st.columns(2)
     with card1:
@@ -1596,6 +1631,7 @@ def show_participant():
         st.divider()
         if existing_submission:
             render_existing_submission(existing_submission)
+            render_ai_response_after_submission(mission)
             if not runtime_session:
                 st_autorefresh(interval=5000, key="submitted_mission_refresh")
         else:

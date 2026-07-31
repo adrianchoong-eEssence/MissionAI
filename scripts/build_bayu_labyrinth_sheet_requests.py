@@ -47,6 +47,17 @@ def cell(value):
     return {"userEnteredValue": {"stringValue": str(value or "")}}
 
 
+def character_portrait_reference(character):
+    slug = {
+        "EVA": "eva",
+        "Headquarters": "headquarters",
+        "Captain Amelia Ross": "captain-amelia-ross",
+        "Dr Marcus Hale": "dr-marcus-hale",
+        "Unknown Transmission": "unknown-transmission",
+    }[character]
+    return f"supabase://exos-mission-media/characters/{slug}/portrait"
+
+
 def row_values(experience, display_order):
     mission_type = experience["type"]
     values = {header: "" for header in HEADERS}
@@ -101,6 +112,9 @@ def row_values(experience, display_order):
         ),
         "CropFramingNote": experience["crop_note"],
         "CharacterSource": experience["character"],
+        "CharacterPortraitURL": character_portrait_reference(
+            experience["character"]
+        ),
     })
     return [cell(values[header]) for header in HEADERS]
 
