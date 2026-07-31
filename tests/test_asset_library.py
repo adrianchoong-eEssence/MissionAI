@@ -140,6 +140,43 @@ def test_empty_catalogue_initialises_without_error():
     assert db.assets.records == []
 
 
+def test_legacy_reference_images_are_backfilled_as_original_images():
+    reference = "supabase://exos-mission-media/assets/paris/file"
+    db = GoogleSheetsDB.__new__(GoogleSheetsDB)
+    db.assets = Worksheet(REQUIRED_WORKSHEETS["Assets"])
+    db.missions = Worksheet(REQUIRED_WORKSHEETS["Missions"])
+    db.clear_cache = lambda: None
+    records = {
+        "Assets": [{
+            "AssetID": "MISSION-IMAGE-PARIS",
+            "Category": "Mission Images",
+            "MediaReference": reference,
+        }],
+        "Missions": [{
+            "EventID": "EVT-0004",
+            "MissionID": "LAB01",
+            "ReferenceImageURL": reference,
+            "OriginalImageID": "",
+        }],
+        "MissionTemplates": [],
+    }
+
+    with patch.object(
+        db, "ensure_existing_assets_catalogue", return_value={"Added": 0},
+    ), patch(
+        "data.google_sheets.get_sheet_records",
+        side_effect=lambda name: records[name],
+    ):
+        result = db.ensure_reference_image_origins()
+
+    column = REQUIRED_WORKSHEETS["Missions"].index("OriginalImageID") + 1
+    assert result == {"AssetsAdded": 0, "MissionsUpdated": 1}
+    assert db.missions.batch_updates == [{
+        "range": __import__("gspread").utils.rowcol_to_a1(2, column),
+        "values": [["MISSION-IMAGE-PARIS"]],
+    }]
+
+
 def test_former_catalogued_spelling_remains_compatible():
     db = GoogleSheetsDB.__new__(GoogleSheetsDB)
     with patch.object(

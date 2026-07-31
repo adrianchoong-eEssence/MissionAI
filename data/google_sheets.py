@@ -370,6 +370,38 @@ class GoogleSheetsDB:
         """Compatibility alias for deployments using the former spelling."""
         return self.ensure_existing_assets_catalogue()
 
+    def ensure_reference_image_origins(self):
+        """Backfill original image IDs for legacy reference-image missions."""
+        catalogue = self.ensure_existing_assets_catalogue()
+        assets = list(get_sheet_records("Assets"))
+        asset_by_reference = {
+            str(asset.get("MediaReference", "")).strip(): str(
+                asset.get("AssetID", "")
+            ).strip()
+            for asset in assets
+            if str(asset.get("Category", "")).strip() == "Mission Images"
+            and str(asset.get("MediaReference", "")).strip()
+            and str(asset.get("AssetID", "")).strip()
+        }
+        headers = self.missions.row_values(1)
+        column = headers.index("OriginalImageID") + 1
+        updates = []
+        for row_number, mission in enumerate(
+            get_sheet_records("Missions"), start=2,
+        ):
+            if str(mission.get("OriginalImageID", "")).strip():
+                continue
+            reference = str(mission.get("ReferenceImageURL", "")).strip()
+            asset_id = asset_by_reference.get(reference, "")
+            if not asset_id:
+                continue
+            cell = gspread.utils.rowcol_to_a1(row_number, column)
+            updates.append({"range": cell, "values": [[asset_id]]})
+        if updates:
+            self.missions.batch_update(updates)
+            self.clear_cache()
+        return {"AssetsAdded": catalogue["Added"], "MissionsUpdated": len(updates)}
+
     def create_asset(self, category, name, uploaded_file):
         clean_category = str(category or "").strip()
         clean_name = str(name or "").strip()

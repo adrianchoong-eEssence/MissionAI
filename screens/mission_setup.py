@@ -671,7 +671,7 @@ def _mission_editor(db, event_id, selected):
 def _experience_designer(db, event_id, selected):
     mission_id = str(selected.get("MissionID", "")).strip().upper()
     key = f"experience_{event_id}_{mission_id}"
-    db.ensure_existing_assets_catalogue()
+    db.ensure_reference_image_origins()
     character_assets = db.get_assets("Characters")
     mission_image_assets = db.get_assets("Mission Images")
     st.markdown(

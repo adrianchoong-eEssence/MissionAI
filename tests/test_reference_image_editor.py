@@ -109,3 +109,7 @@ def test_participant_crop_is_rendered_from_original_asset_bytes():
         )
 
     assert Image.open(io.BytesIO(cropped)).size == (100, 80)
+
+
+def test_no_crop_metadata_uses_full_image_fallback():
+    assert cropped_reference_image("original-reference", {}) is None
