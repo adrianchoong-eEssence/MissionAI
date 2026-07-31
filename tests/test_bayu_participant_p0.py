@@ -187,6 +187,9 @@ def test_bayu_join_auto_assigns_the_least_populated_country():
         is_configured = True
         can_publish = True
 
+        def ensure_event_teams(self, event, teams):
+            self.ensured_teams = [team["TeamName"] for team in teams]
+
         def join_player(self, join_code, name):
             return {
                 "EventID": "EVT-0004", "Name": name,
@@ -213,6 +216,10 @@ def test_bayu_join_auto_assigns_the_least_populated_country():
     assert player["Team"] == "🇹🇭 Thailand"
     assert player["Country"] == "Thailand"
     assert db.runtime.assignment == ("TOKEN", "🇹🇭 Thailand", "Thailand")
+    assert db.runtime.ensured_teams == [
+        "🇰🇷 Korea", "🇯🇵 Japan", "🇹🇭 Thailand",
+        "🇵🇭 Philippines", "🇲🇾 Malaysia", "🇮🇳 India",
+    ]
 
 
 def test_bayu_country_catalogue_contains_exactly_the_approved_six():

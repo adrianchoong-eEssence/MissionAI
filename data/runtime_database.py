@@ -248,6 +248,25 @@ class SupabaseRuntimeDB:
             )
         return published
 
+    def ensure_event_teams(self, event, teams):
+        """Publish missing/mismatched runtime teams without resetting participants."""
+        event_id = str(event.get("EventID", "")).strip()
+        rows = self._request(
+            "GET",
+            "runtime_teams",
+            query={
+                "event_id": f"eq.{event_id}",
+                "select": "team_id,team_name,position",
+                "order": "position.asc",
+            },
+            admin=True,
+        ) or []
+        expected = [str(team.get("TeamName", "")).strip() for team in teams]
+        actual = [str(row.get("team_name", "")).strip() for row in rows]
+        if actual == expected:
+            return {"EventID": event_id, "TeamsPublished": len(actual)}
+        return self.publish_event(event, teams, reset_registration=False)
+
     def publish_programme(self, event_id, missions):
         if not self.can_publish:
             raise RuntimeDatabaseError(

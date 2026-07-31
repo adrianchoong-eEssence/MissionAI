@@ -1796,6 +1796,8 @@ class GoogleSheetsDB:
             event_id = str((event or {}).get("EventID", "")).strip()
             teams = self.get_teams(event_id) if event else []
             if event_id == "EVT-0004":
+                if self.runtime.can_publish:
+                    self.runtime.ensure_event_teams(event, teams)
                 player = self.runtime.join_player(join_code, name)
                 existing_country = str(player.get("Country", "") or "").strip()
                 if not existing_country:
