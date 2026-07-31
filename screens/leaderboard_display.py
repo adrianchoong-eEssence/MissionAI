@@ -7,6 +7,10 @@ from data.runtime_database import RuntimeDatabaseError
 from engines.programme_hierarchy import current_module_activity, friendly_type
 from engines.stage_timer import remaining_seconds
 from screens.app_state import select_active_event
+from screens.projector_broadcast import (
+    projector_broadcast_state,
+    render_projector_broadcast,
+)
 
 
 PROJECTOR_STYLES = """
@@ -141,6 +145,138 @@ PROJECTOR_STYLES = """
         font-weight: 650;
         line-height: 1.45;
         overflow-wrap: break-word;
+    }
+    .broadcast-screen {
+        width:100%;
+        min-height:calc(100vh - 42px);
+        box-sizing:border-box;
+        border-radius:24px;
+        padding:clamp(42px,6vh,92px) clamp(48px,7vw,120px);
+        background-color:#061326;
+        background-position:center;
+        background-size:cover;
+        color:#ffffff;
+        display:flex;
+        flex-direction:column;
+        justify-content:center;
+        overflow:hidden;
+    }
+    .broadcast-presentation {
+        min-height:calc(100vh - 20px);
+        border-radius:0;
+    }
+    .broadcast-brand {
+        font-size:clamp(96px,14vw,220px);
+        font-weight:950;
+        letter-spacing:-.06em;
+        line-height:.85;
+    }
+    .broadcast-product {
+        margin-top:24px;
+        font-size:clamp(28px,3vw,50px);
+        font-weight:750;
+        line-height:1.25;
+    }
+    .broadcast-title {
+        margin-top:clamp(22px,4vh,54px);
+        font-size:clamp(72px,8vw,138px);
+        font-weight:950;
+        line-height:1.02;
+        overflow-wrap:anywhere;
+        text-wrap:balance;
+    }
+    .broadcast-subtitle, .broadcast-tagline, .broadcast-kicker {
+        color:#f0f6ff;
+        font-size:clamp(28px,2.7vw,46px);
+        font-weight:720;
+        line-height:1.35;
+        overflow-wrap:break-word;
+    }
+    .broadcast-subtitle {margin-top:28px;}
+    .broadcast-tagline {margin-top:auto;padding-top:34px;}
+    .broadcast-kicker {
+        color:#d8c46a;
+        letter-spacing:.12em;
+        text-transform:uppercase;
+    }
+    .broadcast-logo {
+        max-width:min(34vw,480px);
+        max-height:20vh;
+        object-fit:contain;
+        margin-top:34px;
+        align-self:center;
+    }
+    .broadcast-story, .broadcast-experience, .broadcast-king-screen {
+        display:grid;
+        grid-template-columns:minmax(340px,.82fr) minmax(0,1.18fr);
+        gap:clamp(42px,6vw,100px);
+        align-items:center;
+    }
+    .broadcast-character, .broadcast-king {
+        width:100%;
+        height:min(76vh,850px);
+        object-fit:contain;
+        object-position:center bottom;
+    }
+    .broadcast-story-copy, .broadcast-experience-copy,
+    .broadcast-king-copy {min-width:0;}
+    .broadcast-message {
+        margin-top:clamp(24px,4vh,48px);
+        font-size:clamp(38px,3.5vw,62px);
+        font-weight:600;
+        line-height:1.48;
+        overflow-wrap:break-word;
+        text-wrap:pretty;
+    }
+    .broadcast-experience-image {
+        width:100%;
+        max-height:76vh;
+        object-fit:contain;
+        border-radius:24px;
+    }
+    .broadcast-centred {
+        align-items:center;
+        text-align:center;
+    }
+    .broadcast-countdown {
+        font-size:clamp(180px,26vw,430px);
+        font-weight:950;
+        line-height:.88;
+        font-variant-numeric:tabular-nums;
+        letter-spacing:-.06em;
+    }
+    .broadcast-rankings {justify-content:flex-start;}
+    .broadcast-ranking {
+        width:min(1180px,100%);
+        margin:clamp(10px,1.3vh,18px) auto 0;
+        padding:clamp(16px,2vh,26px) clamp(22px,3vw,42px);
+        border:2px solid rgba(255,255,255,.28);
+        border-radius:20px;
+        background:rgba(255,255,255,.1);
+        display:flex;
+        justify-content:space-between;
+        gap:40px;
+        font-size:clamp(30px,3vw,48px);
+        font-weight:760;
+        line-height:1.2;
+    }
+    .broadcast-custom-image {
+        width:100%;
+        height:calc(100vh - 90px);
+        object-fit:contain;
+    }
+    .broadcast-blank {
+        position:fixed;
+        inset:0;
+        z-index:999999;
+        background:#000000;
+    }
+    @media (max-width: 1000px) {
+        .broadcast-story, .broadcast-experience, .broadcast-king-screen {
+            grid-template-columns:1fr;
+        }
+        .broadcast-character, .broadcast-king,
+        .broadcast-experience-image {max-height:42vh;}
     }
     @media (max-aspect-ratio: 4/3) {
         .projector-event-title { font-size: clamp(66px, 7vw, 96px); }
@@ -580,8 +716,8 @@ def show_leaderboard_display():
 
         refresh_seconds = st.selectbox(
             "Auto Refresh",
-            [5, 10, 15, 30],
-            index=1,
+            [2, 5, 10, 15, 30],
+            index=0,
             key="live_display_refresh_seconds",
         )
 
@@ -642,13 +778,32 @@ def show_leaderboard_display():
     leaderboard = calculate_leaderboard(submissions)
     mission = db.get_current_mission(event_id)
     teams_count = db.get_team_count(event_id)
+    broadcast_state = projector_broadcast_state(event)
 
     wallet_status = {}
-    if mode == "Credit Leaderboard" and db.runtime.can_publish:
+    if (
+        mode == "Credit Leaderboard"
+        or broadcast_state.get("Mode") == "Credits"
+    ) and db.runtime.can_publish:
         try:
             wallet_status = db.runtime.get_credit_wallet_status(event_id)
         except RuntimeDatabaseError:
             wallet_status = {}
+
+    timer = db.get_stage_timer(
+        event_id,
+        current_stage.get("StageNo", ""),
+        current_stage.get("DurationMinutes", 0),
+    ) if current_stage else {}
+    if render_projector_broadcast(
+        broadcast_state,
+        event=event,
+        mission=mission,
+        leaderboard=leaderboard,
+        wallet_status=wallet_status,
+        timer=timer,
+    ):
+        return
 
     display_header(event, mode)
     if current_module:
@@ -666,11 +821,6 @@ def show_leaderboard_display():
             unsafe_allow_html=True,
         )
     if current_stage:
-        timer = db.get_stage_timer(
-            event_id,
-            current_stage.get("StageNo", ""),
-            current_stage.get("DurationMinutes", 0),
-        )
         remaining = remaining_seconds(timer)
         if str(timer.get("Status", "")).upper() in {"RUNNING", "PAUSED"}:
             st.markdown(

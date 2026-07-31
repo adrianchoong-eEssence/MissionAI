@@ -17,6 +17,10 @@ from screens.live_event_console import (
     render_credit_wallet_control,
     render_review_scoring_widget,
 )
+from screens.projector_broadcast import (
+    projector_broadcast_state,
+    render_broadcast_controller,
+)
 
 
 def stage_family(stage):
@@ -238,7 +242,9 @@ def show_control_centre():
         ),
         0,
     )
-    metadata = db.event_metadata(db.get_event(event_id))
+    selected_event = db.get_event(event_id)
+    metadata = db.event_metadata(selected_event)
+    broadcast_state = projector_broadcast_state(selected_event)
     stage_status = str(metadata.get("CurrentStageStatus", "READY"))
 
     st.markdown(
@@ -258,8 +264,8 @@ def show_control_centre():
     c3.metric("Join Code", event.get("JoinCode", "—"))
     c4.metric(
         "Projector",
-        stage.get("DisplayMode", "Automatic"),
-        "Following current stage",
+        broadcast_state.get("Mode", "Welcome"),
+        "Facilitator broadcast",
     )
 
     previous, launch, next_col, end_module, next_module = st.columns([1, 2, 1, 1, 1])
@@ -313,17 +319,7 @@ def show_control_centre():
     with timer_col:
         _render_timer(db, event_id, stage)
     with broadcast_col:
-        message = st.text_area(
-            "Broadcast message",
-            value=str(stage.get("ParticipantMessage", "")),
-            key=f"broadcast_{event_id}_{stage.get('StageNo', '')}",
-        )
-        if st.button("Send Broadcast", width="stretch"):
-            revised = [dict(row) for row in stages]
-            revised[index]["ParticipantMessage"] = message
-            db.save_programme_stages(event_id, revised)
-            db.set_event_stage(event_id, revised[index])
-            st.success("Broadcast sent to participant and projector views.")
+        render_broadcast_controller(db, event_id)
 
     st.divider()
     _render_stage_widgets(db, event_id, stage_family(stage))
