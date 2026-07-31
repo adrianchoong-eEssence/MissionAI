@@ -70,6 +70,12 @@ def activity_details(stage):
             "EvidenceRequirement": "",
             "ContentType": "",
             "LinkedContent": "",
+            "LinkedContentID": "",
+            "LinkedContentName": "",
+            "ActivityID": "",
+            "ModuleID": "",
+            "AdminDisplayName": "",
+            "ParticipantDisplayName": "",
             "ModuleDetails": {},
         }
     import json
@@ -92,6 +98,12 @@ def activity_details(stage):
         "EvidenceRequirement": str(value.get("EvidenceRequirement", "")),
         "ContentType": str(value.get("ContentType", "")),
         "LinkedContent": str(value.get("LinkedContent", "")),
+        "LinkedContentID": str(value.get("LinkedContentID", "")),
+        "LinkedContentName": str(value.get("LinkedContentName", "")),
+        "ActivityID": str(value.get("ActivityID", "")),
+        "ModuleID": str(value.get("ModuleID", "")),
+        "AdminDisplayName": str(value.get("AdminDisplayName", "")),
+        "ParticipantDisplayName": str(value.get("ParticipantDisplayName", "")),
         "ModuleDetails": (
             value.get("ModuleDetails", {})
             if isinstance(value.get("ModuleDetails", {}), dict)
@@ -183,6 +195,22 @@ def build_programme_hierarchy(stages):
             by_id[module_id] = module
             modules.append(module)
         item = deepcopy(stage)
+        details = activity_details(item)
+        item["ActivityID"] = str(
+            details.get("ActivityID", "")
+            or item.get("ActivityID", "")
+            or f"{item.get('EventID', 'EVENT')}-ACT-{item.get('StageNo', '')}"
+        )
+        item["AdminDisplayName"] = str(
+            details.get("AdminDisplayName", "")
+            or item.get("AdminDisplayName", "")
+            or item.get("StageName", "Activity")
+        )
+        item["ParticipantDisplayName"] = str(
+            details.get("ParticipantDisplayName", "")
+            or item.get("ParticipantDisplayName", "")
+            or item["AdminDisplayName"]
+        )
         item["ActivityTypeLabel"] = friendly_type(stage)
         module["Activities"].append(item)
     for module in modules:
@@ -191,6 +219,135 @@ def build_programme_hierarchy(stages):
             for item in module["Activities"]
         )
         module["ActivityCount"] = len(module["Activities"])
+    return modules
+
+
+EVT0004_CANONICAL_ITEMS = (
+    ("Registration", 1, "Standard Activity", "", ""),
+    ("Energiser", 1, "Standard Activity", "", ""),
+    ("Launch EXOS", 1, "Briefing", "", ""),
+    ("Bridge of Trust", 1, "Standard Activity", "", ""),
+    (
+        "Operation: The Labyrinth", 1, "Experience Board",
+        "Operation: The Labyrinth", "EVT-0004 Bayu Beach Labyrinth",
+    ),
+    ("Lunch", 1, "Break", "", ""),
+    (
+        "Sync AI", 1, "Sync AI", "S01",
+        "existing EVT-0004 Sync AI configuration",
+    ),
+    (
+        "Catalyst Challenge", 2, "Catalyst", "C01",
+        "existing EVT-0004 Catalyst configuration",
+    ),
+)
+
+
+def _evt0004_source_stage(stages, title):
+    wanted = title.casefold()
+    candidates = []
+    for stage in stages:
+        name = str(stage.get("StageName", "")).strip().casefold()
+        if wanted == "operation: the labyrinth":
+            matched = "mission ai" in name or "mission board" in name
+        elif wanted == "sync ai":
+            matched = "sync ai" in name
+        else:
+            matched = name == wanted
+        if matched:
+            candidates.append(stage)
+    if wanted == "operation: the labyrinth":
+        candidates.sort(key=lambda row: (
+            "briefing" not in str(row.get("StageName", "")).casefold(),
+            int(row.get("StageNo") or 999),
+        ))
+    return deepcopy(candidates[0]) if candidates else {}
+
+
+def canonical_event_programme(stages, event_id):
+    """Return one canonical event view without mutating persisted stage rows."""
+    if str(event_id).strip().upper() != "EVT-0004":
+        return build_programme_hierarchy(stages)
+
+    modules = []
+    bridge_narrative = "\n\n".join((
+        "The entrance to The Labyrinth is blocked by an unstable crossing.",
+        "Your expedition must reconnect the detonation line and clear the route.",
+        "The first member crosses with the secured line and fastens it at the far side.",
+        "Each expedition member then crosses safely.",
+        "The final member releases the line and carries it across.",
+        "No member may be left behind.",
+    ))
+    bridge_task = (
+        "Cross the Bridge of Trust and reconnect the detonation line as one "
+        "complete expedition team."
+    )
+    for position, (title, day, content_type, linked_id, linked_name) in enumerate(
+        EVT0004_CANONICAL_ITEMS, start=1,
+    ):
+        source = _evt0004_source_stage(stages, title)
+        details = activity_details(source)
+        module_id = f"EVT-0004-MOD-{position:02d}"
+        activity_id = f"EVT-0004-ACT-{position:02d}"
+        source.update({
+            "EventID": "EVT-0004",
+            "OriginalStageNo": source.get("StageNo", ""),
+            "StageNo": position,
+            "StageName": title,
+            "StageType": encode_module_stage_type(title, day, content_type),
+            "ActivityID": activity_id,
+            "ModuleID": module_id,
+            "AdminDisplayName": title,
+            "ParticipantDisplayName": title,
+            "ContentType": content_type,
+            "LinkedContentID": linked_id,
+            "LinkedContentName": linked_name,
+            "IsActive": "Yes",
+        })
+        if title == "Operation: The Labyrinth":
+            source["MissionID"] = ""
+            source["ParticipantMessage"] = (
+                "Enter The Labyrinth and complete the 17 active Experiences "
+                "in any order."
+            )
+        elif title == "Sync AI":
+            source["MissionID"] = "S01"
+        elif title == "Catalyst Challenge":
+            source["MissionID"] = "C01"
+        if title == "Bridge of Trust":
+            details.update({
+                "ParticipantNarrative": bridge_narrative,
+                "ParticipantTask": bridge_task,
+                "EvidenceRequired": True,
+                "EvidenceRequirement": "Facilitator verification.",
+            })
+            source["ParticipantMessage"] = bridge_task
+        details.update({
+            "ActivityID": activity_id,
+            "ModuleID": module_id,
+            "AdminDisplayName": title,
+            "ParticipantDisplayName": title,
+            "ContentType": content_type,
+            "LinkedContent": linked_id,
+            "LinkedContentID": linked_id,
+            "LinkedContentName": linked_name,
+        })
+        source["FacilitatorInstruction"] = encode_activity_details(details)
+        duration = int(float(source.get("DurationMinutes", 15) or 15))
+        modules.append({
+            "ModuleID": module_id,
+            "ModuleName": title,
+            "AdminDisplayName": title,
+            "ParticipantTitle": title,
+            "ParticipantNarrative": details.get("ParticipantNarrative", ""),
+            "Day": day,
+            "StartTime": source.get("StartTime", ""),
+            "DurationMinutes": duration,
+            "ActivityCount": 1,
+            "Status": "Active",
+            "ProjectionOnly": True,
+            "Activities": [source],
+        })
     return modules
 
 
@@ -232,8 +389,21 @@ def activity_content_config(stage, module=None):
     """Resolve event-owned participant content from one programme activity."""
     stage = dict(stage or {})
     details = activity_details(stage)
-    content_type = str(details.get("ContentType", "") or "").strip()
-    linked = str(details.get("LinkedContent", "") or "").strip()
+    content_type = str(
+        stage.get("ContentType", "") or details.get("ContentType", "") or ""
+    ).strip()
+    linked = str(
+        stage.get("LinkedContentID", "")
+        or stage.get("LinkedContent", "")
+        or details.get("LinkedContentID", "")
+        or details.get("LinkedContent", "")
+        or ""
+    ).strip()
+    linked_name = str(
+        stage.get("LinkedContentName", "")
+        or details.get("LinkedContentName", "")
+        or linked
+    ).strip()
 
     # Preserve links authored before activity-level content linkage existed.
     if not content_type and module:
@@ -262,7 +432,12 @@ def activity_content_config(stage, module=None):
             content_type = "Standard Activity"
     if content_type not in CONTENT_TYPES:
         content_type = "Standard Activity"
-    return {"ContentType": content_type, "LinkedContent": linked}
+    return {
+        "ContentType": content_type,
+        "LinkedContent": linked,
+        "LinkedContentID": linked,
+        "LinkedContentName": linked_name,
+    }
 
 
 def linked_content_stage(stage, module=None, experience_count=0):

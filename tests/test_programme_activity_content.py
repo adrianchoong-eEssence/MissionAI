@@ -53,7 +53,7 @@ def test_programme_builder_exposes_required_event_activity_fields():
     ).read_text(encoding="utf-8")
 
     for label in (
-        "Activity Title", "Participant Narrative", "Participant Task",
-        "Evidence Requirement", "Facilitator Notes", "Credits", "Active",
+        "Activity Name", "Participant Narrative", "Participant Task",
+        "Evidence Requirement", "Facilitator Notes", "Credits", "Status",
     ):
         assert f'"{label}"' in source

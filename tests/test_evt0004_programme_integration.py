@@ -2,6 +2,7 @@ from pathlib import Path
 
 from engines.programme_hierarchy import (
     activity_content_config,
+    canonical_event_programme,
     encode_activity_details,
     linked_content_stage,
 )
@@ -23,10 +24,9 @@ def linked_stage(content_type, linked_content=""):
 def test_activity_content_link_round_trips_without_schema_change():
     stage = linked_stage("Experience Board", "Operation: The Labyrinth")
 
-    assert activity_content_config(stage) == {
-        "ContentType": "Experience Board",
-        "LinkedContent": "Operation: The Labyrinth",
-    }
+    config = activity_content_config(stage)
+    assert config["ContentType"] == "Experience Board"
+    assert config["LinkedContentID"] == "Operation: The Labyrinth"
     payload = linked_content_stage(stage, experience_count=17)
     assert payload["LinkedExperienceSet"] == "Operation: The Labyrinth"
     assert payload["ExperienceCount"] == 17
@@ -58,9 +58,33 @@ def test_programme_and_control_surfaces_expose_linked_content_contract():
         assert f'"{label}"' in builder
     for label in (
         "Linked Content Type", "Linked Content Name", "Participant Preview",
-        "Start Activity", "End Activity", "Previous Activity", "Next Activity",
+        "Select Module", "Select Activity", "Start Selected Activity",
+        "End Selected Activity", "Previous Activity", "Next Activity",
     ):
         assert f'"{label}"' in control
     assert "render_sync_ai_participant" in participant
     assert "ENTER THE LABYRINTH" in participant
 
+
+def test_evt0004_canonical_projection_has_eight_stable_visible_items():
+    stages = [
+        {"EventID": "EVT-0004", "StageNo": index, "StageName": name,
+         "DurationMinutes": 15, "IsActive": "Yes"}
+        for index, name in enumerate((
+            "Registration", "Energiser", "Launch EXOS", "Bridge of Trust",
+            "Mission AI Briefing", "Lunch", "SYNC AI Innovation Market",
+            "Catalyst Challenge", "Mission AI", "SYNC AI Performance & Judging",
+        ), start=1)
+    ]
+
+    modules = canonical_event_programme(stages, "EVT-0004")
+
+    assert [module["ModuleName"] for module in modules] == [
+        "Registration", "Energiser", "Launch EXOS", "Bridge of Trust",
+        "Operation: The Labyrinth", "Lunch", "Sync AI", "Catalyst Challenge",
+    ]
+    assert len({module["ModuleID"] for module in modules}) == 8
+    activities = [module["Activities"][0] for module in modules]
+    assert len({activity["ActivityID"] for activity in activities}) == 8
+    assert activities[4]["LinkedContentName"] == "EVT-0004 Bayu Beach Labyrinth"
+    assert activities[5]["ContentType"] == "Break"

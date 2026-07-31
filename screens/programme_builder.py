@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import time
+from copy import deepcopy
 import html
 import json
 
@@ -29,6 +30,7 @@ from engines.programme_hierarchy import (
     activity_content_config,
     activity_details,
     build_programme_hierarchy,
+    canonical_event_programme,
     encode_activity_details,
     encode_module_stage_type,
     flatten_programme_hierarchy,
@@ -419,7 +421,33 @@ def render_programme_order(db):
 
 
 def _save_modules(db, event_id, modules):
+    if str(event_id).upper() == "EVT-0004" and any(
+        module.get("ProjectionOnly") for module in modules
+    ):
+        st.session_state[f"canonical_programme_preview_{event_id}"] = deepcopy(modules)
+        return
     db.save_programme_stages(event_id, flatten_programme_hierarchy(modules))
+
+
+def _content_choices(db, event_id, content_type, current_id="", current_name=""):
+    choices = [("", "None")]
+    if content_type == "Experience Board":
+        choices.extend((value, value) for value in db.get_experience_sets(event_id))
+        if str(event_id).upper() == "EVT-0004":
+            choices = [
+                (identifier, (
+                    "EVT-0004 Bayu Beach Labyrinth"
+                    if identifier == "Operation: The Labyrinth" else label
+                ))
+                for identifier, label in choices
+            ]
+    elif content_type == "Sync AI" and db.get_mission(event_id, "S01"):
+        choices.append(("S01", "existing EVT-0004 Sync AI configuration"))
+    elif content_type == "Catalyst" and db.get_mission(event_id, "C01"):
+        choices.append(("C01", "existing EVT-0004 Catalyst configuration"))
+    if current_id and current_id not in {item[0] for item in choices}:
+        choices.append((current_id, current_name or current_id))
+    return choices
 
 
 def _add_activity(db, event_id, modules, module, name, minutes):
@@ -497,8 +525,18 @@ def render_programme_first_builder(db):
         return
     event = select_active_event(events, label="Event", key="programme_first_event")
     event_id = str(event.get("EventID", ""))
-    modules = build_programme_hierarchy(db.get_programme_stages(event_id))
+    modules = st.session_state.get(f"canonical_programme_preview_{event_id}")
+    if not modules:
+        modules = canonical_event_programme(
+            db.get_programme_stages(event_id), event_id,
+        )
     st.caption("Arrange the programme like slides. Open a module to edit everything inside it.")
+    if str(event_id).upper() == "EVT-0004":
+        st.info(
+            "Pre-migration Control UAT: these eight canonical items are a safe "
+            "event-specific preview. Save actions update this preview only and do "
+            "not rewrite or deactivate ProgrammeStages records."
+        )
 
     selected_module_labels = [
         f"{position}. {module['ModuleName']}"
@@ -662,7 +700,7 @@ def render_programme_first_builder(db):
                 module_details = first_details.get("ModuleDetails", {})
                 name_col, day_col, start_col = st.columns([3, 1, 1])
                 edited_name = name_col.text_input(
-                    "Module name", value=module["ModuleName"],
+                    "Module Name", value=module["ModuleName"],
                     key=f"module_name_{event_id}_{index}",
                 )
                 edited_day = day_col.number_input(
@@ -670,7 +708,7 @@ def render_programme_first_builder(db):
                     key=f"module_day_{event_id}_{index}",
                 )
                 edited_start = start_col.text_input(
-                    "Start", value=str(module.get("StartTime", "")),
+                    "Start Time", value=str(module.get("StartTime", "")),
                     key=f"module_start_{event_id}_{index}",
                 )
                 duration_col, active_col = st.columns([1, 1])
@@ -679,52 +717,62 @@ def render_programme_first_builder(db):
                     value=int(module.get("DurationMinutes", 15) or 15),
                     key=f"module_duration_{event_id}_{index}",
                 )
-                module_active = active_col.checkbox(
-                    "Active",
-                    value=str(first_activity.get("IsActive", "Yes")).casefold() != "no",
-                    key=f"module_active_{event_id}_{index}",
-                )
-                module_type = st.selectbox(
-                    "Module Type",
-                    ["Standard", "Experience Set"],
+                module_status = active_col.selectbox(
+                    "Status", ["Active", "Inactive"],
                     index=(
-                        1 if str(module_details.get("ModuleType", "")).casefold()
-                        == "experience set" else 0
+                        0 if str(first_activity.get("IsActive", "Yes")).casefold()
+                        != "no" else 1
                     ),
-                    key=f"module_type_{event_id}_{index}",
+                    key=f"module_status_{event_id}_{index}",
                 )
-                experience_sets = db.get_experience_sets(event_id)
-                linked_options = ["None"] + experience_sets
-                current_link = str(
-                    module_details.get("LinkedExperienceSet", "") or "None"
-                )
-                if current_link not in linked_options:
-                    linked_options.append(current_link)
-                linked_experience_set = st.selectbox(
-                    "Linked Experience Set",
-                    linked_options,
-                    index=linked_options.index(current_link),
-                    disabled=module_type != "Experience Set",
-                    format_func=lambda value: (
-                        value.replace("Operation: ", "") if value != "None" else value
+                module_participant_title = st.text_input(
+                    "Participant Title",
+                    value=str(
+                        module_details.get("ParticipantTitle", "")
+                        or module.get("ParticipantTitle", module["ModuleName"])
                     ),
-                    key=f"module_experience_set_{event_id}_{index}",
+                    key=f"module_participant_title_{event_id}_{index}",
                 )
-                module_participant = st.text_area(
-                    "Participant instructions",
-                    value=str(module_details.get(
-                        "ParticipantInstructions",
-                        first_activity.get("ParticipantMessage", ""),
-                    )),
-                    key=f"module_participant_{event_id}_{index}",
+                module_participant_narrative = st.text_area(
+                    "Participant Narrative",
+                    value=str(
+                        module_details.get("ParticipantNarrative", "")
+                        or module.get("ParticipantNarrative", "")
+                    ),
+                    key=f"module_participant_narrative_{event_id}_{index}",
                 )
                 module_facilitator = st.text_area(
-                    "Facilitator instructions",
+                    "Facilitator Notes",
                     value=str(module_details.get(
                         "FacilitatorInstructions",
                         first_details["FacilitatorInstructions"],
                     )),
                     key=f"module_facilitator_{event_id}_{index}",
+                )
+                module_content = activity_content_config(first_activity, module)
+                module_content_type = st.selectbox(
+                    "Content Type", list(CONTENT_TYPES),
+                    index=list(CONTENT_TYPES).index(module_content["ContentType"]),
+                    key=f"module_content_type_{event_id}_{index}",
+                )
+                module_choices = _content_choices(
+                    db, event_id, module_content_type,
+                    module_content["LinkedContentID"],
+                    module_content["LinkedContentName"],
+                )
+                module_choice_ids = [item[0] for item in module_choices]
+                module_linked_content = st.selectbox(
+                    "Linked Content", module_choice_ids,
+                    index=(
+                        module_choice_ids.index(module_content["LinkedContentID"])
+                        if module_content["LinkedContentID"] in module_choice_ids else 0
+                    ),
+                    format_func=lambda value: next(
+                        label for identifier, label in module_choices
+                        if identifier == value
+                    ),
+                    disabled=len(module_choices) == 1,
+                    key=f"module_linked_content_{event_id}_{index}",
                 )
                 module_rules = st.text_area(
                     "Rules", value=str(module_details.get("Rules", "")),
@@ -746,10 +794,15 @@ def render_programme_first_builder(db):
                 )
                 save_module_col, cancel_module_col = st.columns([3, 1])
                 if save_module_col.button("Save Module", type="primary", key=f"mod_save_{event_id}_{index}"):
-                    if module_type == "Experience Set" and linked_experience_set == "None":
-                        st.error("Select the Experience Set this module launches.")
+                    if module_content_type in {"Experience Board", "Sync AI", "Catalyst"} and not module_linked_content:
+                        st.error("Select the event content this module launches.")
                         st.stop()
                     module["ModuleName"] = edited_name.strip() or "Untitled Module"
+                    module["AdminDisplayName"] = module["ModuleName"]
+                    module["ParticipantTitle"] = (
+                        module_participant_title.strip() or module["ModuleName"]
+                    )
+                    module["ParticipantNarrative"] = module_participant_narrative
                     module["Day"] = int(edited_day)
                     remaining_minutes = sum(
                         int(float(row.get("DurationMinutes", 0) or 0))
@@ -764,21 +817,37 @@ def render_programme_first_builder(db):
                         activity["StageType"] = encode_module_stage_type(
                             module["ModuleName"], module["Day"], friendly_type(activity)
                         )
-                        activity["IsActive"] = "Yes" if module_active else "No"
-                    first_activity["ParticipantMessage"] = module_participant
+                        activity["IsActive"] = "Yes" if module_status == "Active" else "No"
+                    first_activity["AdminDisplayName"] = module["ModuleName"]
+                    first_activity["ParticipantDisplayName"] = module["ParticipantTitle"]
+                    selected_module_label = next(
+                        label for identifier, label in module_choices
+                        if identifier == module_linked_content
+                    )
                     first_activity["FacilitatorInstruction"] = encode_activity_details({
                         **first_details,
+                        "AdminDisplayName": module["ModuleName"],
+                        "ParticipantDisplayName": module["ParticipantTitle"],
+                        "ContentType": module_content_type,
+                        "LinkedContent": module_linked_content,
+                        "LinkedContentID": module_linked_content,
+                        "LinkedContentName": selected_module_label,
                         "ModuleDetails": {
-                            "ParticipantInstructions": module_participant,
+                            "ParticipantTitle": module["ParticipantTitle"],
+                            "ParticipantNarrative": module_participant_narrative,
                             "FacilitatorInstructions": module_facilitator,
                             "Rules": module_rules,
                             "Objectives": module_objectives,
                             "Credits": int(module_credits),
                             "Scoring": module_scoring,
-                            "ModuleType": module_type,
+                            "ModuleType": (
+                                "Experience Set"
+                                if module_content_type == "Experience Board"
+                                else "Standard"
+                            ),
                             "LinkedExperienceSet": (
-                                linked_experience_set
-                                if module_type == "Experience Set" else ""
+                                module_linked_content
+                                if module_content_type == "Experience Board" else ""
                             ),
                         },
                     })
@@ -890,12 +959,12 @@ def render_programme_first_builder(db):
                 with st.container(border=True):
                     activity_name_col, activity_start_col, activity_duration_col = st.columns([3, 1, 1])
                     activity_name = activity_name_col.text_input(
-                        "Activity Title",
+                        "Activity Name",
                         value=str(selected_activity.get("StageName", "")),
                         key=f"activity_name_{event_id}_{index}_{selected_position}",
                     )
                     activity_start = activity_start_col.text_input(
-                        "Start time",
+                        "Start Time",
                         value=str(selected_activity.get("StartTime", "")),
                         key=f"activity_start_{event_id}_{index}_{selected_position}",
                     )
@@ -906,10 +975,13 @@ def render_programme_first_builder(db):
                         key=f"activity_duration_{event_id}_{index}_{selected_position}",
                     )
                     active_activity, evidence_required = st.columns(2)
-                    activity_active = active_activity.checkbox(
-                        "Active",
-                        value=str(selected_activity.get("IsActive", "Yes")).casefold() != "no",
-                        key=f"activity_active_{event_id}_{index}_{selected_position}",
+                    activity_status = active_activity.selectbox(
+                        "Status", ["Active", "Inactive"],
+                        index=(
+                            0 if str(selected_activity.get("IsActive", "Yes")).casefold()
+                            != "no" else 1
+                        ),
+                        key=f"activity_status_{event_id}_{index}_{selected_position}",
                     )
                     activity_evidence = evidence_required.checkbox(
                         "Evidence required",
@@ -927,32 +999,24 @@ def render_programme_first_builder(db):
                         ),
                         key=f"content_type_{event_id}_{index}_{selected_position}",
                     )
-                    if content_type == "Experience Board":
-                        content_options = db.get_experience_sets(event_id)
-                    elif content_type == "Sync AI":
-                        content_options = (
-                            [f"{event_id} Sync AI"]
-                            if db.get_mission(event_id, "S01") else []
-                        )
-                    elif content_type == "Catalyst":
-                        content_options = (
-                            [f"{event_id} Catalyst Challenge"]
-                            if db.get_mission(event_id, "C01") else []
-                        )
-                    else:
-                        content_options = []
-                    current_content = content_config["LinkedContent"]
-                    if current_content and current_content not in content_options:
-                        content_options.append(current_content)
-                    linked_options = ["None"] + content_options
+                    content_choices = _content_choices(
+                        db, event_id, content_type,
+                        content_config["LinkedContentID"],
+                        content_config["LinkedContentName"],
+                    )
+                    linked_options = [item[0] for item in content_choices]
                     linked_content = st.selectbox(
                         "Linked Content",
                         linked_options,
                         index=(
-                            linked_options.index(current_content)
-                            if current_content in linked_options else 0
+                            linked_options.index(content_config["LinkedContentID"])
+                            if content_config["LinkedContentID"] in linked_options else 0
                         ),
-                        disabled=not content_options,
+                        format_func=lambda value: next(
+                            label for identifier, label in content_choices
+                            if identifier == value
+                        ),
+                        disabled=len(content_choices) == 1,
                         key=f"linked_content_{event_id}_{index}_{selected_position}",
                     )
                     participant_narrative = st.text_area(
@@ -1014,7 +1078,9 @@ def render_programme_first_builder(db):
                         selected_activity["StageName"] = activity_name.strip() or "Untitled Activity"
                         selected_activity["StartTime"] = activity_start
                         selected_activity["DurationMinutes"] = int(activity_duration)
-                        selected_activity["IsActive"] = "Yes" if activity_active else "No"
+                        selected_activity["IsActive"] = (
+                            "Yes" if activity_status == "Active" else "No"
+                        )
                         selected_activity["ParticipantMessage"] = participant_task
                         selected_activity["FacilitatorInstruction"] = encode_activity_details({
                             "FacilitatorInstructions": facilitator_instructions,
@@ -1024,8 +1090,18 @@ def render_programme_first_builder(db):
                                 evidence_requirement if activity_evidence else ""
                             ),
                             "ContentType": content_type,
-                            "LinkedContent": (
-                                linked_content if linked_content != "None" else ""
+                            "LinkedContent": linked_content,
+                            "LinkedContentID": linked_content,
+                            "LinkedContentName": next(
+                                label for identifier, label in content_choices
+                                if identifier == linked_content
+                            ),
+                            "ActivityID": selected_activity.get("ActivityID", ""),
+                            "ModuleID": module.get("ModuleID", ""),
+                            "AdminDisplayName": activity_name.strip() or "Untitled Activity",
+                            "ParticipantDisplayName": (
+                                details.get("ParticipantDisplayName", "")
+                                or activity_name.strip() or "Untitled Activity"
                             ),
                             "Questions": questions,
                             "Credits": int(credits),

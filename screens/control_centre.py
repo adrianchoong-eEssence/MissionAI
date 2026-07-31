@@ -8,8 +8,7 @@ from engines.stage_timer import remaining_seconds
 from engines.programme_hierarchy import (
     activity_content_config,
     activity_details,
-    build_programme_hierarchy,
-    current_module_activity,
+    canonical_event_programme,
     friendly_type,
     linked_content_stage,
 )
@@ -45,14 +44,6 @@ def stage_family(stage):
     if any(word in combined for word in ("bridge", "trust", "scored")):
         return "scored"
     return "registration"
-
-
-def _current_index(stages, state):
-    stage_no = str((state or {}).get("CurrentStageNo", ""))
-    for index, stage in enumerate(stages):
-        if str(stage.get("StageNo", "")) == stage_no:
-            return index
-    return 0
 
 
 def _format_timer(seconds):
@@ -250,18 +241,59 @@ def show_control_centre():
         st.warning("Build and save the programme before launch.")
         return
     state = db.get_event_state(event_id)
-    index = _current_index(stages, state)
-    stage = stages[index]
-    current_module, current_activity = current_module_activity(
-        stages, stage.get("StageNo", "")
-    )
-    programme_modules = build_programme_hierarchy(stages)
-    module_index = next(
-        (
-            position for position, module in enumerate(programme_modules)
-            if module.get("ModuleID") == current_module.get("ModuleID")
+    programme_modules = canonical_event_programme(stages, event_id)
+    flattened = [
+        (module, activity)
+        for module in programme_modules
+        for activity in module.get("Activities", [])
+    ]
+    if not flattened:
+        st.warning("No active activities are available for this event.")
+        return
+    state_stage_no = str((state or {}).get("CurrentStageNo", ""))
+    default_activity_index = next((
+        position for position, (_, activity) in enumerate(flattened)
+        if str(activity.get("StageNo", "")) == state_stage_no
+    ), 0)
+    default_module_id = flattened[default_activity_index][0].get("ModuleID", "")
+    module_ids = [module.get("ModuleID", "") for module in programme_modules]
+    selected_module_id = st.selectbox(
+        "Select Module", module_ids,
+        index=(
+            module_ids.index(default_module_id)
+            if default_module_id in module_ids else 0
         ),
-        0,
+        format_func=lambda value: next(
+            module.get("ModuleName", "Module") for module in programme_modules
+            if module.get("ModuleID", "") == value
+        ),
+        key=f"control_module_{event_id}",
+    )
+    current_module = next(
+        module for module in programme_modules
+        if module.get("ModuleID", "") == selected_module_id
+    )
+    activity_ids = [
+        activity.get("ActivityID", "")
+        for activity in current_module.get("Activities", [])
+    ]
+    selected_activity_id = st.selectbox(
+        "Select Activity", activity_ids,
+        format_func=lambda value: next(
+            activity.get("AdminDisplayName", activity.get("StageName", "Activity"))
+            for activity in current_module.get("Activities", [])
+            if activity.get("ActivityID", "") == value
+        ),
+        key=f"control_activity_{event_id}_{selected_module_id}",
+    )
+    current_activity = next(
+        activity for activity in current_module.get("Activities", [])
+        if activity.get("ActivityID", "") == selected_activity_id
+    )
+    stage = current_activity
+    index = next(
+        position for position, (_, activity) in enumerate(flattened)
+        if activity.get("ActivityID", "") == selected_activity_id
     )
     selected_event = db.get_event(event_id)
     metadata = db.event_metadata(selected_event)
@@ -269,7 +301,7 @@ def show_control_centre():
     stage_status = str(metadata.get("CurrentStageStatus", "READY"))
     content_config = activity_content_config(current_activity, current_module)
     linked_content_name = (
-        content_config["LinkedContent"] or "Event-specific activity content"
+        content_config["LinkedContentName"] or "Event-specific activity content"
     )
     participant_details = activity_details(current_activity)
 
@@ -279,7 +311,7 @@ def show_control_centre():
           <div class="control-kicker">{html.escape(str(event.get("EventName", "")))}</div>
           <div class="control-title">{html.escape(str(current_module.get("ModuleName", "")))}</div>
           <div style="font-size:1.25rem">Current activity: {html.escape(str(current_activity.get("StageName", "")))}</div>
-          <div>{html.escape(friendly_type(current_activity))} · Activity {index + 1} of {len(stages)} · {html.escape(stage_status)}</div>
+          <div>{html.escape(friendly_type(current_activity))} · Activity {index + 1} of {len(flattened)} · {html.escape(stage_status)}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -310,17 +342,17 @@ def show_control_centre():
         if participant_details["EvidenceRequirement"]:
             st.caption(participant_details["EvidenceRequirement"])
         if content_config["LinkedContent"]:
-            st.success(f"Publishes: {content_config['LinkedContent']}")
+            st.success(f"Publishes: {content_config['LinkedContentName']}")
 
-    previous, launch, next_col, end_module, next_module = st.columns([1, 2, 1, 1, 1])
+    previous, launch, end_activity, next_col = st.columns([1, 2, 2, 1])
     if previous.button(
         "Previous Activity",
         width="stretch",
         disabled=index == 0,
     ):
-        _set_stage(db, event_id, stages[index - 1])
+        _set_stage(db, event_id, flattened[index - 1][1])
     if launch.button(
-        "Start Activity",
+        "Start Selected Activity",
         type="primary",
         width="stretch",
     ):
@@ -333,14 +365,8 @@ def show_control_centre():
         )
         db.update_event_metadata(event_id, {"CurrentStageStatus": "RUNNING"})
         st.rerun()
-    if next_col.button(
-        "Next Activity",
-        width="stretch",
-        disabled=index >= len(stages) - 1,
-    ):
-        _set_stage(db, event_id, stages[index + 1])
-    if end_module.button(
-        "End Activity",
+    if end_activity.button(
+        "End Selected Activity",
         width="stretch",
     ):
         db.update_stage_timer(
@@ -351,13 +377,12 @@ def show_control_centre():
         )
         db.update_event_metadata(event_id, {"CurrentStageStatus": "ENDED"})
         st.rerun()
-    if next_module.button(
-        "Next Module",
+    if next_col.button(
+        "Next Activity",
         width="stretch",
-        disabled=module_index >= len(programme_modules) - 1,
+        disabled=index >= len(flattened) - 1,
     ):
-        following = programme_modules[module_index + 1]["Activities"][0]
-        _set_stage(db, event_id, following)
+        _set_stage(db, event_id, flattened[index + 1][1])
 
     timer_col, broadcast_col = st.columns([1, 2])
     with timer_col:
