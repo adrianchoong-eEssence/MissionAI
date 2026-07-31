@@ -5,6 +5,7 @@ import time
 import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -650,6 +651,88 @@ class SupabaseRuntimeDB:
             admin=True,
         )
         return {"EventID": clean_event_id, "RuntimeDeleted": True}
+
+    def reset_event_data(self, event_id, reset_type):
+        """Reset event-scoped runtime data while preserving event configuration."""
+        clean_event_id = str(event_id).strip()
+        clean_type = str(reset_type).strip().upper()
+        if not clean_event_id:
+            raise ValueError("Event ID is required.")
+        if clean_type not in {"PARTICIPANTS", "RUNTIME", "FACTORY"}:
+            raise ValueError("Select a valid event reset type.")
+
+        deleted = {}
+
+        def delete_table(table):
+            result = self._request(
+                "DELETE",
+                table,
+                query={"event_id": f"eq.{clean_event_id}"},
+                admin=True,
+            )
+            deleted[table] = len(result or []) if isinstance(result, list) else 0
+
+        if clean_type in {"RUNTIME", "FACTORY"}:
+            for table in (
+                "runtime_marketplace_purchases",
+                "runtime_credit_transactions",
+                "runtime_team_wallets",
+                "runtime_ai_messages",
+                "runtime_ai_hint_state",
+                "runtime_team_trackers",
+                "runtime_team_locations",
+                "runtime_location_history",
+                "runtime_geofence_arrivals",
+                "runtime_submissions",
+            ):
+                delete_table(table)
+
+            if clean_type == "RUNTIME":
+                self._request(
+                    "PATCH",
+                    "runtime_participants",
+                    payload={"points": 0, "status": "Waiting"},
+                    query={"event_id": f"eq.{clean_event_id}"},
+                    admin=True,
+                )
+
+        if clean_type in {"PARTICIPANTS", "FACTORY"}:
+            delete_table("runtime_participants")
+
+        if clean_type == "FACTORY":
+            delete_table("runtime_marketplace_items")
+            delete_table("runtime_teams")
+
+        event_updates = {
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if clean_type in {"RUNTIME", "FACTORY"}:
+            event_updates.update({
+                "current_stage_no": 0,
+                "stage_state": "",
+                "stage_name": "",
+                "current_mission_id": "",
+                "display_mode": "Registration",
+                "stage_payload": {},
+                "state_version": 0,
+                "credit_earning_frozen": False,
+                "credit_leaderboard_frozen_at": None,
+            })
+        if clean_type in {"PARTICIPANTS", "FACTORY"}:
+            event_updates["next_team_index"] = 0
+        self._request(
+            "PATCH",
+            "runtime_events",
+            payload=event_updates,
+            query={"event_id": f"eq.{clean_event_id}"},
+            admin=True,
+        )
+
+        return {
+            "EventID": clean_event_id,
+            "ResetType": clean_type,
+            "Deleted": deleted,
+        }
 
     def save_submission(self, submission):
         def value(name, default=""):

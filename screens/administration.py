@@ -9,6 +9,94 @@ from data.google_sheets import GoogleSheetsDB
 
 APP_VERSION = PLATFORM_VERSION
 BUILD_TIMESTAMP = "2026-07-28"
+RESET_OPTIONS = {
+    "Reset Participants": {
+        "Type": "PARTICIPANTS",
+        "Deletes": "Participants and their team membership",
+        "Keeps": "Experiences and Programme",
+    },
+    "Reset Runtime": {
+        "Type": "RUNTIME",
+        "Deletes": (
+            "Credits, leaderboard scores, submissions, photos, timers and "
+            "live state"
+        ),
+        "Keeps": "Participants, Experiences and Programme",
+    },
+    "Factory Reset": {
+        "Type": "FACTORY",
+        "Deletes": "All other event-related operational records",
+        "Keeps": (
+            "Event, Programme, Experiences, characters and reference images"
+        ),
+    },
+}
+
+
+def reset_confirmation_matches(event_id, confirmation):
+    expected = f"RESET {str(event_id).strip()}"
+    return str(confirmation or "").strip() == expected
+
+
+def render_event_reset(db):
+    st.subheader("Reset Event")
+    st.warning(
+        "Reset operations are event-scoped and cannot be undone. Programme, "
+        "Experience and protected media records are preserved as described."
+    )
+    events = db.get_events(include_archived=True)
+    if not events:
+        st.info("No events are available to reset.")
+        return
+
+    event_labels = {
+        f"{event.get('EventID', '')} | {event.get('EventName', 'Unnamed event')}":
+        event
+        for event in events
+    }
+    selected_label = st.selectbox(
+        "Event to reset",
+        list(event_labels),
+        key="administration_reset_event",
+    )
+    event_id = str(event_labels[selected_label].get("EventID", "")).strip()
+    option = st.radio(
+        "Reset option",
+        list(RESET_OPTIONS),
+        key=f"administration_reset_option_{event_id}",
+    )
+    scope = RESET_OPTIONS[option]
+    with st.container(border=True):
+        st.markdown(f"**Deletes:** {scope['Deletes']}")
+        st.markdown(f"**Keeps:** {scope['Keeps']}")
+
+    expected = f"RESET {event_id}"
+    confirmation = st.text_input(
+        f"Type {expected} to confirm",
+        key=f"administration_reset_confirmation_{event_id}_{scope['Type']}",
+    )
+    confirmed = reset_confirmation_matches(event_id, confirmation)
+    if st.button(
+        option,
+        type="primary",
+        disabled=not confirmed,
+        width="stretch",
+        key=f"administration_reset_execute_{event_id}_{scope['Type']}",
+    ):
+        try:
+            result = db.reset_event(event_id, scope["Type"])
+        except Exception as error:
+            st.error(f"Event reset failed: {error}")
+        else:
+            st.success(
+                f"{result['EventID']} {option.lower()} completed. "
+                "Programme and Experiences were preserved."
+            )
+            st.session_state.pop(
+                f"administration_reset_confirmation_{event_id}_{scope['Type']}",
+                None,
+            )
+            st.rerun()
 
 
 def show_administration():
@@ -27,6 +115,10 @@ def show_administration():
     )
     db = GoogleSheetsDB()
 
+    st.divider()
+    render_event_reset(db)
+
+    st.divider()
     st.subheader("Data Safety & Legacy Events")
     snapshot = db.export_backup_snapshot()
     exported_at = str(snapshot.get("ExportedAt", ""))

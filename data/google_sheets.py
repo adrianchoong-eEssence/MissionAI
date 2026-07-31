@@ -840,6 +840,162 @@ class GoogleSheetsDB:
             "EvidenceReferencesRemoved": len(submission_paths) + len(mission_paths),
         }
 
+    def reset_event(self, event_id, reset_type):
+        """Reset operational event data without touching programme or content."""
+        clean_event_id = str(event_id).strip()
+        clean_type = str(reset_type).strip().upper()
+        if clean_type not in {"PARTICIPANTS", "RUNTIME", "FACTORY"}:
+            raise ValueError("Select a valid event reset type.")
+        if not self.get_event(clean_event_id):
+            raise ValueError(f"Event {clean_event_id} was not found.")
+        if self.runtime.is_configured and not self.runtime.can_publish:
+            raise RuntimeDatabaseError(
+                "Event reset requires the Supabase service role secret."
+            )
+
+        records = {
+            name: get_sheet_records(name)
+            for name in (
+                "Participants",
+                "Teams",
+                "Submissions",
+                "Conversations",
+                "EventState",
+            )
+        }
+        runtime_submissions = []
+        if (
+            clean_type in {"RUNTIME", "FACTORY"}
+            and self.runtime.can_publish
+        ):
+            runtime_submissions = self.runtime.get_submissions(clean_event_id)
+
+        submission_references = [
+            str(row.get("ImageURL", "")).strip()
+            for row in (
+                records["Submissions"] + list(runtime_submissions or [])
+            )
+            if str(row.get("EventID", "")).strip() == clean_event_id
+            and str(row.get("ImageURL", "")).strip().startswith(
+                "supabase://exos-submissions/"
+            )
+        ]
+        submission_paths = list(dict.fromkeys(
+            reference.split("supabase://exos-submissions/", 1)[1]
+            for reference in submission_references
+        ))
+
+        if clean_type in {"RUNTIME", "FACTORY"} and self.runtime.can_publish:
+            if submission_paths:
+                self.runtime.delete_submission_images(submission_paths)
+            runtime_result = self.runtime.reset_event_data(
+                clean_event_id,
+                clean_type,
+            )
+        elif clean_type == "PARTICIPANTS" and self.runtime.can_publish:
+            runtime_result = self.runtime.reset_event_data(
+                clean_event_id,
+                clean_type,
+            )
+        else:
+            runtime_result = {
+                "EventID": clean_event_id,
+                "ResetType": clean_type,
+                "RuntimeSkipped": True,
+            }
+
+        sheet_map = {
+            "Participants": self.participants,
+            "Teams": self.teams,
+            "Submissions": self.submissions,
+            "Conversations": self.conversations,
+            "EventState": self.event_state,
+        }
+        delete_targets = {
+            "PARTICIPANTS": ("Participants",),
+            "RUNTIME": ("Submissions", "EventState"),
+            "FACTORY": (
+                "Participants",
+                "Teams",
+                "Submissions",
+                "Conversations",
+                "EventState",
+            ),
+        }[clean_type]
+        deleted = {}
+        for name in delete_targets:
+            row_numbers = [
+                index
+                for index, row in enumerate(records[name], start=2)
+                if str(row.get("EventID", "")).strip() == clean_event_id
+            ]
+            for row_number in reversed(row_numbers):
+                worksheet = sheet_map[name]
+                _call_sheets_with_retry(
+                    lambda row_number=row_number, worksheet=worksheet:
+                    worksheet.delete_rows(row_number)
+                )
+            deleted[name] = len(row_numbers)
+
+        if clean_type == "RUNTIME":
+            for name, field_updates in (
+                ("Participants", {"Points": 0, "Status": "Waiting"}),
+                ("Teams", {"Score": 0}),
+            ):
+                worksheet = sheet_map[name]
+                headers = worksheet.row_values(1)
+                updates = []
+                for row_number, row in enumerate(records[name], start=2):
+                    if str(row.get("EventID", "")).strip() != clean_event_id:
+                        continue
+                    for field, value in field_updates.items():
+                        if field in headers:
+                            updates.append({
+                                "range": gspread.utils.rowcol_to_a1(
+                                    row_number,
+                                    headers.index(field) + 1,
+                                ),
+                                "values": [[value]],
+                            })
+                if updates:
+                    _call_sheets_with_retry(
+                        lambda worksheet=worksheet, updates=updates:
+                        worksheet.batch_update(updates)
+                    )
+
+        event = self.get_event(clean_event_id)
+        event_updates = {}
+        if clean_type in {"RUNTIME", "FACTORY"}:
+            metadata = self.event_metadata(event)
+            metadata.pop("StageTimers", None)
+            event_updates["Notes"] = (
+                json.dumps(
+                    metadata,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                if metadata else ""
+            )
+        if clean_type in {"PARTICIPANTS", "FACTORY"}:
+            event_updates["NextTeamIndex"] = 0
+        if clean_type == "FACTORY":
+            event_updates["NumberOfTeams"] = 0
+        self.update_event(clean_event_id, event_updates)
+        self.clear_cache()
+        return {
+            "EventID": clean_event_id,
+            "ResetType": clean_type,
+            "Deleted": deleted,
+            "SubmissionPhotosRemoved": len(submission_paths),
+            "Runtime": runtime_result,
+            "Preserved": [
+                "Events",
+                "ProgrammeStages",
+                "Missions",
+                "Assets",
+            ],
+        }
+
     def get_event_by_join_code(self, join_code):
         if self.runtime.is_configured:
             runtime_event = self.runtime.get_event_by_join_code(join_code)
