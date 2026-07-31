@@ -69,6 +69,48 @@ class GoogleSheetsResilienceTests(unittest.TestCase):
                 lambda: (_ for _ in ()).throw(FakeSheetError(403))
             )
 
+    def test_ensure_worksheet_expands_grid_before_adding_headers(self):
+        class FakeWorksheet:
+            def __init__(self):
+                self.col_count = 2
+                self.added_columns = []
+                self.updated = []
+
+            def row_values(self, row_number):
+                return ["EventID", "MissionID"]
+
+            def add_cols(self, count):
+                self.added_columns.append(count)
+                self.col_count += count
+
+            def update(self, **kwargs):
+                self.updated.append(kwargs)
+
+        class FakeWorkbook:
+            def __init__(self, worksheet):
+                self.existing = worksheet
+
+            def worksheet(self, name):
+                return self.existing
+
+        worksheet = FakeWorksheet()
+        result = google_sheets.ensure_worksheet(
+            FakeWorkbook(worksheet),
+            "Missions",
+            ["EventID", "MissionID", "Title", "Transmission"],
+        )
+
+        self.assertIs(result, worksheet)
+        self.assertEqual(worksheet.added_columns, [2])
+        self.assertEqual(
+            worksheet.updated[0]["range_name"],
+            "C1:D1",
+        )
+        self.assertEqual(
+            worksheet.updated[0]["values"],
+            [["Title", "Transmission"]],
+        )
+
     def test_participant_count_uses_event_scoped_runtime_query(self):
         runtime = FakeRuntime(
             players=[

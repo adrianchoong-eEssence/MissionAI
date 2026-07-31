@@ -176,11 +176,18 @@ def ensure_worksheet(workbook, name, headers):
         return worksheet
 
     existing = _call_sheets_with_retry(lambda: worksheet.row_values(1))
+    missing_headers = [header for header in headers if header not in existing]
+    required_columns = len(existing) + len(missing_headers)
+    current_columns = int(getattr(worksheet, "col_count", required_columns))
+    if current_columns < required_columns:
+        _call_sheets_with_retry(
+            lambda: worksheet.add_cols(required_columns - current_columns)
+        )
+
     if not existing:
         _call_sheets_with_retry(lambda: worksheet.append_row(headers))
         return worksheet
 
-    missing_headers = [header for header in headers if header not in existing]
     if missing_headers:
         _call_sheets_with_retry(
             lambda: worksheet.update(
