@@ -241,7 +241,7 @@ def render_event_module_editor(db):
                 "Scoring method",
                 value=str(mission.get("ScoringRule", "")),
             )
-        with st.expander("Missions and Questions"):
+        with st.expander("Experiences and Prompts"):
             questions = st.text_area(
                 "Questions",
                 value=str(mission.get("DebriefQuestions", "")),
@@ -251,7 +251,7 @@ def render_event_module_editor(db):
                 value=str(mission.get("Answer", "")),
             )
             variants = st.text_area(
-                "Mission variants",
+                "Experience variants",
                 value=str(settings.get("MissionVariants", "")),
             )
             ai_required = st.checkbox(
@@ -961,7 +961,7 @@ def render_programme_first_builder(db):
                 elif module["ModuleName"].casefold() == "mission ai":
                     st.divider()
                     if st.button(
-                        "Edit Missions",
+                        "Edit Experiences",
                         key=f"edit_missions_{event_id}_{index}",
                         width="stretch",
                     ):
@@ -971,15 +971,15 @@ def render_programme_first_builder(db):
 
 
 def render_filtered_mission_library(db):
-    st.subheader("Mission Library")
-    st.caption("Add Mission → choose a relevant mission from the library.")
+    st.subheader("Experience Library")
+    st.caption("Add Experience → choose a relevant experience from the library.")
     templates = db.get_mission_templates(include_archived=True)
     programme = st.selectbox(
         "Programme",
         ["Mission AI", "Sync AI", "Catalyst Challenge", "Formula R.A.C.E.", "Road Hunt", "All"],
         key="mission_library_programme",
     )
-    search = st.text_input("Search missions", key="mission_library_search").casefold()
+    search = st.text_input("Search experiences", key="mission_library_search").casefold()
     active_only = st.checkbox("Active only", value=True)
     filtered = []
     for template in templates:
@@ -1005,7 +1005,7 @@ def render_filtered_mission_library(db):
             filtered.append(template)
     st.dataframe(
         [{
-            "Mission": row.get("Title", ""),
+            "Experience": row.get("Title", ""),
             "Activity type": row.get("SubmissionType", "Activity"),
             "AI required": row.get("AIHelpEnabled", "No"),
             "Evidence type": row.get("SubmissionType", "None"),
@@ -1015,7 +1015,7 @@ def render_filtered_mission_library(db):
         hide_index=True,
     )
     if not filtered:
-        st.info("No missions match these filters.")
+        st.info("No experiences match these filters.")
 
 
 DEFAULT_SYNC_JUDGING = [
@@ -1082,7 +1082,7 @@ def render_sync_ai_editor(db, event_id):
     settings = _module_settings(creation)
     judging = _module_settings(performance)
     st.markdown("### Sync AI")
-    st.caption("Event-specific settings. Mission templates remain unchanged.")
+    st.caption("Event-specific settings. Experience templates remain unchanged.")
     flow, market, performance_tab, judging_tab = st.tabs([
         "Flow & Credits", "Marketplace", "Performance", "Judging",
     ])
@@ -1282,7 +1282,7 @@ def render_container_editors(db):
 
 
 def render_live_programme_builder(db):
-    st.subheader("Build a Live Mission Programme")
+    st.subheader("Build a Live Experience Programme")
     st.caption(
         "Choose missions in running order. EXOS creates the event missions and Show Control timeline together."
     )
@@ -1293,7 +1293,7 @@ def render_live_programme_builder(db):
         st.warning("Create an event first.")
         return
     if not templates:
-        st.warning("Create or import missions in Mission Studio first.")
+        st.warning("Create or import experiences in Experience Studio first.")
         return
 
     selected_event = select_active_event(
@@ -1308,7 +1308,7 @@ def render_live_programme_builder(db):
         for template in templates
     }
     selected_template_labels = st.multiselect(
-        "Missions — select them in running order",
+        "Experiences — select them in running order",
         list(template_options),
         key=f"programme_builder_templates_{event_id}",
     )
@@ -1331,7 +1331,7 @@ def render_live_programme_builder(db):
         )
     with col3:
         debrief_minutes = st.number_input(
-            "Debrief Minutes per Mission",
+            "Debrief Minutes per Experience",
             min_value=0,
             max_value=120,
             value=15,
@@ -1407,11 +1407,12 @@ def render_live_programme_builder(db):
                 required=True,
             ),
             "MissionID": st.column_config.TextColumn(
-                "Mission ID",
+                "Experience ID",
                 required=True,
             ),
+            "Mission": st.column_config.TextColumn("Experience"),
             "DurationMinutes": st.column_config.NumberColumn(
-                "Mission Minutes",
+                "Experience Minutes",
                 min_value=1,
                 max_value=480,
                 step=5,
@@ -1458,7 +1459,7 @@ def render_live_programme_builder(db):
 
         st.success("Programme built and published to Show Control.")
         metric1, metric2, metric3 = st.columns(3)
-        metric1.metric("Missions", result["Missions"])
+        metric1.metric("Experiences", result["Missions"])
         metric2.metric("Stages", result["Stages"])
         metric3.metric("Scheduled End", result["ProgrammeEndTime"])
         db.clear_cache()
@@ -1571,7 +1572,7 @@ def render_saved_programme_packs(db):
 
     metric1, metric2, metric3, metric4 = st.columns(4)
     metric1.metric("Teams", len(selected_pack.get("Teams", [])))
-    metric2.metric("Missions", len(selected_pack.get("Missions", [])))
+    metric2.metric("Experiences", len(selected_pack.get("Missions", [])))
     metric3.metric("Timeline Stages", len(selected_pack.get("Stages", [])))
     metric4.metric("Marketplace", len(selected_pack.get("Marketplace", [])))
 
@@ -1606,7 +1607,7 @@ def render_saved_programme_packs(db):
             )
             result1, result2, result3, result4 = st.columns(4)
             result1.metric("Teams", result["Teams"])
-            result2.metric("Missions", result["Missions"])
+            result2.metric("Experiences", result["Missions"])
             result3.metric("Stages", result["Stages"])
             result4.metric("Marketplace", result["MarketplaceItems"])
 
@@ -1629,7 +1630,7 @@ def render_mahb_media_explore_installer(db, events):
 
     metric1, metric2, metric3, metric4 = st.columns(4)
     metric1.metric("Teams", len(MAHB_MEDIA_EXPLORE_TEAMS))
-    metric2.metric("Missions", len(MAHB_MEDIA_EXPLORE_MISSION_PLAN))
+    metric2.metric("Experiences", len(MAHB_MEDIA_EXPLORE_MISSION_PLAN))
     metric3.metric("GPS Stops", len(MAHB_MEDIA_EXPLORE_ROUTE))
     metric4.metric("Show Control Stages", len(MAHB_MEDIA_EXPLORE_STAGES))
 
@@ -1662,7 +1663,7 @@ def render_mahb_media_explore_installer(db, events):
         st.success("MAHB Media Explore Road Hunt installed and published.")
         result1, result2, result3, result4 = st.columns(4)
         result1.metric("Teams Published", result["Teams"])
-        result2.metric("Missions Published", result["Missions"])
+        result2.metric("Experiences Published", result["Missions"])
         result3.metric("GPS Stops", result["RouteStops"])
         result4.metric("Timeline Stages", result["Stages"])
 
@@ -1693,7 +1694,7 @@ def render_programme_packs(db):
 
     metric1, metric2, metric3, metric4 = st.columns(4)
     metric1.metric("Teams", len(AIA_CUSTOMER_CONTACT_TEAMS))
-    metric2.metric("Missions", len(AIA_CUSTOMER_CONTACT_MISSION_PLAN))
+    metric2.metric("Experiences", len(AIA_CUSTOMER_CONTACT_MISSION_PLAN))
     metric3.metric("Show Control Stages", len(AIA_CUSTOMER_CONTACT_STAGES))
     metric4.metric("Marketplace Items", len(AIA_CUSTOMER_CONTACT_MARKETPLACE))
 
@@ -1725,7 +1726,7 @@ def render_programme_packs(db):
         st.success("AIA Customer Contact programme installed and published.")
         result1, result2, result3, result4 = st.columns(4)
         result1.metric("Teams Published", result["Teams"])
-        result2.metric("Missions Published", result["Missions"])
+        result2.metric("Experiences Published", result["Missions"])
         result3.metric("Timeline Stages", result["Stages"])
         result4.metric("Marketplace Items", result["MarketplaceItems"])
 

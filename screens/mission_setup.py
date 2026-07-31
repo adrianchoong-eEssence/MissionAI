@@ -74,20 +74,20 @@ def mission_module_name(mission):
 def _mission_editor(db, event_id, selected):
     mission_id = str(selected.get("MissionID", "")).strip().upper()
     form_key = f"event_mission_editor_{event_id}_{mission_id or 'new'}"
-    st.markdown(f"## {selected.get('Title', 'Mission Editor')}")
-    st.caption("Mission Editor")
+    st.markdown(f"## {selected.get('Title', 'Experience Editor')}")
+    st.caption("Experience Editor")
     if st.session_state.get("exos_administration_mode"):
-        st.caption(f"Mission code: {mission_id}")
+        st.caption(f"Experience code: {mission_id}")
     with st.form(form_key):
         st.markdown("#### Basic Details")
         col1, col2 = st.columns(2)
         with col1:
-            title = st.text_input("Mission Name", value=str(selected.get("Title", "")))
+            title = st.text_input("Experience Name", value=str(selected.get("Title", "")))
             if st.session_state.get("exos_administration_mode"):
-                code = st.text_input("Mission Code", value=mission_id)
+                code = st.text_input("Experience Code", value=mission_id)
             else:
                 code = mission_id
-            category = st.text_input("Mission Category", value=str(selected.get("Category", "Mission AI")))
+            category = st.text_input("Experience Category", value=str(selected.get("Category", "Mission AI")))
             status = st.selectbox(
                 "Active / Inactive", ["ACTIVE", "INACTIVE"],
                 index=0 if str(selected.get("Status", "ACTIVE")).upper() not in {"INACTIVE", "CLOSED"} else 1,
@@ -103,8 +103,8 @@ def _mission_editor(db, event_id, selected):
             )
             module = st.text_input("Module", value=str(selected.get("Module", "Mission AI")))
 
-        st.markdown("#### Mission Content")
-        story = st.text_area("Mission Story", value=str(selected.get("Story", "")))
+        st.markdown("#### Experience Content")
+        story = st.text_area("Narrative", value=str(selected.get("Story", "")))
         clue = st.text_area("Treasure Hunt Clue", value=str(selected.get("Clue", "")))
         question = st.text_area("Main Question", value=str(selected.get("MainQuestion", "")))
         answer = st.text_input("Correct Answer", value=str(selected.get("Answer", "")))
@@ -225,7 +225,7 @@ def _mission_editor(db, event_id, selected):
         )
 
         st.markdown("#### Media")
-        image_url = st.text_input("Mission Image", value=str(selected.get("ImageURL", "")))
+        image_url = st.text_input("Experience Image", value=str(selected.get("ImageURL", "")))
         reference_image = st.text_input(
             "Reference Image", value=str(selected.get("ReferenceImageURL", "")),
         )
@@ -246,11 +246,11 @@ def _mission_editor(db, event_id, selected):
             "Facilitator Debrief Notes",
             value=str(selected.get("FacilitatorDebriefNotes", "")),
         )
-        saved = st.form_submit_button("Save Mission", width="stretch")
+        saved = st.form_submit_button("Save Experience", width="stretch")
 
     if saved:
         if not title.strip() or not clean_id(code):
-            st.error("Mission Name and Mission Code are required.")
+            st.error("Experience Name and Experience Code are required.")
             return
         resolved_image = "" if remove_image else image_url.strip()
         if uploaded_image is not None:
@@ -293,7 +293,7 @@ def _mission_editor(db, event_id, selected):
             "Description": story.strip(), "ParticipantInstructions": question.strip() or story.strip(),
         })
         result = db.upsert_event_mission(payload)
-        st.session_state["mission_studio_message"] = f"{result['Action']} mission {result['MissionID']}."
+        st.session_state["mission_studio_message"] = f"{result['Action']} experience {result['MissionID']}."
         st.rerun()
 
     if qr_value:
@@ -337,7 +337,7 @@ def _experience_designer(db, event_id, selected):
             st.markdown('<div class="studio-step">01 · Narrative</div><div class="studio-heading">Set the scene</div>', unsafe_allow_html=True)
             title = st.text_input("Story Title", value=str(selected.get("NarrativeTitle") or selected.get("Title", "")), key=f"{key}_title")
             narrative = st.text_area("Narrative", value=str(selected.get("Story", "")), height=120, key=f"{key}_narrative")
-            context = st.text_area("Mission Context", value=str(selected.get("MissionContext") or selected.get("Description", "")), key=f"{key}_context")
+            context = st.text_area("Experience Context", value=str(selected.get("MissionContext") or selected.get("Description", "")), key=f"{key}_context")
             transmission = st.text_area("Transmission", value=str(selected.get("Transmission") or selected.get("Clue", "")), placeholder="Command Centre to field team…", key=f"{key}_transmission")
 
         with st.container(border=True):
@@ -345,8 +345,8 @@ def _experience_designer(db, event_id, selected):
             types = ["Observe", "Think", "Interact"]
             current_type = str(selected.get("MissionType", "Observe") or "Observe").title()
             current_type = current_type if current_type in types else "Observe"
-            mission_type = st.radio("Mission Type", types, horizontal=True, index=types.index(current_type), key=f"{key}_type")
-            mission = st.text_area("Mission", value=str(selected.get("ParticipantInstructions") or selected.get("MainQuestion", "")), height=120, key=f"{key}_mission")
+            mission_type = st.radio("Experience Type", types, horizontal=True, index=types.index(current_type), key=f"{key}_type")
+            mission = st.text_area("Experience", value=str(selected.get("ParticipantInstructions") or selected.get("MainQuestion", "")), height=120, key=f"{key}_mission")
             reference = str(selected.get("ReferenceImageURL", ""))
             interaction = str(selected.get("Interaction", ""))
             reasoning = str(selected.get("ReasoningPrompt", ""))
@@ -412,7 +412,7 @@ def _experience_designer(db, event_id, selected):
             evidence = st.selectbox("Evidence", evidence_types, index=evidence_types.index(current_evidence), format_func=str.title, key=f"{key}_evidence")
             evidence_instructions = st.text_area("Evidence Instructions", value=type_guidance, key=f"{key}_evidence_instructions")
             if evidence in {"PHOTO", "VIDEO", "MULTIPLE"}:
-                st.info("Camera preview example · The participant camera opens with mission guidance above the shutter.")
+                st.info("Camera preview example · The participant camera opens with experience guidance above the shutter.")
 
         with st.container(border=True):
             st.markdown('<div class="studio-step">04 · Reward</div><div class="studio-heading">Make completion matter</div>', unsafe_allow_html=True)
@@ -423,7 +423,7 @@ def _experience_designer(db, event_id, selected):
             with reward2:
                 estimated_default = min(max(safe_int(selected.get("EstimatedTimeMinutes"), time_limit or 10), 1), 180)
                 estimated = st.slider("Estimated Time (minutes)", 1, 180, estimated_default, key=f"{key}_estimate")
-                complete_message = st.text_input("Mission Complete Message", value=str(selected.get("MissionCompleteMessage", "Transmission Restored") or "Transmission Restored"), key=f"{key}_complete")
+                complete_message = st.text_input("Experience Complete Message", value=str(selected.get("MissionCompleteMessage", "Transmission Restored") or "Transmission Restored"), key=f"{key}_complete")
             st.success(f"{complete_message}  ·  +{credits} Credits")
 
         ai_enabled = st.toggle("Enable AI Companion", value=yes_no(selected.get("AIRequired", selected.get("AIHelpEnabled"))) == "Yes", key=f"{key}_ai_enabled")
@@ -455,7 +455,7 @@ def _experience_designer(db, event_id, selected):
             <div class="phone-body"><div class="transmission">Incoming transmission</div><h2>{clean(title) or "Untitled experience"}</h2>
             <p>{clean(transmission) or "Command Centre is establishing a secure channel…"}</p>{image}
             <div class="mission-card"><div class="mission-label">Narrative</div><p>{clean(narrative) or "Your narrative will appear here."}</p>
-            <div class="mission-label">Mission</div><p><strong>{clean(mission) or "Your mission will appear here."}</strong></p>
+            <div class="mission-label">Experience</div><p><strong>{clean(mission) or "Your experience will appear here."}</strong></p>
             <div class="evidence-row"><span><span class="mission-label">Evidence</span><br>{clean(evidence.title())}</span>
             <span class="credit-pill">+{credits} Credits</span></div></div></div></div></div>""",
             unsafe_allow_html=True,
@@ -463,7 +463,7 @@ def _experience_designer(db, event_id, selected):
 
     if saved:
         if not title.strip() or not mission.strip():
-            st.error("Story Title and Mission are required.")
+            st.error("Story Title and Experience are required.")
             return
         resolved_reference = "" if remove_reference else reference
         if reference_upload is not None:
@@ -545,7 +545,7 @@ def render_event_mission_editor(db):
         st.session_state.pop("mission_studio_selected_mission", None)
 
     if selected:
-        if st.button("← Back to Missions", type="secondary"):
+        if st.button("← Back to Experiences", type="secondary"):
             st.session_state.pop("mission_studio_selected_mission", None)
             st.rerun()
         _experience_designer(db, event_id, selected)
@@ -566,20 +566,20 @@ def render_event_mission_editor(db):
             st.rerun()
         return
 
-    st.markdown("## Missions")
-    st.caption("Choose a mission to start authoring.")
+    st.markdown("## Experiences")
+    st.caption("Choose an experience to start authoring.")
     if not missions:
-        st.info("No missions belong to this event and module yet.")
+        st.info("No experiences belong to this event and module yet.")
     for row_index, mission in enumerate(missions):
         with st.container(border=True):
             title_col, action_col = st.columns([5, 1])
             with title_col:
-                st.markdown(f"### {mission.get('Title', 'Untitled Mission')}")
+                st.markdown(f"### {mission.get('Title', 'Untitled Experience')}")
                 status = str(mission.get("Status", "DRAFT") or "DRAFT").title()
                 category = str(mission.get("Category", "") or "").strip()
                 st.caption(" · ".join(item for item in (category, status) if item))
                 if st.session_state.get("exos_administration_mode"):
-                    st.caption(f"Mission code: {mission.get('MissionID', '')}")
+                    st.caption(f"Experience code: {mission.get('MissionID', '')}")
             with action_col:
                 if st.button(
                     "Edit",
@@ -594,25 +594,25 @@ def render_event_mission_editor(db):
                     )
                     st.rerun()
 
-    with st.expander("New Mission"):
+    with st.expander("New Experience"):
         creation_mode = st.radio(
-            "Create using", ["Create Blank Mission", "Copy from Mission Library", "Duplicate Existing Event Mission"],
+            "Create using", ["Create Blank Experience", "Copy from Experience Library", "Duplicate Existing Event Experience"],
             key=f"new_mission_mode_{event_id}",
         )
-        if creation_mode == "Create Blank Mission":
-            if st.button("Create Blank Mission", width="stretch"):
+        if creation_mode == "Create Blank Experience":
+            if st.button("Create Blank Experience", width="stretch"):
                 new_id = db.generate_next_event_mission_id(event_id)
                 db.upsert_event_mission({
-                    "EventID": event_id, "MissionID": new_id, "Title": "New Mission",
+                    "EventID": event_id, "MissionID": new_id, "Title": "New Experience",
                     "Module": module, "Status": "DRAFT", "DisplayOrder": len(missions) + 1,
                 })
                 st.session_state["mission_studio_selected_mission"] = new_id
                 st.rerun()
-        elif creation_mode == "Copy from Mission Library":
+        elif creation_mode == "Copy from Experience Library":
             templates = db.get_mission_templates()
             template_map = {f"{row.get('TemplateID')} | {row.get('Title')}": row for row in templates}
             if template_map:
-                template_label = st.selectbox("Master Mission", list(template_map))
+                template_label = st.selectbox("Master Experience", list(template_map))
                 if st.button("Copy to Event", width="stretch"):
                     new_id = db.generate_next_event_mission_id(event_id)
                     db.add_template_to_event(template_map[template_label]["TemplateID"], event_id, new_id)
@@ -624,8 +624,8 @@ def render_event_mission_editor(db):
         else:
             source_map = {f"{row.get('MissionID')} | {row.get('Title')}": row for row in missions}
             if source_map:
-                source_label = st.selectbox("Event Mission", list(source_map))
-                if st.button("Duplicate Mission", width="stretch"):
+                source_label = st.selectbox("Event Experience", list(source_map))
+                if st.button("Duplicate Experience", width="stretch"):
                     result = db.duplicate_event_mission(event_id, source_map[source_label]["MissionID"])
                     st.session_state["mission_studio_selected_mission"] = result["MissionID"]
                     st.rerun()
@@ -650,7 +650,7 @@ def show_flash_message():
 
 
 def render_template_editor(db):
-    st.subheader("Mission Library")
+    st.subheader("Experience Library")
     templates = db.get_mission_templates(include_archived=True)
     template_map = {
         f"{row.get('TemplateID', '')} | {row.get('Title', '')}": row
@@ -658,7 +658,7 @@ def render_template_editor(db):
     }
     selected_label = st.selectbox(
         "Create or Edit",
-        ["➕ Create New Mission"] + list(template_map.keys()),
+        ["➕ Create New Experience"] + list(template_map.keys()),
         key="mission_template_editor_selection",
     )
     selected = template_map.get(selected_label, {})
@@ -673,7 +673,7 @@ def render_template_editor(db):
             )
         with col2:
             title = st.text_input(
-                "Mission Title *",
+                "Experience Name *",
                 value=str(selected.get("Title", "")),
             )
 
@@ -772,7 +772,7 @@ def render_template_editor(db):
                 help="Maximum 25 MB.",
             )
 
-        st.markdown("#### Mission Guidance")
+        st.markdown("#### Experience Guidance")
         clue = st.text_area("Clue", value=str(selected.get("Clue", "")))
         answer = st.text_input("Answer", value=str(selected.get("Answer", "")))
         hint1 = st.text_input("Hint 1", value=str(selected.get("Hint1", "")))
@@ -801,11 +801,11 @@ def render_template_editor(db):
                 value=str(selected.get("Version", "1.0") or "1.0"),
             )
 
-        submitted = st.form_submit_button("💾 Save Mission", width="stretch")
+        submitted = st.form_submit_button("💾 Save Experience", width="stretch")
 
     if submitted:
         if not title.strip():
-            st.error("Mission Title is required.")
+            st.error("Experience Name is required.")
             return
         if not participant_instructions.strip():
             st.error("Participant Instructions are required.")
@@ -838,7 +838,7 @@ def render_template_editor(db):
                     "document",
                 )
         except Exception as error:
-            st.error(f"Mission media upload failed: {error}")
+            st.error(f"Experience media upload failed: {error}")
             return
 
         result = db.upsert_mission_template({
@@ -871,15 +871,15 @@ def render_template_editor(db):
 
 
 def render_bulk_import(db):
-    st.subheader("Bulk Import Missions")
+    st.subheader("Bulk Import Experiences")
     st.caption("Upload CSV or Excel. Existing Template IDs are updated; new IDs are created.")
 
     headers = REQUIRED_WORKSHEETS["MissionTemplates"]
     example = pd.DataFrame([
         {
             "TemplateID": "MT-EXAMPLE",
-            "Title": "Example Mission",
-            "Story": "Mission context goes here.",
+            "Title": "Example Experience",
+            "Story": "Experience context goes here.",
             "ParticipantInstructions": "Complete the challenge and submit your result.",
             "FacilitatorInstructions": "Brief the teams and start the timer.",
             "LearningObjectives": "Collaboration; communication",
@@ -909,7 +909,7 @@ def render_bulk_import(db):
     )
 
     uploaded = st.file_uploader(
-        "Mission File",
+        "Experience File",
         type=["csv", "xlsx"],
         key="mission_bulk_import_file",
     )
@@ -926,12 +926,12 @@ def render_bulk_import(db):
         return
 
     st.dataframe(dataframe.head(50), width="stretch")
-    st.caption(f"{len(dataframe)} mission row(s) detected.")
+    st.caption(f"{len(dataframe)} experience row(s) detected.")
     confirmed = st.checkbox(
         "I have checked the mission titles and submission types",
         key="confirm_mission_import",
     )
-    if st.button("📥 Import Missions", width="stretch"):
+    if st.button("📥 Import Experiences", width="stretch"):
         if not confirmed:
             st.error("Confirm the import first.")
             return
@@ -945,14 +945,14 @@ def render_bulk_import(db):
 
 
 def render_event_assignment(db):
-    st.subheader("Add Missions to an Event")
+    st.subheader("Add Experiences to an Event")
     events = db.get_events()
     templates = db.get_mission_templates()
     if not events:
         st.info("Create an event first.")
         return
     if not templates:
-        st.info("Create or import a mission first.")
+        st.info("Create or import an experience first.")
         return
 
     event_map = {
@@ -970,14 +970,14 @@ def render_event_assignment(db):
         key="mission_assignment_event",
     )
     template_label = st.selectbox(
-        "Mission Template",
+        "Experience Template",
         list(template_map),
         key="mission_assignment_template",
     )
     template = template_map[template_label]
     default_mission_id = str(template.get("TemplateID", ""))
     mission_id = st.text_input(
-        "Mission ID for this Event",
+        "Experience ID for this Event",
         value=default_mission_id,
         key=f"assignment_mission_id_{default_mission_id}",
     )
@@ -988,17 +988,17 @@ def render_event_assignment(db):
         if display_video_url:
             st.video(display_video_url)
 
-    if st.button("➕ Add Mission to Event", width="stretch"):
+    if st.button("➕ Add Experience to Event", width="stretch"):
         result = db.add_template_to_event(
             template_id=template.get("TemplateID", ""),
             event_id=event_map[event_label].get("EventID", ""),
             mission_id=clean_id(mission_id),
         )
-        st.success(f"{result['Action']} event mission {result['MissionID']}.")
+        st.success(f"{result['Action']} event experience {result['MissionID']}.")
 
 
 def render_event_missions(db):
-    st.subheader("Event Missions")
+    st.subheader("Event Experiences")
     events = db.get_events()
     if not events:
         st.info("No events found.")
@@ -1016,7 +1016,7 @@ def render_event_missions(db):
     event_id = event_map[selected].get("EventID", "")
     missions = db.get_event_missions(event_id)
     if not missions:
-        st.info("No missions have been added to this event.")
+        st.info("No experiences have been added to this event.")
         return
 
     display_fields = [
@@ -1037,14 +1037,14 @@ def render_event_missions(db):
 
 
 def show_mission_setup():
-    st.title("🧭 Mission Studio")
+    st.title("🧭 Experience Studio")
     st.caption("Create once, reuse across projects, and launch from the Live Event Console.")
     db = GoogleSheetsDB()
     show_flash_message()
 
     event_tab, library_tab, import_tab, assign_tab = st.tabs([
-        "Event Missions",
-        "Master Mission Templates",
+        "Event Experiences",
+        "Master Experience Templates",
         "Bulk Import",
         "Add to Event",
     ])

@@ -8,8 +8,8 @@ def _stage_badge(stage_type):
     mapping = {
         "Registration": "🟢 Registration",
         "TeamDiscovery": "🌍 Team Discovery",
-        "MissionBriefing": "🎯 Mission Briefing",
-        "MissionActive": "🚀 Mission Active",
+        "MissionBriefing": "🎯 Experience Briefing",
+        "MissionActive": "🚀 Experience Active",
         "Results": "📊 Results",
         "Debrief": "💬 Debrief",
         "Break": "🍱 Break",
@@ -70,7 +70,7 @@ def _render_stage_card(stage, is_current=False):
             <div style="font-size:24px; font-weight:800;">{stage.get('StageName', '')}</div>
             <div style="font-size:15px; margin-top:6px; opacity:0.85;">{_stage_badge(stage.get('StageType', ''))}</div>
             <div style="font-size:14px; margin-top:6px; opacity:0.75;">{stage.get('StartTime', '') or 'Unscheduled'} • {stage.get('DurationMinutes', '') or '-'} min</div>
-            <div style="font-size:14px; margin-top:6px; opacity:0.7;">Mission: {stage.get('MissionID', '') or '-'}</div>
+            <div style="font-size:14px; margin-top:6px; opacity:0.7;">Experience: {stage.get('MissionID', '') or '-'}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -130,7 +130,7 @@ def show_show_control():
 
     if not stages:
         st.warning("No programme stages found for this event.")
-        st.info("Open Programme Builder to select missions and publish the live timeline.")
+        st.info("Open Programme Builder to select experiences and publish the live timeline.")
         return
 
     state = db.get_event_state(event_id)
@@ -152,7 +152,7 @@ def show_show_control():
             <div style="font-size:20px; margin-top:10px;">{_stage_badge(current_stage.get('StageType', ''))}</div>
             <div style="font-size:18px; margin-top:12px; opacity:0.9;">Scheduled: {current_stage.get('StartTime', '') or 'Unscheduled'} • {current_stage.get('DurationMinutes', '') or '-'} minutes</div>
             <div style="font-size:16px; margin-top:12px; opacity:0.8;">Display Mode: {current_stage.get('DisplayMode', '')}</div>
-            <div style="font-size:16px; margin-top:6px; opacity:0.8;">Mission ID: {current_stage.get('MissionID', '') or '-'}</div>
+            <div style="font-size:16px; margin-top:6px; opacity:0.8;">Experience ID: {current_stage.get('MissionID', '') or '-'}</div>
         </div>
         """,
         unsafe_allow_html=True,

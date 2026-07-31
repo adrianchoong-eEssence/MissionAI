@@ -611,7 +611,7 @@ def render_text_form(db, mission):
 
 
 def render_photo_form(db, mission):
-    st.subheader("📸 Mission Submission")
+    st.subheader("📸 Experience Submission")
     uploaded_image = st.file_uploader(
         "Choose Photo",
         type=["jpg", "jpeg", "png"],
@@ -622,11 +622,11 @@ def render_photo_form(db, mission):
         st.image(uploaded_image, width="stretch")
 
         if st.button(
-            "📤 Submit Mission",
+            "📤 Submit Experience",
             width="stretch",
             key=f"submit_photo_{mission['MissionID']}",
         ):
-            with st.spinner("Submitting mission..."):
+            with st.spinner("Submitting experience..."):
                 try:
                     uploaded = upload_photo(
                         event_id=st.session_state["participant_event_id"],
@@ -646,7 +646,7 @@ def render_photo_form(db, mission):
                     drive_file_id=uploaded.get("file_id", ""),
                 )
 
-            st.success("✅ Mission submitted successfully.")
+            st.success("✅ Experience submitted successfully.")
             st.balloons()
             st.rerun()
 
@@ -673,7 +673,7 @@ def render_submission_form(db, mission, submission_type):
     elif submission_type == "GPS":
         render_gps_form(db, mission)
     elif submission_type == "NONE":
-        st.info("No participant submission is required for this mission.")
+        st.info("No participant submission is required for this experience.")
     else:
         render_photo_form(db, mission)
 
@@ -694,9 +694,9 @@ def render_qr_form(db, mission):
             else candidate == expected
         )
         if not expected:
-            st.error("This mission has no QR validation value configured.")
+            st.error("This experience has no QR validation value configured.")
         elif not valid:
-            st.error("That QR code is not valid for this mission.")
+            st.error("That QR code is not valid for this experience.")
         else:
             save_structured_submission(
                 db, mission, "QR", metric1=candidate,
@@ -788,9 +788,9 @@ def render_mission_content(mission):
         try:
             st.video(display_video_url)
         except Exception:
-            st.warning("The mission video could not be displayed.")
+            st.warning("The experience video could not be displayed.")
             st.link_button(
-                "▶️ Open Mission Video",
+                "▶️ Open Experience Video",
                 display_video_url,
                 width="stretch",
             )
@@ -799,7 +799,7 @@ def render_mission_content(mission):
         try:
             st.image(display_image_url, width="stretch")
         except Exception:
-            st.warning("The mission image could not be displayed.")
+            st.warning("The experience image could not be displayed.")
 
     if (
         str(mission.get("MissionType", "") or "").strip().casefold()
@@ -817,7 +817,7 @@ def render_mission_content(mission):
             st.warning("The reference image could not be displayed.")
 
     if instructions:
-        st.markdown("#### Mission")
+        st.markdown("#### Experience")
         st.info(instructions)
 
     evidence = str(mission.get("SubmissionType", "") or "").strip().title()
@@ -851,11 +851,11 @@ def render_mission_content(mission):
                 st.caption(f"Hint penalty: {_credit_number(penalty)} credits")
 
     if mission_ai_help_enabled(mission):
-        st.info("🤖 AI Companion is enabled for this mission.")
+        st.info("🤖 AI Companion is enabled for this experience.")
 
     if display_document_url:
         st.link_button(
-            "📄 Open Mission Document",
+            "📄 Open Experience Document",
             display_document_url,
             width="stretch",
         )
@@ -1027,7 +1027,7 @@ def render_ai_facilitator(db, mission, runtime_session):
                 try:
                     hint = db.advance_ai_hint(session_token, mission_id)
                     if not hint.get("Enabled", True):
-                        st.warning("AI help is disabled for this mission.")
+                        st.warning("AI help is disabled for this experience.")
                         return
 
                     released_level = int(hint.get("Level", 0) or 0)
@@ -1070,7 +1070,7 @@ def render_ai_facilitator(db, mission, runtime_session):
         else:
             st.caption("All three controlled hint levels have been released.")
     elif not mission_ai_help_enabled(mission):
-        st.caption("AI help is disabled for this mission.")
+        st.caption("AI help is disabled for this experience.")
 
     prompt = st.chat_input(f"Ask {facilitator_name}...")
     if not prompt:
@@ -1136,7 +1136,7 @@ def render_road_hunt_mission_hub(session_token):
     except RuntimeDatabaseError as error:
         if _road_hunt_team_missions_missing(error):
             return None, False
-        st.caption("🟠 Team missions are reconnecting…")
+        st.caption("🟠 Team experiences are reconnecting…")
         return None, True
 
     if not state.get("Enabled"):
@@ -1150,7 +1150,7 @@ def render_road_hunt_mission_hub(session_token):
     st.divider()
     st.subheader("🧭 Your Team's Road Hunt")
     metric1, metric2, metric3 = st.columns(3)
-    metric1.metric("Route Missions", total)
+    metric1.metric("Route Experiences", total)
     metric2.metric("Unlocked", unlocked)
     metric3.metric("Submitted", submitted)
 
@@ -1182,7 +1182,7 @@ def render_road_hunt_mission_hub(session_token):
         option_map[label] = row
 
     selected_label = st.selectbox(
-        "Available Team Mission",
+        "Available Team Experience",
         list(option_map),
         key=(
             f"road_hunt_mission_{state.get('EventID', '')}_"
@@ -1460,13 +1460,13 @@ def show_participant():
                 ),
             )
         except RuntimeDatabaseError as error:
-            st.warning("Live mission state is reconnecting. Please wait a moment.")
+            st.warning("Live experience state is reconnecting. Please wait a moment.")
             st.caption(str(error))
             mission = None
     if road_hunt_active:
-        st.subheader("🎯 Selected Team Mission" if mission else "📍 Route Stage")
+        st.subheader("🎯 Selected Team Experience" if mission else "📍 Route Stage")
     else:
-        st.subheader("🎯 Current Mission" if mission else "🎬 Live Stage")
+        st.subheader("🎯 Current Experience" if mission else "🎬 Live Stage")
 
     if mission is None:
         stage_payload = live_runtime_state.get("Stage", {}) or {}
@@ -1496,13 +1496,13 @@ def show_participant():
                 st.info(participant_message)
             if current_mission_id and not road_hunt_active:
                 st.warning(
-                    f"Mission {current_mission_id} is being synchronised. "
-                    "Press Check for New Mission once."
+                    f"Experience {current_mission_id} is being synchronised. "
+                    "Press Check for New Experience once."
                 )
         else:
             st.info("Waiting for facilitator to launch a stage...")
         if st.button(
-            "🔄 Check for New Mission",
+            "🔄 Check for New Experience",
             width="stretch",
             key="check_waiting_mission",
         ):
@@ -1513,7 +1513,7 @@ def show_participant():
         runtime_stage = mission.get("_RuntimeStage", {})
         if runtime_stage:
             st.caption(
-                f"Current stage: {runtime_stage.get('StageName', mission.get('Title', 'Mission'))}"
+                f"Current stage: {runtime_stage.get('StageName', mission.get('Title', 'Experience'))}"
             )
             stage_message = str(
                 runtime_stage.get("ParticipantMessage", "") or ""
@@ -1521,7 +1521,7 @@ def show_participant():
             if stage_message:
                 st.info(stage_message)
 
-        st.success(mission.get("Title", "Mission"))
+        st.success(mission.get("Title", "Experience"))
         render_mission_content(mission)
 
         submission_type = normalise_submission_type(mission)
@@ -1539,14 +1539,14 @@ def show_participant():
         else:
             if runtime_session:
                 st.caption(
-                    "Mission changes update automatically. Your entered values are preserved."
+                    "Experience changes update automatically. Your entered values are preserved."
                 )
             else:
                 st.caption(
                     "Auto-refresh pauses while you enter results so your values are not reset."
                 )
             if st.button(
-                "🔄 Check for New Mission",
+                "🔄 Check for New Experience",
                 width="stretch",
                 key=f"check_mission_{mission.get('MissionID', 'current')}",
             ):

@@ -166,7 +166,7 @@ def show_event_manager():
 
                 col3, col4, col5 = st.columns(3)
                 col3.metric("Teams Copied", result["TeamsCopied"])
-                col4.metric("Missions Copied", result["MissionsCopied"])
+                col4.metric("Experiences Copied", result["MissionsCopied"])
                 col5.metric("Stages Copied", result["StagesCopied"])
 
                 if result.get("MarketplaceItemsCopied"):

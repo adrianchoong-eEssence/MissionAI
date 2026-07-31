@@ -110,7 +110,7 @@ def display_current_mission(mission):
             """
             <div style="text-align:center; margin-top:120px;">
                 <div style="font-size:64px; font-weight:900;">
-                    Waiting for Mission Launch
+                    Waiting for Experience Launch
                 </div>
                 <div style="font-size:28px; margin-top:30px; opacity:0.75;">
                     Stand by. Your next challenge will appear shortly.
@@ -125,10 +125,10 @@ def display_current_mission(mission):
         f"""
         <div style="text-align:center; margin-top:70px;">
             <div style="font-size:42px; opacity:0.8;">
-                Current Mission
+                Current Experience
             </div>
             <div style="font-size:82px; font-weight:900; margin-top:20px;">
-                {mission.get("Title", "Mission")}
+                {mission.get("Title", "Experience")}
             </div>
             <div style="font-size:34px; max-width:1100px; margin:45px auto 0 auto; line-height:1.4;">
                 {mission.get("Description", "")}
@@ -309,7 +309,7 @@ def display_collaborative_progress(submissions, teams_count):
                 Team Participation
             </div>
             <div style="font-size:48px; font-weight:800; margin-top:50px;">
-                {len(approved)} Missions Approved
+                {len(approved)} Experiences Approved
             </div>
             <div style="font-size:42px; font-weight:800; margin-top:25px;">
                 {total_score} Collective Points
@@ -511,7 +511,8 @@ def show_leaderboard_display():
         mode = "Leaderboard"
 
     with st.sidebar:
-        st.success(f"Automatic view: {mode}")
+        display_mode = "Current Experience" if mode == "Current Mission" else mode
+        st.success(f"Automatic view: {display_mode}")
 
     auto_refresh(refresh_seconds)
 

@@ -25,6 +25,9 @@ PAGES = [
     "Reports",
     "Administration",
 ]
+PAGE_LABELS = {
+    "Mission Studio": "Experience Studio",
+}
 
 
 def apply_navigation_request():
@@ -38,7 +41,12 @@ def apply_navigation_request():
 apply_navigation_request()
 
 st.sidebar.caption("eEssence eXperiential OS")
-page = st.sidebar.radio("Workspace", PAGES, key="main_navigation")
+page = st.sidebar.radio(
+    "Workspace",
+    PAGES,
+    key="main_navigation",
+    format_func=lambda value: PAGE_LABELS.get(value, value),
+)
 
 active_event_id = str(st.session_state.get(ACTIVE_EVENT_KEY, ""))
 if active_event_id:

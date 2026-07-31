@@ -144,8 +144,8 @@ def _render_mission_board(db, event_id):
     mission = db.get_current_mission(event_id)
     submissions = db.get_submissions(event_id)
     if mission:
-        st.subheader("Mission Board")
-        st.success(mission.get("Title", "Current mission"))
+        st.subheader("Experience Board")
+        st.success(mission.get("Title", "Current experience"))
         st.write(
             mission.get("ParticipantInstructions", "")
             or mission.get("Description", "")
@@ -161,7 +161,7 @@ def _render_mission_board(db, event_id):
         st.progress(progress)
         st.caption(f"{len(submitted)} of {len(teams)} teams submitted")
     else:
-        st.info("No mission is active for this stage.")
+        st.info("No experience is active for this stage.")
 
 
 def _render_rankings(db, event_id, final=False):

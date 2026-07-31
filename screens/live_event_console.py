@@ -200,7 +200,7 @@ def mission_defaults(submission_type):
         },
         "PHOTO": {
             "mission_id": "M01",
-            "title": "Photo Evidence Mission",
+            "title": "Photo Evidence Experience",
             "description": "Upload one photo as evidence of mission completion.",
             "points": 100,
             "clue": "One submission per team is enough.",
@@ -247,7 +247,7 @@ def render_submission_details(submission):
     if display_url:
         st.image(
             display_url,
-            caption="Mission Submission",
+            caption="Experience Submission",
             width="stretch",
         )
     elif image_url or drive_file_id:
@@ -805,7 +805,7 @@ def render_road_hunt_operations(db, event_id):
                     "GPS: {GPS}<br/>Last seen: {Last Seen}<br/>"
                     "Accuracy: ±{AccuracyLabel} m<br/>"
                     "Stops reached: {Stops Reached}<br/>"
-                    "Missions: {Missions Submitted}/{Missions Unlocked} submitted"
+                    "Experiences: {Missions Submitted}/{Missions Unlocked} submitted"
                 ),
                 "style": {"backgroundColor": "#0f172a", "color": "white"},
             },
@@ -976,7 +976,7 @@ def show_live_event_console():
     render_road_hunt_operations(db, event_id)
 
     st.divider()
-    st.subheader("🚀 Launch Mission")
+    st.subheader("🚀 Launch Experience")
 
     event_missions = db.get_event_missions(event_id, include_closed=True)
     if event_missions:
@@ -985,7 +985,7 @@ def show_live_event_console():
             for row in event_missions
         }
         mission_label = st.selectbox(
-            "Event Mission",
+            "Event Experience",
             list(mission_options),
             key="console_event_mission",
         )
@@ -995,19 +995,19 @@ def show_live_event_console():
         ).strip()
         if facilitator_instructions:
             st.info("Facilitator: " + facilitator_instructions)
-        if st.button("🚀 Launch Selected Mission", width="stretch"):
+        if st.button("🚀 Launch Selected Experience", width="stretch"):
             db.launch_event_mission(
                 event_id,
                 selected_mission.get("MissionID", ""),
             )
-            st.success("Mission launched. Previous LIVE mission closed automatically.")
+            st.success("Experience launched. Previous LIVE experience closed automatically.")
             st.rerun()
     else:
-        st.info("No event missions yet. Add them in Mission Studio or use Quick Create.")
+        st.info("No event experiences yet. Add them in Experience Studio or use Quick Create.")
 
-    with st.expander("Quick Create Mission"):
+    with st.expander("Quick Create Experience"):
         submission_type = st.selectbox(
-            "Mission Type",
+            "Experience Type",
             [
                 "PIPELINE",
                 "PIPELINE_ENTERPRISE",
@@ -1023,9 +1023,9 @@ def show_live_event_console():
         )
         defaults = mission_defaults(submission_type)
 
-        mission_id = st.text_input("Mission ID", value=defaults["mission_id"])
-        title = st.text_input("Mission Title", value=defaults["title"])
-        description = st.text_area("Mission Instructions", value=defaults["description"])
+        mission_id = st.text_input("Experience ID", value=defaults["mission_id"])
+        title = st.text_input("Experience Name", value=defaults["title"])
+        description = st.text_area("Experience Instructions", value=defaults["description"])
         facilitator_instructions = st.text_area("Facilitator Instructions", value="")
         points = st.number_input("Points", min_value=0, value=defaults["points"], step=10)
         video_url = st.text_input("Video URL", value="")
@@ -1058,15 +1058,15 @@ def show_live_event_console():
                 image_url=image_url,
                 document_url=document_url,
             )
-            st.success("Mission created and launched.")
+            st.success("Experience created and launched.")
             st.rerun()
 
     st.divider()
-    st.subheader("Current Mission")
+    st.subheader("Current Experience")
 
     mission = db.get_current_mission(event_id)
     if mission:
-        st.success(mission.get("Title", "Mission"))
+        st.success(mission.get("Title", "Experience"))
         participant_instructions = str(
             mission.get("ParticipantInstructions", "")
             or mission.get("Description", "")
@@ -1089,7 +1089,7 @@ def show_live_event_console():
             st.image(display_image_url, width="stretch")
         if display_document_url:
             st.link_button(
-                "📄 Open Mission Document",
+                "📄 Open Experience Document",
                 display_document_url,
             )
         if mission.get("DebriefQuestions"):
@@ -1097,12 +1097,12 @@ def show_live_event_console():
                 st.markdown(str(mission.get("DebriefQuestions")))
         st.caption(f"Submission Type: {mission.get('SubmissionType', '')}")
     else:
-        st.info("No live mission yet.")
+        st.info("No live experience yet.")
 
     render_enterprise_pipeline_form(db, event_id, mission)
 
     st.divider()
-    st.subheader("📥 Mission Submissions")
+    st.subheader("📥 Experience Submissions")
 
     current_mission_id = mission.get("MissionID") if mission else None
     current_submissions = [
@@ -1142,7 +1142,7 @@ def show_live_event_console():
             st.rerun()
 
     if not current_submissions:
-        st.info("No submissions received for the current mission yet.")
+        st.info("No submissions received for the current experience yet.")
     else:
         for submission in current_submissions:
             submission_id = submission.get("SubmissionID")
@@ -1155,7 +1155,7 @@ def show_live_event_console():
 **{submission.get('TeamName', '')}**
 
 - Participant: {submission.get('ParticipantName', '')}
-- Mission: {submission.get('MissionID', '')}
+- Experience: {submission.get('MissionID', '')}
 - Type: {get_value(submission, 'SubmissionType', '')}
 - Submitted: {submission.get('SubmittedAt', '')}
 - Status: {get_value(submission, 'Status', 'PENDING')}

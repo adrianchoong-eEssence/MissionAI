@@ -71,7 +71,7 @@ def show_command_centre():
     metric1, metric2, metric3, metric4 = st.columns(4)
     metric1.metric("Participants", participants)
     metric2.metric("Teams", teams)
-    metric3.metric("Missions", missions)
+    metric3.metric("Experiences", missions)
     metric4.metric("Submissions", submissions)
 
     current_stage = str(
@@ -97,9 +97,9 @@ def show_command_centre():
             f"{teams} team(s) configured",
         ),
         _readiness_row(
-            "Missions",
+            "Experiences",
             missions > 0,
-            f"{missions} event mission(s)",
+            f"{missions} event experience(s)",
         ),
         _readiness_row(
             "Programme timeline",

@@ -3,7 +3,7 @@ import streamlit as st
 
 def show_mission_control():
 
-    st.title("🎮 Mission Control")
+    st.title("🎮 Experience Control")
 
     missions = [
         "Welcome Briefing",
@@ -14,20 +14,20 @@ def show_mission_control():
     ]
 
     selected = st.selectbox(
-        "Current Mission",
+        "Current Experience",
         missions
     )
 
     description = st.text_area(
-        "Mission Instructions",
+        "Experience Instructions",
         value="Complete the assigned challenge."
     )
 
-    if st.button("🚀 Send Mission"):
+    if st.button("🚀 Send Experience"):
 
         st.session_state["current_mission"] = {
             "title": selected,
             "description": description
         }
 
-        st.success("Mission sent.")
+        st.success("Experience sent.")
