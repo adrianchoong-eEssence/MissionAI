@@ -888,7 +888,7 @@ def render_programme_first_builder(db):
                 with st.container(border=True):
                     activity_name_col, activity_start_col, activity_duration_col = st.columns([3, 1, 1])
                     activity_name = activity_name_col.text_input(
-                        "Activity name",
+                        "Activity Title",
                         value=str(selected_activity.get("StageName", "")),
                         key=f"activity_name_{event_id}_{index}_{selected_position}",
                     )
@@ -914,13 +914,24 @@ def render_programme_first_builder(db):
                         value=details["EvidenceRequired"],
                         key=f"activity_evidence_{event_id}_{index}_{selected_position}",
                     )
-                    participant_instructions = st.text_area(
-                        "Participant instructions",
-                        value=str(selected_activity.get("ParticipantMessage", "")),
-                        key=f"participant_instructions_{event_id}_{index}_{selected_position}",
+                    participant_narrative = st.text_area(
+                        "Participant Narrative",
+                        value=details["ParticipantNarrative"],
+                        key=f"participant_narrative_{event_id}_{index}_{selected_position}",
+                    )
+                    participant_task = st.text_area(
+                        "Participant Task",
+                        value=details["ParticipantTask"],
+                        key=f"participant_task_{event_id}_{index}_{selected_position}",
+                    )
+                    evidence_requirement = st.text_area(
+                        "Evidence Requirement",
+                        value=details["EvidenceRequirement"],
+                        disabled=not activity_evidence,
+                        key=f"evidence_requirement_{event_id}_{index}_{selected_position}",
                     )
                     facilitator_instructions = st.text_area(
-                        "Facilitator instructions",
+                        "Facilitator Notes",
                         value=details["FacilitatorInstructions"],
                         key=f"facilitator_instructions_{event_id}_{index}_{selected_position}",
                     )
@@ -963,9 +974,14 @@ def render_programme_first_builder(db):
                         selected_activity["StartTime"] = activity_start
                         selected_activity["DurationMinutes"] = int(activity_duration)
                         selected_activity["IsActive"] = "Yes" if activity_active else "No"
-                        selected_activity["ParticipantMessage"] = participant_instructions
+                        selected_activity["ParticipantMessage"] = participant_task
                         selected_activity["FacilitatorInstruction"] = encode_activity_details({
                             "FacilitatorInstructions": facilitator_instructions,
+                            "ParticipantNarrative": participant_narrative,
+                            "ParticipantTask": participant_task,
+                            "EvidenceRequirement": (
+                                evidence_requirement if activity_evidence else ""
+                            ),
                             "Questions": questions,
                             "Credits": int(credits),
                             "Rules": rules,

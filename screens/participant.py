@@ -19,6 +19,7 @@ from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 from engines.programme_hierarchy import (
+    activity_details,
     current_module_activity,
     experience_set_config,
     friendly_type,
@@ -1509,18 +1510,6 @@ def render_road_hunt_navigator(session_token):
             st.caption(f"{len(arrivals)} route stop(s) reached.")
 
 
-BRIDGE_OF_TRUST_TRANSMISSION = """The entrance to The Labyrinth has been sealed.
-
-Your expedition must cross the bridge together.
-
-The first member must carry the secured line across and fasten it at the far side.
-
-Each member then crosses safely.
-
-The final member must release the line and bring it across.
-
-No expedition member may be left behind."""
-
 EVA_LABYRINTH_BRIEFING = """Commander...
 
 Access to The Labyrinth has been granted.
@@ -1542,14 +1531,27 @@ def _is_bayu_event():
     return str(st.session_state.get("participant_event_id", "")) == "EVT-0004"
 
 
-def render_bridge_of_trust():
-    st.markdown("## Bridge of Trust")
-    st.markdown("#### Transmission")
-    st.info(BRIDGE_OF_TRUST_TRANSMISSION)
-    st.markdown("#### Task")
-    st.success("Cross the Bridge of Trust as one complete expedition team.")
-    st.markdown("#### Evidence")
-    st.write("**Facilitator verification.**")
+def render_programme_activity(stage):
+    """Render only participant-facing copy saved on this event activity."""
+    stage = dict(stage or {})
+    details = activity_details(stage)
+    title = str(stage.get("StageName", "Activity") or "Activity").strip()
+    narrative = details["ParticipantNarrative"].strip()
+    task = details["ParticipantTask"].strip()
+    evidence = details["EvidenceRequirement"].strip()
+
+    st.markdown(f"## {title}")
+    if narrative:
+        st.markdown("#### Narrative")
+        st.info(narrative)
+    if task:
+        st.markdown("#### Task")
+        st.success(task)
+    if details["EvidenceRequired"] or evidence:
+        st.markdown("#### Evidence")
+        st.write(f"**{evidence or 'Evidence required.'}**")
+    if details["Credits"]:
+        st.metric("Credits", details["Credits"])
 
 
 def render_mission_ai_briefing(db):
@@ -1884,7 +1886,9 @@ def show_participant():
         stage_key = current_stage_name.casefold()
         if "bridge of trust" in stage_key:
             st.session_state.pop("bayu_board_open", None)
-            render_bridge_of_trust()
+            render_programme_activity(
+                stage_payload or hierarchy_activity,
+            )
             footer()
             return
         if linked_experience_set:
@@ -1951,9 +1955,6 @@ def show_participant():
             live_runtime_state.get("StageName", "")
             or stage_payload.get("StageName", "")
         ).strip()
-        participant_message = str(
-            stage_payload.get("ParticipantMessage", "")
-        ).strip()
         current_mission_id = str(
             live_runtime_state.get("MissionID", "")
         ).strip()
@@ -1968,9 +1969,7 @@ def show_participant():
                 st.session_state.get("participant_session_token", "")
             )
         elif stage_name:
-            st.success(stage_name)
-            if participant_message:
-                st.info(participant_message)
+            render_programme_activity(stage_payload or hierarchy_activity)
             if current_mission_id and not road_hunt_active:
                 st.warning(
                     f"Experience {current_mission_id} is being synchronised. "

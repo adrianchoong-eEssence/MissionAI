@@ -5,7 +5,6 @@ from data.runtime_database import SupabaseRuntimeDB
 from data.google_sheets import GoogleSheetsDB
 from screens.live_event_console import approval_score
 from screens.participant import (
-    BRIDGE_OF_TRUST_TRANSMISSION,
     EVA_PORTRAIT_REFERENCE,
     EVA_LABYRINTH_BRIEFING,
     _bayu_submission_status,
@@ -188,7 +187,6 @@ def test_required_bayu_participant_copy_and_history_fix_are_present():
         Path(__file__).resolve().parents[1] / "screens" / "participant.py"
     ).read_text(encoding="utf-8")
 
-    assert "No expedition member may be left behind." in BRIDGE_OF_TRUST_TRANSMISSION
     assert "Seventeen intelligence signals" in EVA_LABYRINTH_BRIEFING
     assert "ENTER THE LABYRINTH" in source
     assert "Your Team Leader submits evidence for the team." in source

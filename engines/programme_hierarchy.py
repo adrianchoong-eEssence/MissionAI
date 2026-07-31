@@ -57,6 +57,9 @@ def activity_details(stage):
             "Objectives": "",
             "Scoring": "",
             "EvidenceRequired": False,
+            "ParticipantNarrative": "",
+            "ParticipantTask": str(stage.get("ParticipantMessage", "") or ""),
+            "EvidenceRequirement": "",
             "ModuleDetails": {},
         }
     import json
@@ -72,6 +75,11 @@ def activity_details(stage):
         "Objectives": str(value.get("Objectives", "")),
         "Scoring": str(value.get("Scoring", "")),
         "EvidenceRequired": bool(value.get("EvidenceRequired", False)),
+        "ParticipantNarrative": str(value.get("ParticipantNarrative", "")),
+        "ParticipantTask": str(
+            value.get("ParticipantTask", stage.get("ParticipantMessage", ""))
+        ),
+        "EvidenceRequirement": str(value.get("EvidenceRequirement", "")),
         "ModuleDetails": (
             value.get("ModuleDetails", {})
             if isinstance(value.get("ModuleDetails", {}), dict)
