@@ -658,7 +658,7 @@ class SupabaseRuntimeDB:
         clean_type = str(reset_type).strip().upper()
         if not clean_event_id:
             raise ValueError("Event ID is required.")
-        if clean_type not in {"PARTICIPANTS", "RUNTIME", "FACTORY"}:
+        if clean_type not in {"PARTICIPANTS", "RUNTIME", "FACTORY", "UAT"}:
             raise ValueError("Select a valid event reset type.")
 
         deleted = {}
@@ -672,7 +672,7 @@ class SupabaseRuntimeDB:
             )
             deleted[table] = len(result or []) if isinstance(result, list) else 0
 
-        if clean_type in {"RUNTIME", "FACTORY"}:
+        if clean_type in {"RUNTIME", "FACTORY", "UAT"}:
             for table in (
                 "runtime_marketplace_purchases",
                 "runtime_credit_transactions",
@@ -696,29 +696,30 @@ class SupabaseRuntimeDB:
                     admin=True,
                 )
 
-        if clean_type in {"PARTICIPANTS", "FACTORY"}:
+        if clean_type in {"PARTICIPANTS", "FACTORY", "UAT"}:
             delete_table("runtime_participants")
 
         if clean_type == "FACTORY":
             delete_table("runtime_marketplace_items")
+        if clean_type in {"FACTORY", "UAT"}:
             delete_table("runtime_teams")
 
         event_updates = {
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        if clean_type in {"RUNTIME", "FACTORY"}:
+        if clean_type in {"RUNTIME", "FACTORY", "UAT"}:
             event_updates.update({
                 "current_stage_no": 0,
                 "stage_state": "",
                 "stage_name": "",
                 "current_mission_id": "",
-                "display_mode": "Registration",
+                "display_mode": "Welcome" if clean_type == "UAT" else "Registration",
                 "stage_payload": {},
                 "state_version": 0,
                 "credit_earning_frozen": False,
                 "credit_leaderboard_frozen_at": None,
             })
-        if clean_type in {"PARTICIPANTS", "FACTORY"}:
+        if clean_type in {"PARTICIPANTS", "FACTORY", "UAT"}:
             event_updates["next_team_index"] = 0
         self._request(
             "PATCH",

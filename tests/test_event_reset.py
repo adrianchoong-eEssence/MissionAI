@@ -58,6 +58,8 @@ def make_database():
         "EventID": event_id,
         "Notes": json.dumps({
             "StageTimers": {"1": {"Status": "RUNNING"}},
+            "ProjectorBroadcast": {"Mode": "Announcement"},
+            "CurrentStageStatus": "RUNNING",
             "ProtectedNote": "keep",
         }),
     }
@@ -129,6 +131,8 @@ def make_database():
             "EventName": "Reset Event",
             "Notes": json.dumps({
                 "StageTimers": {"1": {"Status": "RUNNING"}},
+                "ProjectorBroadcast": {"Mode": "Announcement"},
+                "CurrentStageStatus": "RUNNING",
                 "ProtectedNote": "keep",
             }),
             "NumberOfTeams": 2,
@@ -207,6 +211,58 @@ def test_factory_reset_keeps_event_programme_experiences_and_media():
         "Missions",
         "Assets",
     ]
+
+
+def test_uat_reset_clears_progress_and_preserves_event_configuration():
+    db, sheets, records = make_database()
+    with patch(
+        "data.google_sheets.get_sheet_records",
+        side_effect=lambda name: records[name],
+    ):
+        result = db.reset_event("EVT-RESET", "UAT")
+
+    for name in ("Participants", "Submissions", "Conversations", "EventState"):
+        assert sheets[name].deleted_rows == [2]
+    assert sheets["Teams"].deleted_rows == []
+    assert sheets["Teams"].batch_updates
+    assert db.runtime.reset_calls == [("EVT-RESET", "UAT")]
+    assert result["Preserved"] == [
+        "Events", "ProgrammeStages", "Missions", "Assets",
+    ]
+    updated_notes = json.loads(sheets["Events"].updated_rows[-1][1][0][2])
+    assert "StageTimers" not in updated_notes
+    assert "ProjectorBroadcast" not in updated_notes
+    assert "CurrentStageStatus" not in updated_notes
+    assert updated_notes["ProtectedNote"] == "keep"
+
+
+def test_runtime_uat_reset_returns_to_welcome_without_deleting_content():
+    runtime = SupabaseRuntimeDB.__new__(SupabaseRuntimeDB)
+    calls = []
+
+    def request(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        return []
+
+    runtime._request = request
+    runtime.reset_event_data("EVT-RESET", "UAT")
+
+    deleted = {path for method, path, _ in calls if method == "DELETE"}
+    assert "runtime_participants" in deleted
+    assert "runtime_teams" in deleted
+    assert "runtime_submissions" in deleted
+    assert "runtime_team_wallets" in deleted
+    assert "runtime_marketplace_purchases" in deleted
+    assert "runtime_events" not in deleted
+    assert "runtime_missions" not in deleted
+    assert "runtime_marketplace_items" not in deleted
+    event_patch = next(
+        kwargs["payload"] for method, path, kwargs in calls
+        if method == "PATCH" and path == "runtime_events"
+    )
+    assert event_patch["display_mode"] == "Welcome"
+    assert event_patch["current_stage_no"] == 0
+    assert event_patch["current_mission_id"] == ""
 
 
 def test_runtime_factory_reset_never_deletes_event_or_experiences():

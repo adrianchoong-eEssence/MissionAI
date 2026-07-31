@@ -881,7 +881,7 @@ class GoogleSheetsDB:
         """Reset operational event data without touching programme or content."""
         clean_event_id = str(event_id).strip()
         clean_type = str(reset_type).strip().upper()
-        if clean_type not in {"PARTICIPANTS", "RUNTIME", "FACTORY"}:
+        if clean_type not in {"PARTICIPANTS", "RUNTIME", "FACTORY", "UAT"}:
             raise ValueError("Select a valid event reset type.")
         if not self.get_event(clean_event_id):
             raise ValueError(f"Event {clean_event_id} was not found.")
@@ -902,7 +902,7 @@ class GoogleSheetsDB:
         }
         runtime_submissions = []
         if (
-            clean_type in {"RUNTIME", "FACTORY"}
+            clean_type in {"RUNTIME", "FACTORY", "UAT"}
             and self.runtime.can_publish
         ):
             runtime_submissions = self.runtime.get_submissions(clean_event_id)
@@ -922,7 +922,7 @@ class GoogleSheetsDB:
             for reference in submission_references
         ))
 
-        if clean_type in {"RUNTIME", "FACTORY"} and self.runtime.can_publish:
+        if clean_type in {"RUNTIME", "FACTORY", "UAT"} and self.runtime.can_publish:
             if submission_paths:
                 self.runtime.delete_submission_images(submission_paths)
             runtime_result = self.runtime.reset_event_data(
@@ -958,6 +958,12 @@ class GoogleSheetsDB:
                 "Conversations",
                 "EventState",
             ),
+            "UAT": (
+                "Participants",
+                "Submissions",
+                "Conversations",
+                "EventState",
+            ),
         }[clean_type]
         deleted = {}
         for name in delete_targets:
@@ -974,11 +980,13 @@ class GoogleSheetsDB:
                 )
             deleted[name] = len(row_numbers)
 
-        if clean_type == "RUNTIME":
-            for name, field_updates in (
-                ("Participants", {"Points": 0, "Status": "Waiting"}),
-                ("Teams", {"Score": 0}),
-            ):
+        if clean_type in {"RUNTIME", "UAT"}:
+            reset_updates = [("Teams", {"Score": 0})]
+            if clean_type == "RUNTIME":
+                reset_updates.insert(
+                    0, ("Participants", {"Points": 0, "Status": "Waiting"}),
+                )
+            for name, field_updates in reset_updates:
                 worksheet = sheet_map[name]
                 headers = worksheet.row_values(1)
                 updates = []
@@ -1002,9 +1010,11 @@ class GoogleSheetsDB:
 
         event = self.get_event(clean_event_id)
         event_updates = {}
-        if clean_type in {"RUNTIME", "FACTORY"}:
+        if clean_type in {"RUNTIME", "FACTORY", "UAT"}:
             metadata = self.event_metadata(event)
             metadata.pop("StageTimers", None)
+            metadata.pop("ProjectorBroadcast", None)
+            metadata.pop("CurrentStageStatus", None)
             event_updates["Notes"] = (
                 json.dumps(
                     metadata,
@@ -1013,7 +1023,7 @@ class GoogleSheetsDB:
                 )
                 if metadata else ""
             )
-        if clean_type in {"PARTICIPANTS", "FACTORY"}:
+        if clean_type in {"PARTICIPANTS", "FACTORY", "UAT"}:
             event_updates["NextTeamIndex"] = 0
         if clean_type == "FACTORY":
             event_updates["NumberOfTeams"] = 0

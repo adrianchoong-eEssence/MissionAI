@@ -39,7 +39,7 @@ def reset_confirmation_matches(event_id, confirmation):
 
 
 def render_event_reset(db):
-    st.subheader("Reset Event")
+    st.subheader("Reset Event (UAT Mode)")
     st.warning(
         "Reset operations are event-scoped and cannot be undone. Programme, "
         "Experience and protected media records are preserved as described."
@@ -60,11 +60,45 @@ def render_event_reset(db):
         key="administration_reset_event",
     )
     event_id = str(event_labels[selected_label].get("EventID", "")).strip()
-    option = st.radio(
-        "Reset option",
-        list(RESET_OPTIONS),
-        key=f"administration_reset_option_{event_id}",
-    )
+    with st.container(border=True):
+        st.markdown("### Reset this event for another UAT session?")
+        st.write(
+            "Participant sessions, team assignments, progress, submissions, "
+            "AI responses, credits, purchases, leaderboard and live state will "
+            "be removed. Event content, Programme, Experiences and Assets remain."
+        )
+        uat_confirmed = st.checkbox(
+            "I understand all participant progress will be removed.",
+            key=f"administration_uat_reset_confirm_{event_id}",
+        )
+        if st.button(
+            "RESET EVENT",
+            type="primary",
+            disabled=not uat_confirmed,
+            width="stretch",
+            key=f"administration_uat_reset_execute_{event_id}",
+        ):
+            try:
+                result = db.reset_event(event_id, "UAT")
+            except Exception as error:
+                st.error(f"Event reset failed: {error}")
+            else:
+                st.success(
+                    f"{result['EventID']} is ready for another UAT session. "
+                    "The event has returned to Welcome."
+                )
+                st.session_state.pop(
+                    f"administration_uat_reset_confirm_{event_id}", None,
+                )
+                st.rerun()
+
+    with st.expander("Advanced reset options"):
+        st.caption("Use the specialised reset scopes only when required.")
+        option = st.radio(
+            "Reset option",
+            list(RESET_OPTIONS),
+            key=f"administration_reset_option_{event_id}",
+        )
     scope = RESET_OPTIONS[option]
     with st.container(border=True):
         st.markdown(f"**Deletes:** {scope['Deletes']}")
