@@ -74,6 +74,167 @@ class EventSafetyTests(unittest.TestCase):
         self.assertEqual(value["LegacyValue"], "keep")
         self.assertEqual(value["ExpectedParticipants"], 80)
 
+    def test_archive_preserves_events_with_participants(self):
+        db = GoogleSheetsDB.__new__(GoogleSheetsDB)
+        captured = {}
+        db.get_participant_count = lambda event_id: (_ for _ in ()).throw(
+            AssertionError("Archiving must not inspect or delete participants")
+        )
+        db.update_event = lambda event_id, updates: captured.update(
+            {"EventID": event_id, **updates}
+        )
+
+        db.archive_event("EVT-DISPOSABLE")
+
+        self.assertEqual(
+            captured,
+            {"EventID": "EVT-DISPOSABLE", "Status": "Archived"},
+        )
+
+    def test_event_backup_is_scoped_and_excludes_master_templates(self):
+        db = GoogleSheetsDB.__new__(GoogleSheetsDB)
+
+        class Runtime:
+            can_publish = True
+
+            @staticmethod
+            def export_event_records(event_id):
+                return {
+                    "runtime_events": [{"event_id": event_id}],
+                    "runtime_team_wallets": [{"event_id": event_id}],
+                }
+
+        db.runtime = Runtime()
+        db.get_event = lambda event_id: {
+            "EventID": event_id,
+            "EventName": "Disposable",
+        }
+        rows = {
+            name: [
+                {"EventID": "EVT-DISPOSABLE", "Value": f"{name}-delete"},
+                {"EventID": "EVT-KEEP", "Value": f"{name}-keep"},
+            ]
+            for name in (
+                "Events", "ProgrammeStages", "Missions", "Teams",
+                "Participants", "Submissions", "Conversations", "EventState",
+            )
+        }
+        rows["ProgrammePacks"] = [
+            {"SourceEventID": "EVT-DISPOSABLE", "PackID": "P-DELETE"},
+            {"SourceEventID": "EVT-KEEP", "PackID": "P-KEEP"},
+        ]
+
+        with patch(
+            "data.google_sheets.get_sheet_records",
+            side_effect=lambda name: rows[name],
+        ):
+            backup = db.export_event_backup("EVT-DISPOSABLE")
+
+        self.assertEqual(backup["EventID"], "EVT-DISPOSABLE")
+        self.assertNotIn("MissionTemplates", backup["Worksheets"])
+        self.assertEqual(
+            backup["Worksheets"]["Events"][0]["EventID"],
+            "EVT-DISPOSABLE",
+        )
+        self.assertEqual(
+            backup["Runtime"]["runtime_team_wallets"][0]["event_id"],
+            "EVT-DISPOSABLE",
+        )
+
+    def test_permanent_delete_removes_only_selected_event(self):
+        class Worksheet:
+            def __init__(self):
+                self.deleted_rows = []
+
+            def delete_rows(self, row_number):
+                self.deleted_rows.append(row_number)
+
+        class Runtime:
+            can_publish = True
+
+            def __init__(self):
+                self.deleted_event = ""
+                self.submission_images = []
+                self.mission_media = []
+
+            def delete_submission_images(self, paths):
+                self.submission_images.extend(paths)
+
+            def delete_mission_media(self, paths):
+                self.mission_media.extend(paths)
+
+            def permanently_delete_event(self, event_id):
+                self.deleted_event = event_id
+
+        db = GoogleSheetsDB.__new__(GoogleSheetsDB)
+        db.runtime = Runtime()
+        db.get_event = lambda event_id: {
+            "EventID": event_id,
+            "Status": "Archived",
+        }
+        db.clear_cache = lambda: None
+        sheet_attributes = {
+            "Participants": "participants",
+            "Submissions": "submissions",
+            "Conversations": "conversations",
+            "ProgrammeStages": "programme_stages",
+            "Missions": "missions",
+            "Teams": "teams",
+            "EventState": "event_state",
+            "Events": "events",
+        }
+        sheets = {}
+        for name, attribute in sheet_attributes.items():
+            sheets[name] = Worksheet()
+            setattr(db, attribute, sheets[name])
+        records = {
+            name: [
+                {"EventID": "EVT-DISPOSABLE"},
+                {"EventID": "EVT-KEEP"},
+            ]
+            for name in sheets
+        }
+        records["MissionTemplates"] = []
+        backup = {
+            "EventID": "EVT-DISPOSABLE",
+            "Worksheets": {
+                "Missions": [{
+                    "EventID": "EVT-DISPOSABLE",
+                    "ReferenceImageURL": (
+                        "supabase://exos-mission-media/events/disposable.jpg"
+                    ),
+                }],
+                "Submissions": [{
+                    "EventID": "EVT-DISPOSABLE",
+                    "ImageURL": (
+                        "supabase://exos-submissions/events/evidence.jpg"
+                    ),
+                }],
+            },
+            "Runtime": {},
+        }
+
+        with patch(
+            "data.google_sheets.get_sheet_records",
+            side_effect=lambda name: records[name],
+        ):
+            result = db.permanently_delete_event(
+                "EVT-DISPOSABLE",
+                backup,
+            )
+
+        self.assertEqual(db.runtime.deleted_event, "EVT-DISPOSABLE")
+        self.assertEqual(
+            db.runtime.submission_images,
+            ["events/evidence.jpg"],
+        )
+        self.assertEqual(
+            db.runtime.mission_media,
+            ["events/disposable.jpg"],
+        )
+        self.assertTrue(all(sheet.deleted_rows == [2] for sheet in sheets.values()))
+        self.assertEqual(result["Deleted"]["Events"], 1)
+
 
 class ModuleIsolationTests(unittest.TestCase):
     class FakeDB:

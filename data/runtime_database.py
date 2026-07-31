@@ -604,6 +604,53 @@ class SupabaseRuntimeDB:
         )
         return self._normalise_result(result) or {}
 
+    def export_event_records(self, event_id):
+        """Return every runtime row scoped to one event for backup."""
+        clean_event_id = str(event_id).strip()
+        tables = (
+            "runtime_events",
+            "runtime_teams",
+            "runtime_participants",
+            "runtime_missions",
+            "runtime_submissions",
+            "runtime_team_wallets",
+            "runtime_credit_transactions",
+            "runtime_marketplace_items",
+            "runtime_marketplace_purchases",
+            "runtime_ai_messages",
+            "runtime_ai_hint_state",
+            "runtime_route_stops",
+            "runtime_team_trackers",
+            "runtime_team_locations",
+            "runtime_location_history",
+            "runtime_geofence_arrivals",
+        )
+        return {
+            table: self._request(
+                "GET",
+                table,
+                query={
+                    "event_id": f"eq.{clean_event_id}",
+                    "select": "*",
+                },
+                admin=True,
+            ) or []
+            for table in tables
+        }
+
+    def permanently_delete_event(self, event_id):
+        """Delete one runtime event; event foreign keys cascade to child rows."""
+        clean_event_id = str(event_id).strip()
+        if not clean_event_id:
+            raise ValueError("Event ID is required.")
+        self._request(
+            "DELETE",
+            "runtime_events",
+            query={"event_id": f"eq.{clean_event_id}"},
+            admin=True,
+        )
+        return {"EventID": clean_event_id, "RuntimeDeleted": True}
+
     def save_submission(self, submission):
         def value(name, default=""):
             raw = submission.get(name, default)

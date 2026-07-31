@@ -406,10 +406,6 @@ class GoogleSheetsDB:
         return timers[key]
 
     def archive_event(self, event_id):
-        if self.get_participant_count(event_id):
-            raise ValueError(
-                "Events with participants cannot be archived from the normal interface."
-            )
         return self.update_event(event_id, {"Status": "Archived"})
 
     def restore_event(self, event_id):
@@ -434,6 +430,144 @@ class GoogleSheetsDB:
                 row for row in worksheets.get("Submissions", [])
                 if row.get("Score", "") not in ("", None)
             ],
+        }
+
+    def export_event_backup(self, event_id):
+        clean_event_id = str(event_id).strip()
+        event = self.get_event(clean_event_id)
+        if not event:
+            raise ValueError(f"Event {clean_event_id} was not found.")
+
+        sheet_names = (
+            "Events",
+            "ProgrammeStages",
+            "Missions",
+            "Teams",
+            "Participants",
+            "Submissions",
+            "Conversations",
+            "EventState",
+        )
+        worksheets = {
+            name: [
+                row for row in get_sheet_records(name)
+                if str(row.get("EventID", "")).strip() == clean_event_id
+            ]
+            for name in sheet_names
+        }
+        worksheets["ProgrammePacks"] = [
+            row for row in get_sheet_records("ProgrammePacks")
+            if str(row.get("SourceEventID", "")).strip() == clean_event_id
+        ]
+
+        runtime = {}
+        if self.runtime.can_publish:
+            runtime = self.runtime.export_event_records(clean_event_id)
+
+        return {
+            "BackupType": "EXOS Event Backup",
+            "EventID": clean_event_id,
+            "ExportedAt": datetime.now().isoformat(timespec="seconds"),
+            "SpreadsheetID": SPREADSHEET_ID,
+            "Worksheets": worksheets,
+            "Runtime": runtime,
+        }
+
+    @staticmethod
+    def _event_media_references(backup):
+        references = []
+        worksheets = (backup or {}).get("Worksheets", {}) or {}
+        for mission in worksheets.get("Missions", []) or []:
+            references.extend(
+                mission.get(field, "")
+                for field in (
+                    "ImageURL", "ReferenceImageURL", "VideoURL", "DocumentURL",
+                )
+            )
+        for submission in worksheets.get("Submissions", []) or []:
+            references.append(submission.get("ImageURL", ""))
+        runtime = (backup or {}).get("Runtime", {}) or {}
+        for submission in runtime.get("runtime_submissions", []) or []:
+            references.append(submission.get("image_url", ""))
+        return [str(value).strip() for value in references if str(value).strip()]
+
+    def permanently_delete_event(self, event_id, backup):
+        clean_event_id = str(event_id).strip()
+        event = self.get_event(clean_event_id)
+        if not event:
+            raise ValueError(f"Event {clean_event_id} was not found.")
+        if str(event.get("Status", "")).strip().upper() != "ARCHIVED":
+            raise ValueError("Only archived events can be permanently deleted.")
+        if str((backup or {}).get("EventID", "")).strip() != clean_event_id:
+            raise ValueError("A successful backup for this event is required.")
+
+        references = self._event_media_references(backup)
+        submission_paths = list(dict.fromkeys([
+            value.split("supabase://exos-submissions/", 1)[1]
+            for value in references
+            if value.startswith("supabase://exos-submissions/")
+        ]))
+        mission_paths = list(dict.fromkeys([
+            value.split("supabase://exos-mission-media/", 1)[1]
+            for value in references
+            if value.startswith("supabase://exos-mission-media/")
+        ]))
+        protected_media = set()
+        for mission in get_sheet_records("Missions"):
+            if str(mission.get("EventID", "")).strip() == clean_event_id:
+                continue
+            protected_media.update(
+                str(mission.get(field, "")).strip()
+                for field in (
+                    "ImageURL", "ReferenceImageURL", "VideoURL", "DocumentURL",
+                )
+            )
+        for template in get_sheet_records("MissionTemplates"):
+            protected_media.update(
+                str(template.get(field, "")).strip()
+                for field in (
+                    "ImageURL", "VideoURL", "DocumentURL",
+                )
+            )
+        mission_paths = [
+            path for path in mission_paths
+            if f"supabase://exos-mission-media/{path}" not in protected_media
+        ]
+        if self.runtime.can_publish:
+            if submission_paths:
+                self.runtime.delete_submission_images(submission_paths)
+            if mission_paths:
+                self.runtime.delete_mission_media(mission_paths)
+            self.runtime.permanently_delete_event(clean_event_id)
+
+        sheets = (
+            ("Participants", self.participants),
+            ("Submissions", self.submissions),
+            ("Conversations", self.conversations),
+            ("ProgrammeStages", self.programme_stages),
+            ("Missions", self.missions),
+            ("Teams", self.teams),
+            ("EventState", self.event_state),
+            ("Events", self.events),
+        )
+        deleted = {}
+        for name, worksheet in sheets:
+            rows = get_sheet_records(name)
+            row_numbers = [
+                index for index, row in enumerate(rows, start=2)
+                if str(row.get("EventID", "")).strip() == clean_event_id
+            ]
+            for row_number in reversed(row_numbers):
+                _call_sheets_with_retry(
+                    lambda row_number=row_number, worksheet=worksheet:
+                    worksheet.delete_rows(row_number)
+                )
+            deleted[name] = len(row_numbers)
+        self.clear_cache()
+        return {
+            "EventID": clean_event_id,
+            "Deleted": deleted,
+            "EvidenceReferencesRemoved": len(submission_paths) + len(mission_paths),
         }
 
     def get_event_by_join_code(self, join_code):

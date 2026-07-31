@@ -44,51 +44,111 @@ def show_administration():
         st.success(f"Backup prepared successfully at {exported_at}.")
 
     st.divider()
-    st.subheader("Archive Legacy Event")
-    st.caption("Archiving hides an event but does not delete its associated records.")
-    events = db.get_events()
-    if events:
-        options = {
-            f"{event.get('EventID', '')} — {event.get('EventName', '')}": event
-            for event in events
-        }
-        label = st.selectbox("Event", list(options))
-        event = options[label]
-        event_id = str(event.get("EventID", ""))
-        st.warning(
-            f"Affected event: {event.get('EventName', '')} ({event_id})"
-        )
-        confirmation = st.text_input(f"Type {event_id} to confirm")
-        can_archive = bool(
-            st.session_state.get("exos_backup_created")
-            and confirmation.strip() == event_id
-        )
-        if st.button(
-            "Archive Event",
-            disabled=not can_archive,
-            width="stretch",
-        ):
-            db.archive_event(event_id)
-            st.success("Event archived. Its records remain recoverable.")
-            st.rerun()
-    else:
-        st.info("No active events are available to archive.")
+    st.subheader("Archived Events")
+    st.caption(
+        "Restore an event with all data intact, or create an event-only backup "
+        "before permanent deletion."
+    )
+    archived = [
+        event for event in db.get_events(include_archived=True)
+        if str(event.get("Status", "")).strip().upper() == "ARCHIVED"
+    ]
+    if not archived:
+        st.info("No archived events.")
+        return
 
-    with st.expander("Restore archived event"):
-        archived = [
-            event for event in db.get_events(include_archived=True)
-            if str(event.get("Status", "")).upper() == "ARCHIVED"
-        ]
-        if archived:
-            restore_options = {
-                f"{event.get('EventID', '')} — {event.get('EventName', '')}": event
-                for event in archived
-            }
-            restore_label = st.selectbox("Archived event", list(restore_options))
-            restore_event = restore_options[restore_label]
-            if st.button("Restore Event", width="stretch"):
-                db.restore_event(restore_event.get("EventID", ""))
-                st.success("Event restored.")
+    for event in archived:
+        event_id = str(event.get("EventID", "")).strip()
+        with st.container(border=True):
+            st.subheader(str(event.get("EventName", "Unnamed event")))
+            st.caption(
+                f"{event.get('Client', '—')} · {event.get('EventDate', '—')} · "
+                f"Event ID {event_id}"
+            )
+            restore_col, delete_col = st.columns(2)
+            if restore_col.button(
+                "Restore",
+                key=f"restore_archived_{event_id}",
+                width="stretch",
+            ):
+                db.restore_event(event_id)
+                st.success(f"{event_id} restored with all event data intact.")
                 st.rerun()
-        else:
-            st.caption("No archived events.")
+
+            with delete_col:
+                with st.popover("Permanently Delete", width="stretch"):
+                    st.error(
+                        "This removes only this event and its related records. "
+                        "It cannot be undone."
+                    )
+                    backup_key = f"event_delete_backup_{event_id}"
+                    if st.button(
+                        "Generate Event Backup",
+                        key=f"generate_event_backup_{event_id}",
+                        width="stretch",
+                    ):
+                        try:
+                            st.session_state[backup_key] = db.export_event_backup(
+                                event_id
+                            )
+                            st.success("Event backup generated successfully.")
+                        except Exception as error:
+                            st.session_state.pop(backup_key, None)
+                            st.error(f"Backup generation failed: {error}")
+
+                    event_backup = st.session_state.get(backup_key)
+                    if event_backup:
+                        backup_filename = (
+                            f"EXOS-{event_id}-backup-"
+                            + datetime.now().strftime("%Y%m%d-%H%M%S")
+                            + ".json"
+                        )
+                        st.download_button(
+                            "Download Event Backup",
+                            data=json.dumps(
+                                event_backup,
+                                ensure_ascii=False,
+                                indent=2,
+                                default=str,
+                            ),
+                            file_name=backup_filename,
+                            mime="application/json",
+                            width="stretch",
+                            key=f"download_event_backup_{event_id}",
+                        )
+
+                    typed_id = st.text_input(
+                        f"Type {event_id} to confirm",
+                        key=f"type_delete_event_{event_id}",
+                    )
+                    understands = st.checkbox(
+                        "I understand this cannot be undone",
+                        key=f"understand_delete_event_{event_id}",
+                    )
+                    final_confirmation = st.checkbox(
+                        f"Final confirmation: permanently delete {event_id}",
+                        key=f"final_delete_event_{event_id}",
+                    )
+                    can_delete = bool(
+                        event_backup
+                        and typed_id.strip() == event_id
+                        and understands
+                        and final_confirmation
+                    )
+                    if st.button(
+                        "Permanently Delete",
+                        key=f"permanent_delete_event_{event_id}",
+                        type="primary",
+                        disabled=not can_delete,
+                        width="stretch",
+                    ):
+                        result = db.permanently_delete_event(
+                            event_id,
+                            event_backup,
+                        )
+                        st.session_state.pop(backup_key, None)
+                        st.success(
+                            f"{result['EventID']} permanently deleted. "
+                            "Other events and master templates were not changed."
+                        )
+                        st.rerun()

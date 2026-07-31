@@ -54,7 +54,7 @@ def show_events_home():
                 f"{event.get('Client', '—')} · {event.get('EventDate', '—')} · "
                 f"{event.get('Venue', '—')} · Join code {event.get('JoinCode', '—')}"
             )
-            open_event, build, control = st.columns(3)
+            open_event, build, control, more = st.columns([1, 1, 1, .55])
             if open_event.button(
                 "Open Event",
                 width="stretch",
@@ -76,3 +76,23 @@ def show_events_home():
             ):
                 remember_active_event(event)
                 request_navigation("Control Centre")
+            with more:
+                with st.popover("More", width="stretch"):
+                    st.markdown("**Archive this event?**")
+                    st.caption(
+                        "Archived events will disappear from the normal Events "
+                        "list but can be restored from Administration."
+                    )
+                    confirmed = st.checkbox(
+                        "Confirm archive",
+                        key=f"confirm_archive_{event_id}",
+                    )
+                    if st.button(
+                        "Archive Event",
+                        key=f"archive_event_{event_id}",
+                        disabled=not confirmed,
+                        width="stretch",
+                    ):
+                        db.archive_event(event_id)
+                        st.success("Event archived. All event data is preserved.")
+                        st.rerun()

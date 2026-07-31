@@ -132,10 +132,44 @@ class FakeDB:
     runtime = FakeRuntime()
 
     def get_events(self, include_archived=False):
-        return [dict(EVENT)]
+        event = dict(EVENT)
+        event["Status"] = st.session_state.get("uat_event_status", "Draft")
+        if event["Status"] == "Archived" and not include_archived:
+            return []
+        return [event]
 
     def get_event(self, event_id):
-        return dict(EVENT)
+        event = dict(EVENT)
+        event["Status"] = st.session_state.get("uat_event_status", "Draft")
+        return event
+
+    def archive_event(self, event_id):
+        st.session_state["uat_event_status"] = "Archived"
+        return self.get_event(event_id)
+
+    def restore_event(self, event_id):
+        st.session_state["uat_event_status"] = "Draft"
+        return self.get_event(event_id)
+
+    def export_event_backup(self, event_id):
+        return {
+            "BackupType": "EXOS Event Backup",
+            "EventID": event_id,
+            "ExportedAt": "2026-07-31T08:48:43",
+            "Worksheets": {
+                "Events": [self.get_event(event_id)],
+                "ProgrammeStages": self.get_programme_stages(event_id),
+                "Missions": self.get_event_missions(event_id),
+                "Teams": self.get_teams(event_id),
+                "Participants": [],
+                "Submissions": [],
+            },
+            "Runtime": {},
+        }
+
+    def permanently_delete_event(self, event_id, backup):
+        st.session_state["uat_event_status"] = "Deleted"
+        return {"EventID": event_id}
 
     def get_event_by_join_code(self, join_code):
         return None
