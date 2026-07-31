@@ -45,6 +45,10 @@ REQUIRED_WORKSHEETS = {
         "AutoApprovalAllowed", "TimeLimitMinutes", "AvailabilityStart",
         "AvailabilityEnd", "CountdownEnabled", "ReferenceImageURL",
         "LearningPoint", "FacilitatorDebriefNotes",
+        "NarrativeTitle", "MissionContext", "Transmission", "MissionType",
+        "Interaction", "ReasoningPrompt", "Difficulty",
+        "EstimatedTimeMinutes", "MissionCompleteMessage",
+        "AIRestrictions", "FacilitatorIntent", "LearningIntent", "SafetyNotes",
     ],
     "MissionTemplates": [
         "TemplateID", "Title", "Story", "ParticipantInstructions",

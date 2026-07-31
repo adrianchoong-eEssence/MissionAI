@@ -756,6 +756,9 @@ def render_gps_form(db, mission):
 
 def render_mission_content(mission):
     story = str(mission.get("Story", "") or "").strip()
+    transmission = str(
+        mission.get("Transmission", "") or mission.get("Clue", "") or ""
+    ).strip()
     instructions = str(
         mission.get("ParticipantInstructions", "")
         or mission.get("Description", "")
@@ -765,8 +768,12 @@ def render_mission_content(mission):
     image_url = str(mission.get("ImageURL", "") or "").strip()
     document_url = str(mission.get("DocumentURL", "") or "").strip()
 
+    if transmission:
+        st.markdown("#### Transmission")
+        st.info(transmission)
+
     if story:
-        st.markdown("#### Mission Story")
+        st.markdown("#### Narrative")
         st.markdown(story)
 
     display_video_url = get_mission_media_url(video_url)
@@ -791,23 +798,15 @@ def render_mission_content(mission):
             st.warning("The mission image could not be displayed.")
 
     if instructions:
-        st.markdown("#### Instructions")
+        st.markdown("#### Mission")
         st.info(instructions)
 
-    clue = str(mission.get("Clue", "") or "").strip()
-    question = str(mission.get("MainQuestion", "") or "").strip()
     evidence = str(mission.get("SubmissionType", "") or "").strip().title()
     evidence_instructions = str(
         mission.get("EvidenceInstructions", "") or ""
     ).strip()
-    if clue:
-        st.markdown("#### Treasure Hunt Clue")
-        st.info(clue)
-    if question:
-        st.markdown("#### Question")
-        st.write(question)
     if yes_no_value(mission.get("EvidenceRequired", "Yes")):
-        st.markdown("#### Evidence Requirement")
+        st.markdown("#### Evidence")
         st.write(f"**{evidence or 'Evidence'}**")
         if evidence_instructions:
             st.caption(evidence_instructions)

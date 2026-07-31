@@ -1,3 +1,4 @@
+import html
 import io
 import re
 
@@ -296,6 +297,153 @@ def _mission_editor(db, event_id, selected):
         )
 
 
+def _experience_designer(db, event_id, selected):
+    mission_id = str(selected.get("MissionID", "")).strip().upper()
+    key = f"experience_{event_id}_{mission_id}"
+    st.markdown(
+        """
+        <style>
+        .studio-step{font-size:.72rem;font-weight:800;letter-spacing:.18em;color:#B59A37;text-transform:uppercase}
+        .studio-heading{font-size:1.4rem;font-weight:800;color:#082D58;margin:.25rem 0 .9rem}
+        .phone{max-width:350px;margin:0 auto;background:#071d38;border:9px solid #071d38;border-radius:42px;padding:9px;box-shadow:0 24px 55px rgba(8,45,88,.25)}
+        .phone-screen{min-height:640px;border-radius:29px;background:#f5f7fa;overflow:hidden;color:#082D58}
+        .phone-top{height:25px;background:#fff;text-align:center}.phone-notch{display:inline-block;width:92px;height:17px;background:#071d38;border-radius:0 0 14px 14px}
+        .phone-body{padding:23px 20px 28px}.transmission{font-size:.67rem;letter-spacing:.17em;font-weight:800;color:#B59A37;text-transform:uppercase}
+        .phone h2{font-size:1.7rem!important;line-height:1.08;margin:.55rem 0}.phone p{font-family:Arial,sans-serif;font-size:.9rem;line-height:1.48}
+        .mission-card{background:#fff;border:1px solid #dce3eb;border-radius:14px;padding:15px;margin:18px 0}
+        .mission-label{font-size:.65rem;letter-spacing:.15em;font-weight:800;color:#557089;text-transform:uppercase;margin:8px 0 5px}
+        .evidence-row{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #dce3eb;padding-top:15px;margin-top:15px}
+        .credit-pill{background:#082D58;color:#fff;border-radius:20px;padding:7px 11px;font-weight:800}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("## Experience Designer")
+    st.caption("Shape what participants feel, do, submit and earn.")
+    editor, preview = st.columns([1.55, 1], gap="large")
+    with editor:
+        with st.container(border=True):
+            st.markdown('<div class="studio-step">01 · Narrative</div><div class="studio-heading">Set the scene</div>', unsafe_allow_html=True)
+            title = st.text_input("Story Title", value=str(selected.get("NarrativeTitle") or selected.get("Title", "")), key=f"{key}_title")
+            narrative = st.text_area("Narrative", value=str(selected.get("Story", "")), height=120, key=f"{key}_narrative")
+            context = st.text_area("Mission Context", value=str(selected.get("MissionContext") or selected.get("Description", "")), key=f"{key}_context")
+            transmission = st.text_area("Transmission", value=str(selected.get("Transmission") or selected.get("Clue", "")), placeholder="Command Centre to field team…", key=f"{key}_transmission")
+
+        with st.container(border=True):
+            st.markdown('<div class="studio-step">02 · Experience</div><div class="studio-heading">Design the action</div>', unsafe_allow_html=True)
+            types = ["Observe", "Think", "Interact"]
+            current_type = str(selected.get("MissionType", "Observe") or "Observe").title()
+            current_type = current_type if current_type in types else "Observe"
+            mission_type = st.radio("Mission Type", types, horizontal=True, index=types.index(current_type), key=f"{key}_type")
+            mission = st.text_area("Mission", value=str(selected.get("ParticipantInstructions") or selected.get("MainQuestion", "")), height=120, key=f"{key}_mission")
+            reference = str(selected.get("ReferenceImageURL", ""))
+            interaction = str(selected.get("Interaction", ""))
+            reasoning = str(selected.get("ReasoningPrompt", ""))
+            companion_prompt = str(selected.get("AIPrompt", ""))
+            time_limit = safe_int(selected.get("TimeLimitMinutes"), 10)
+            if mission_type == "Observe":
+                reference = st.text_input("Reference Image", value=reference, key=f"{key}_reference")
+                type_guidance = st.text_area("Observation Instructions", value=str(selected.get("EvidenceInstructions", "")), key=f"{key}_observe")
+            elif mission_type == "Think":
+                companion_prompt = st.text_area("AI Companion Prompt", value=companion_prompt, key=f"{key}_think_ai")
+                reasoning = st.text_area("Reasoning Prompt", value=reasoning, key=f"{key}_reason")
+                type_guidance = str(selected.get("EvidenceInstructions", ""))
+            else:
+                interaction = st.text_area("Interaction", value=interaction, key=f"{key}_interaction")
+                time_limit = st.slider("Time Limit (minutes)", 0, 180, min(time_limit, 180), key=f"{key}_time")
+                type_guidance = str(selected.get("EvidenceInstructions", ""))
+
+        with st.container(border=True):
+            st.markdown('<div class="studio-step">03 · Evidence</div><div class="studio-heading">Choose proof of completion</div>', unsafe_allow_html=True)
+            evidence_types = ["PHOTO", "VIDEO", "TEXT", "AUDIO", "MULTIPLE"]
+            current_evidence = str(selected.get("SubmissionType", "PHOTO") or "PHOTO").upper()
+            current_evidence = current_evidence if current_evidence in evidence_types else "TEXT"
+            evidence = st.selectbox("Evidence", evidence_types, index=evidence_types.index(current_evidence), format_func=str.title, key=f"{key}_evidence")
+            evidence_instructions = st.text_area("Evidence Instructions", value=type_guidance, key=f"{key}_evidence_instructions")
+            if evidence in {"PHOTO", "VIDEO", "MULTIPLE"}:
+                st.info("Camera preview example · The participant camera opens with mission guidance above the shutter.")
+
+        with st.container(border=True):
+            st.markdown('<div class="studio-step">04 · Reward</div><div class="studio-heading">Make completion matter</div>', unsafe_allow_html=True)
+            reward1, reward2 = st.columns(2)
+            with reward1:
+                credits = st.number_input("Credits", min_value=0, value=safe_int(selected.get("CreditValue", selected.get("Points")), 120), step=10, key=f"{key}_credits")
+                difficulty = st.select_slider("Difficulty", ["Easy", "Moderate", "Challenging", "Expert"], value=str(selected.get("Difficulty", "Moderate") or "Moderate"), key=f"{key}_difficulty")
+            with reward2:
+                estimated_default = min(max(safe_int(selected.get("EstimatedTimeMinutes"), time_limit or 10), 1), 180)
+                estimated = st.slider("Estimated Time (minutes)", 1, 180, estimated_default, key=f"{key}_estimate")
+                complete_message = st.text_input("Mission Complete Message", value=str(selected.get("MissionCompleteMessage", "Transmission Restored") or "Transmission Restored"), key=f"{key}_complete")
+            st.success(f"{complete_message}  ·  +{credits} Credits")
+
+        ai_enabled = st.toggle("Enable AI Companion", value=yes_no(selected.get("AIRequired", selected.get("AIHelpEnabled"))) == "Yes", key=f"{key}_ai_enabled")
+        if ai_enabled:
+            with st.container(border=True):
+                st.markdown('<div class="studio-step">05 · AI Companion</div>', unsafe_allow_html=True)
+                ai_role = st.text_input("Role", value=str(selected.get("AIRole", "")), key=f"{key}_ai_role")
+                ai_prompt = st.text_area("Prompt", value=companion_prompt, key=f"{key}_ai_prompt")
+                restrictions = st.text_area("Restrictions", value=str(selected.get("AIRestrictions") or selected.get("AIUsageRules", "")), key=f"{key}_restrictions")
+                hints = st.text_area("Hints", value="\n".join(str(selected.get(f"Hint{i}", "") or "") for i in range(1, 4)).strip(), help="One hint per line.", key=f"{key}_hints")
+        else:
+            ai_role, ai_prompt = str(selected.get("AIRole", "")), companion_prompt
+            restrictions = str(selected.get("AIRestrictions") or selected.get("AIUsageRules", ""))
+            hints = "\n".join(str(selected.get(f"Hint{i}", "") or "") for i in range(1, 4)).strip()
+
+        with st.expander("06 · Facilitator · Hidden from participants"):
+            facilitator = st.text_area("Facilitator Intent", value=str(selected.get("FacilitatorIntent") or selected.get("FacilitatorInstructions", "")), key=f"{key}_facilitator")
+            learning = st.text_area("Learning Intent", value=str(selected.get("LearningIntent") or selected.get("LearningObjectives", "")), key=f"{key}_learning")
+            safety = st.text_area("Safety Notes", value=str(selected.get("SafetyNotes", "")), key=f"{key}_safety")
+        saved = st.button("Save Experience", type="primary", width="stretch", key=f"{key}_save")
+
+    with preview:
+        st.markdown('<div class="studio-step">Live Preview</div>', unsafe_allow_html=True)
+        st.caption("Participant view · updates as you edit")
+        clean = lambda value: html.escape(str(value or "")).replace("\n", "<br>")
+        image = f'<img src="{clean(reference)}" alt="Reference" style="width:100%;border-radius:12px;margin-top:10px">' if reference and mission_type == "Observe" else ""
+        st.markdown(
+            f"""<div class="phone"><div class="phone-screen"><div class="phone-top"><span class="phone-notch"></span></div>
+            <div class="phone-body"><div class="transmission">Incoming transmission</div><h2>{clean(title) or "Untitled experience"}</h2>
+            <p>{clean(transmission) or "Command Centre is establishing a secure channel…"}</p>{image}
+            <div class="mission-card"><div class="mission-label">Narrative</div><p>{clean(narrative) or "Your narrative will appear here."}</p>
+            <div class="mission-label">Mission</div><p><strong>{clean(mission) or "Your mission will appear here."}</strong></p>
+            <div class="evidence-row"><span><span class="mission-label">Evidence</span><br>{clean(evidence.title())}</span>
+            <span class="credit-pill">+{credits} Credits</span></div></div></div></div></div>""",
+            unsafe_allow_html=True,
+        )
+
+    if saved:
+        if not title.strip() or not mission.strip():
+            st.error("Story Title and Mission are required.")
+            return
+        hint_values = [line.strip() for line in hints.splitlines() if line.strip()][:3]
+        payload = dict(selected)
+        payload.update({
+            "EventID": event_id, "MissionID": mission_id, "Title": title.strip(),
+            "NarrativeTitle": title.strip(), "Story": narrative.strip(),
+            "MissionContext": context.strip(), "Description": context.strip(),
+            "Transmission": transmission.strip(), "Clue": transmission.strip(),
+            "MissionType": mission_type, "ParticipantInstructions": mission.strip(),
+            "MainQuestion": mission.strip(), "Interaction": interaction.strip(),
+            "ReasoningPrompt": reasoning.strip(), "ReferenceImageURL": reference.strip(),
+            "EvidenceRequired": "Yes", "SubmissionType": evidence,
+            "EvidenceInstructions": evidence_instructions.strip(),
+            "CreditValue": int(credits), "Points": int(credits), "MaximumCredits": int(credits),
+            "Difficulty": difficulty, "EstimatedTimeMinutes": int(estimated),
+            "MissionCompleteMessage": complete_message.strip(), "TimeLimitMinutes": int(time_limit),
+            "AIRequired": "Yes" if ai_enabled else "No", "AIHelpEnabled": "Yes" if ai_enabled else "No",
+            "AIRole": ai_role.strip(), "AIPrompt": ai_prompt.strip(),
+            "AIRestrictions": restrictions.strip(), "AIUsageRules": restrictions.strip(),
+            "Hint1": hint_values[0] if len(hint_values) > 0 else "",
+            "Hint2": hint_values[1] if len(hint_values) > 1 else "",
+            "Hint3": hint_values[2] if len(hint_values) > 2 else "",
+            "FacilitatorIntent": facilitator.strip(), "FacilitatorInstructions": facilitator.strip(),
+            "LearningIntent": learning.strip(), "LearningObjectives": learning.strip(),
+            "SafetyNotes": safety.strip(),
+        })
+        result = db.upsert_event_mission(payload)
+        st.session_state["mission_studio_message"] = f"{result['Action']} experience {result['MissionID']}."
+        st.rerun()
+
+
 def render_event_mission_editor(db):
     events = db.get_events()
     if not events:
@@ -336,7 +484,7 @@ def render_event_mission_editor(db):
         if st.button("← Back to Missions", type="secondary"):
             st.session_state.pop("mission_studio_selected_mission", None)
             st.rerun()
-        _mission_editor(db, event_id, selected)
+        _experience_designer(db, event_id, selected)
         action1, action2, action3 = st.columns(3)
         new_status = "INACTIVE" if str(selected.get("Status", "")).upper() == "ACTIVE" else "ACTIVE"
         if action1.button(f"Set {new_status.title()}", width="stretch"):

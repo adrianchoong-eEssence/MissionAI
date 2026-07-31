@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
 from screens.mission_setup import mission_module_name
+from screens.mission_setup import EVIDENCE_TYPES
 
 
 class FakeWorksheet:
@@ -278,6 +279,20 @@ class MissionStudioDataTests(unittest.TestCase):
         with patch("data.google_sheets.get_sheet_records", return_value=rows):
             self.assertEqual(database.get_event_missions("EVT-A")[0]["Version"], "A")
             self.assertEqual(database.get_event_missions("EVT-B")[0]["Version"], "B")
+
+    def test_experience_designer_fields_are_persisted_on_missions(self):
+        headers = REQUIRED_WORKSHEETS["Missions"]
+        for field in (
+            "NarrativeTitle", "MissionContext", "Transmission", "MissionType",
+            "Interaction", "ReasoningPrompt", "Difficulty",
+            "EstimatedTimeMinutes", "MissionCompleteMessage",
+            "AIRestrictions", "FacilitatorIntent", "LearningIntent", "SafetyNotes",
+        ):
+            self.assertIn(field, headers)
+
+    def test_experience_evidence_supports_participant_media(self):
+        for evidence in ("PHOTO", "VIDEO", "TEXT", "AUDIO", "MULTIPLE"):
+            self.assertIn(evidence, EVIDENCE_TYPES)
 
     def test_mission_order_is_event_specific(self):
         database = self.make_db()
