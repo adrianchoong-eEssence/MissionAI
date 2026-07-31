@@ -6,11 +6,12 @@ from streamlit_autorefresh import st_autorefresh
 from data.google_sheets import GoogleSheetsDB
 from engines.stage_timer import remaining_seconds
 from engines.programme_hierarchy import (
+    activity_content_config,
+    activity_details,
     build_programme_hierarchy,
     current_module_activity,
-    experience_set_config,
-    experience_set_stage,
     friendly_type,
+    linked_content_stage,
 )
 from screens.app_state import select_active_event
 from screens.live_event_console import (
@@ -71,17 +72,17 @@ def _set_stage(db, event_id, stage, status="READY"):
 
 
 def _start_programme_activity(db, event_id, stage, module):
-    """Activate a linked Experience Set before broadcasting its stage."""
-    config = experience_set_config(module)
-    live_stage = dict(stage)
+    """Publish the activity's linked content before broadcasting its stage."""
+    config = activity_content_config(stage, module)
+    live_stage = linked_content_stage(stage, module)
     if (
-        config["ModuleType"].casefold() == "experience set"
-        and config["LinkedExperienceSet"]
+        config["ContentType"] == "Experience Board"
+        and config["LinkedContent"]
     ):
         result = db.activate_experience_set(
-            event_id, config["LinkedExperienceSet"],
+            event_id, config["LinkedContent"],
         )
-        live_stage = experience_set_stage(
+        live_stage = linked_content_stage(
             stage, module, result["ExperiencesPublished"],
         )
     db.set_event_stage(event_id, live_stage)
@@ -266,6 +267,11 @@ def show_control_centre():
     metadata = db.event_metadata(selected_event)
     broadcast_state = projector_broadcast_state(selected_event)
     stage_status = str(metadata.get("CurrentStageStatus", "READY"))
+    content_config = activity_content_config(current_activity, current_module)
+    linked_content_name = (
+        content_config["LinkedContent"] or "Event-specific activity content"
+    )
+    participant_details = activity_details(current_activity)
 
     st.markdown(
         f"""
@@ -288,6 +294,24 @@ def show_control_centre():
         "Facilitator broadcast",
     )
 
+    link_type_col, link_name_col = st.columns(2)
+    link_type_col.metric("Linked Content Type", content_config["ContentType"])
+    link_name_col.metric("Linked Content Name", linked_content_name)
+    with st.expander("Participant Preview", expanded=True):
+        st.markdown(f"### {current_activity.get('StageName', 'Activity')}")
+        if participant_details["ParticipantNarrative"]:
+            st.info(participant_details["ParticipantNarrative"])
+        preview_task = (
+            participant_details["ParticipantTask"]
+            or current_activity.get("ParticipantMessage", "")
+        )
+        if preview_task:
+            st.write(preview_task)
+        if participant_details["EvidenceRequirement"]:
+            st.caption(participant_details["EvidenceRequirement"])
+        if content_config["LinkedContent"]:
+            st.success(f"Publishes: {content_config['LinkedContent']}")
+
     previous, launch, next_col, end_module, next_module = st.columns([1, 2, 1, 1, 1])
     if previous.button(
         "Previous Activity",
@@ -296,7 +320,7 @@ def show_control_centre():
     ):
         _set_stage(db, event_id, stages[index - 1])
     if launch.button(
-        "Start Current Activity",
+        "Start Activity",
         type="primary",
         width="stretch",
     ):
@@ -316,7 +340,7 @@ def show_control_centre():
     ):
         _set_stage(db, event_id, stages[index + 1])
     if end_module.button(
-        "End Module",
+        "End Activity",
         width="stretch",
     ):
         db.update_stage_timer(

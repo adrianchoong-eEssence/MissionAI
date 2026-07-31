@@ -24,6 +24,14 @@ FACILITATOR_TYPE_LABELS = {
 }
 MODULE_MARKER = "EXOSMODULE|"
 ACTIVITY_META_MARKER = "EXOSMETA:"
+CONTENT_TYPES = (
+    "Standard Activity",
+    "Experience Board",
+    "Sync AI",
+    "Catalyst",
+    "Break",
+    "Briefing",
+)
 
 
 def encode_module_stage_type(module_name, day, activity_type="Activity"):
@@ -60,6 +68,8 @@ def activity_details(stage):
             "ParticipantNarrative": "",
             "ParticipantTask": str(stage.get("ParticipantMessage", "") or ""),
             "EvidenceRequirement": "",
+            "ContentType": "",
+            "LinkedContent": "",
             "ModuleDetails": {},
         }
     import json
@@ -80,6 +90,8 @@ def activity_details(stage):
             value.get("ParticipantTask", stage.get("ParticipantMessage", ""))
         ),
         "EvidenceRequirement": str(value.get("EvidenceRequirement", "")),
+        "ContentType": str(value.get("ContentType", "")),
+        "LinkedContent": str(value.get("LinkedContent", "")),
         "ModuleDetails": (
             value.get("ModuleDetails", {})
             if isinstance(value.get("ModuleDetails", {}), dict)
@@ -214,6 +226,57 @@ def experience_set_config(module):
         "ModuleType": module_type,
         "LinkedExperienceSet": linked,
     }
+
+
+def activity_content_config(stage, module=None):
+    """Resolve event-owned participant content from one programme activity."""
+    stage = dict(stage or {})
+    details = activity_details(stage)
+    content_type = str(details.get("ContentType", "") or "").strip()
+    linked = str(details.get("LinkedContent", "") or "").strip()
+
+    # Preserve links authored before activity-level content linkage existed.
+    if not content_type and module:
+        legacy = experience_set_config(module)
+        if (
+            legacy["ModuleType"].casefold() == "experience set"
+            and legacy["LinkedExperienceSet"]
+        ):
+            content_type = "Experience Board"
+            linked = legacy["LinkedExperienceSet"]
+
+    combined = " ".join((
+        str(stage.get("StageName", "")),
+        str(stage.get("StageType", "")),
+    )).casefold()
+    if not content_type:
+        if "sync ai" in combined:
+            content_type = "Sync AI"
+        elif "catalyst" in combined:
+            content_type = "Catalyst"
+        elif "lunch" in combined or "break" in combined:
+            content_type = "Break"
+        elif "brief" in combined:
+            content_type = "Briefing"
+        else:
+            content_type = "Standard Activity"
+    if content_type not in CONTENT_TYPES:
+        content_type = "Standard Activity"
+    return {"ContentType": content_type, "LinkedContent": linked}
+
+
+def linked_content_stage(stage, module=None, experience_count=0):
+    """Attach resolved linkage to the live payload without changing the schema."""
+    payload = deepcopy(stage or {})
+    config = activity_content_config(payload, module)
+    payload.update(config)
+    if config["ContentType"] == "Experience Board":
+        payload.update({
+            "ModuleType": "Experience Set",
+            "LinkedExperienceSet": config["LinkedContent"],
+            "ExperienceCount": int(experience_count or 0),
+        })
+    return payload
 
 
 def experience_set_stage(stage, module, experience_count=0):

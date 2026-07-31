@@ -25,6 +25,8 @@ from data.mahb_media_explore import (
 from data.google_sheets import GoogleSheetsDB
 from engines.programme_engine import ProgrammeEngine
 from engines.programme_hierarchy import (
+    CONTENT_TYPES,
+    activity_content_config,
     activity_details,
     build_programme_hierarchy,
     encode_activity_details,
@@ -914,6 +916,45 @@ def render_programme_first_builder(db):
                         value=details["EvidenceRequired"],
                         key=f"activity_evidence_{event_id}_{index}_{selected_position}",
                     )
+                    content_config = activity_content_config(
+                        selected_activity, module,
+                    )
+                    content_type = st.selectbox(
+                        "Content Type",
+                        list(CONTENT_TYPES),
+                        index=list(CONTENT_TYPES).index(
+                            content_config["ContentType"]
+                        ),
+                        key=f"content_type_{event_id}_{index}_{selected_position}",
+                    )
+                    if content_type == "Experience Board":
+                        content_options = db.get_experience_sets(event_id)
+                    elif content_type == "Sync AI":
+                        content_options = (
+                            [f"{event_id} Sync AI"]
+                            if db.get_mission(event_id, "S01") else []
+                        )
+                    elif content_type == "Catalyst":
+                        content_options = (
+                            [f"{event_id} Catalyst Challenge"]
+                            if db.get_mission(event_id, "C01") else []
+                        )
+                    else:
+                        content_options = []
+                    current_content = content_config["LinkedContent"]
+                    if current_content and current_content not in content_options:
+                        content_options.append(current_content)
+                    linked_options = ["None"] + content_options
+                    linked_content = st.selectbox(
+                        "Linked Content",
+                        linked_options,
+                        index=(
+                            linked_options.index(current_content)
+                            if current_content in linked_options else 0
+                        ),
+                        disabled=not content_options,
+                        key=f"linked_content_{event_id}_{index}_{selected_position}",
+                    )
                     participant_narrative = st.text_area(
                         "Participant Narrative",
                         value=details["ParticipantNarrative"],
@@ -981,6 +1022,10 @@ def render_programme_first_builder(db):
                             "ParticipantTask": participant_task,
                             "EvidenceRequirement": (
                                 evidence_requirement if activity_evidence else ""
+                            ),
+                            "ContentType": content_type,
+                            "LinkedContent": (
+                                linked_content if linked_content != "None" else ""
                             ),
                             "Questions": questions,
                             "Credits": int(credits),

@@ -19,9 +19,9 @@ from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 from engines.programme_hierarchy import (
+    activity_content_config,
     activity_details,
     current_module_activity,
-    experience_set_config,
     friendly_type,
 )
 from screens.mission_setup import cropped_reference_image, mission_module_name
@@ -1733,6 +1733,59 @@ def render_bayu_experience_board(db):
     )
 
 
+def render_sync_ai_participant(db, event_id, session_token):
+    """Open the existing event-owned Sync AI content from its programme link."""
+    missions = db.get_event_missions(event_id)
+    king = next((
+        mission for mission in missions
+        if str(mission.get("DisplayOrder", "")).strip() in {"18", "18.0"}
+        or "audience with the king" in str(mission.get("Title", "")).casefold()
+    ), {})
+    briefing = str(
+        king.get("Transmission", "")
+        or king.get("Narrative", "")
+        or king.get("Story", "")
+        or "The King awaits your expedition's intelligence briefing."
+    ).strip()
+    st.markdown("## Sync AI")
+    if not render_character_card(
+        str(king.get("CharacterSource", "") or "The King"),
+        str(king.get("CharacterPortraitURL", "") or ""),
+        briefing,
+        role="The King",
+    ):
+        st.markdown("### The King")
+        st.info(briefing)
+
+    if session_token:
+        try:
+            marketplace = get_runtime_database().get_team_wallet(session_token)
+            wallet = marketplace.get("Wallet", {}) or {}
+            st.metric(
+                "Approved Intelligence Credits",
+                _credit_number(wallet.get("EarnedCredits", wallet.get("Balance", 0))),
+            )
+        except RuntimeDatabaseError as error:
+            st.warning("Intelligence Credits are reconnecting.")
+            st.caption(str(error))
+
+    preparation = db.get_mission(event_id, "S01") or {}
+    instructions = str(
+        preparation.get("ParticipantInstructions", "")
+        or preparation.get("Description", "")
+        or preparation.get("Story", "")
+    ).strip()
+    st.markdown("### Performance Preparation")
+    if instructions:
+        st.write(instructions)
+    else:
+        st.write("Prepare your team performance using only approved resources.")
+    if session_token:
+        render_marketplace(session_token)
+    else:
+        st.info("Reconnect your participant session to open the marketplace.")
+
+
 def show_participant():
     db = GoogleSheetsDB()
     restore_session_from_query_params(db)
@@ -1872,18 +1925,30 @@ def show_participant():
         st.info(f"Current live stage: {current_stage_name}")
 
     stage_payload = live_runtime_state.get("Stage", {}) or {}
-    linked_config = {
-        "ModuleType": stage_payload.get("ModuleType", ""),
-        "LinkedExperienceSet": stage_payload.get("LinkedExperienceSet", ""),
-    }
-    if not linked_config["LinkedExperienceSet"] and hierarchy_module:
-        linked_config = experience_set_config(hierarchy_module)
+    linked_config = activity_content_config(
+        stage_payload or hierarchy_activity,
+        hierarchy_module,
+    )
+    if stage_payload.get("LinkedExperienceSet"):
+        linked_config = {
+            "ContentType": "Experience Board",
+            "LinkedContent": stage_payload.get("LinkedExperienceSet", ""),
+        }
     linked_experience_set = str(
-        linked_config.get("LinkedExperienceSet", "") or ""
+        linked_config.get("LinkedContent", "") or ""
     ).strip()
 
     if _is_bayu_event():
         stage_key = current_stage_name.casefold()
+        if linked_config["ContentType"] == "Sync AI":
+            st.session_state.pop("bayu_board_open", None)
+            render_sync_ai_participant(
+                db,
+                st.session_state["participant_event_id"],
+                st.session_state.get("participant_session_token", ""),
+            )
+            footer()
+            return
         if "bridge of trust" in stage_key:
             st.session_state.pop("bayu_board_open", None)
             render_programme_activity(
