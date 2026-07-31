@@ -115,6 +115,16 @@ def test_no_crop_metadata_uses_full_image_fallback():
     assert cropped_reference_image("original-reference", {}) is None
 
 
+def test_legacy_static_reference_can_be_loaded_for_crop_editor():
+    from screens.mission_setup import _reference_image_bytes
+
+    image_bytes = _reference_image_bytes(
+        "static/bayu_beach/experience-01-paris-fragment.jpg"
+    )
+
+    assert Image.open(io.BytesIO(image_bytes)).size[0] > 0
+
+
 def test_two_experiences_share_original_but_render_different_persisted_crops():
     source = Image.new("RGB", (200, 100), "#cc3300")
     source.paste("#0033cc", (100, 0, 200, 100))

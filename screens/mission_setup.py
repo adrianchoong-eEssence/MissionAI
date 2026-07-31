@@ -4,6 +4,7 @@ import io
 import json
 import re
 import urllib.request
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -142,6 +143,12 @@ def _reference_image_bytes(reference):
         return b""
     if preview_url.startswith("data:"):
         return base64.b64decode(preview_url.split(",", 1)[1])
+    if not preview_url.startswith(("http://", "https://")):
+        local_path = Path(preview_url.lstrip("/")).resolve()
+        workspace = Path(__file__).resolve().parents[1]
+        if workspace not in local_path.parents:
+            raise ValueError("Reference image path is outside the EXOS workspace.")
+        return local_path.read_bytes()
     with urllib.request.urlopen(preview_url, timeout=15) as response:
         return response.read()
 
