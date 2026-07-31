@@ -1765,15 +1765,33 @@ class GoogleSheetsDB:
     # Participants
     # -------------------------
 
-    def join_player_by_code(self, join_code, name):
+    def join_player_by_code(self, join_code, name, country=""):
         if self.runtime.is_configured:
-            return self.runtime.join_player(join_code, name)
+            event = self.get_event_by_join_code(join_code)
+            teams = self.get_teams(event.get("EventID", "")) if event else []
+            matching = [
+                team for team in teams
+                if str(team.get("Country", "")).strip().casefold()
+                == str(country or "").strip().casefold()
+            ]
+            if country and not matching:
+                raise ValueError("Select a country configured for this event.")
+            player = self.runtime.join_player(join_code, name)
+            if matching and self.runtime.can_publish:
+                self.runtime.assign_participant_country_team(
+                    player.get("SessionToken", ""),
+                    matching[0].get("TeamName", ""),
+                    country,
+                )
+                player["Team"] = matching[0].get("TeamName", "")
+                player["Country"] = country
+            return player
 
         event = self.get_event_by_join_code(join_code)
         if event is None:
             raise ValueError("Invalid Join Code")
 
-        player = self.join_player(event["EventID"], name)
+        player = self.join_player(event["EventID"], name, country=country)
         player["EventName"] = event.get("EventName", "EXOS Event")
         player["SessionToken"] = ""
         return player
@@ -1783,7 +1801,7 @@ class GoogleSheetsDB:
             return None
         return self.runtime.get_player_by_token(session_token)
 
-    def join_player(self, event_id, name):
+    def join_player(self, event_id, name, country=""):
         clean_name = str(name).strip()
 
         # Existing participant rejoins
@@ -1831,8 +1849,16 @@ class GoogleSheetsDB:
         if event_row is None:
             next_team_index = 0
 
+        matching = [
+            row for row in teams
+            if str(row.get("Country", "")).strip().casefold()
+            == str(country or "").strip().casefold()
+        ]
         # ---------- Assign Team ----------
-        team = teams[next_team_index % len(teams)]["TeamName"]
+        team = (
+            matching[0]["TeamName"] if country and matching
+            else teams[next_team_index % len(teams)]["TeamName"]
+        )
 
         # ---------- Update Pointer ----------
         new_index = (next_team_index + 1) % len(teams)
@@ -1865,7 +1891,24 @@ class GoogleSheetsDB:
             "Team": team,
             "Points": 0,
             "Status": "Waiting",
+            "Country": country,
         }
+
+    def get_team_roster(self, event_id, team_name):
+        if self.runtime.can_publish:
+            return self.runtime.get_team_roster(event_id, team_name)
+        return [
+            {"Name": row.get("Name", ""), "Team": row.get("Team", ""),
+             "Country": "", "IsLeader": False}
+            for row in get_sheet_records("Participants")
+            if str(row.get("EventID", "")) == str(event_id)
+            and str(row.get("Team", "")) == str(team_name)
+        ]
+
+    def claim_team_leader(self, session_token):
+        if not self.runtime.can_publish:
+            raise RuntimeDatabaseError("Team leader selection requires live runtime.")
+        return self.runtime.claim_team_leader(session_token)
 
     def get_players(self):
         sheet_players = get_sheet_records("Participants")

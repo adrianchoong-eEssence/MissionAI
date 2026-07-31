@@ -116,6 +116,25 @@ def calculate_leaderboard(submissions):
     return sorted(leaderboard.items(), key=lambda item: item[1], reverse=True)
 
 
+def approval_score(db, event_id, submission):
+    """Use authored Intelligence Credits for Bayu Beach approvals."""
+    if str(event_id) == "EVT-0004":
+        mission_id = str(submission.get("MissionID", ""))
+        mission = next(
+            (
+                row for row in db.get_event_missions(event_id)
+                if str(row.get("MissionID", "")) == mission_id
+            ),
+            {},
+        )
+        if mission:
+            return float(
+                mission.get("CreditValue", mission.get("Points", 0)) or 0
+            )
+    score, _ = calculate_score(submission)
+    return score
+
+
 def calculate_score(submission):
     submission_type = str(get_value(submission, "SubmissionType", "")).upper().strip()
     metric1 = get_value(submission, "Metric1", "")
@@ -327,7 +346,7 @@ def render_review_scoring_widget(db, event_id, show_all=False):
         key=f"control_approve_all_{event_id}_{mission_id}_{show_all}",
     ):
         for submission in pending:
-            score, _ = calculate_score(submission)
+            score = approval_score(db, event_id, submission)
             db.update_submission_score(
                 submission_id=submission.get("SubmissionID"),
                 score=round(score, 1),
@@ -1126,7 +1145,7 @@ def show_live_event_console():
         ):
             count = 0
             for submission in pending_current:
-                calculated_score, _ = calculate_score(submission)
+                calculated_score = approval_score(db, event_id, submission)
                 final_score = bulk_score if bulk_score is not None else calculated_score
                 updated = db.update_submission_score(
                     submission_id=submission.get("SubmissionID"),

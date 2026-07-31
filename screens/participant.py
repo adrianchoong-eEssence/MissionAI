@@ -36,6 +36,7 @@ SESSION_KEYS = [
     "participant_event_id",
     "participant_name",
     "participant_team",
+    "participant_country",
     "participant_points",
     "participant_event_name",
     "participant_session_token",
@@ -96,17 +97,6 @@ def watch_live_mission_state(session_token):
     st.session_state["participant_runtime_state"] = runtime_state
     st.session_state.pop("participant_runtime_error", None)
 
-    poll_count = int(
-        st.session_state.get("participant_runtime_poll_count", 0)
-    ) + 1
-    st.session_state["participant_runtime_poll_count"] = poll_count
-    stage_number = runtime_state.get("StageNo", 0)
-    event_id = runtime_state.get("EventID", "")
-    st.caption(
-        f"🟢 Live connection active · {event_id} · "
-        f"stage {stage_number} · check #{poll_count}"
-    )
-
     if previous_signature is not None and signature != previous_signature:
         st.rerun(scope="app")
 
@@ -137,6 +127,7 @@ def restore_session_from_query_params(db):
             )
             st.session_state["participant_name"] = runtime_player.get("Name", "")
             st.session_state["participant_team"] = team_name
+            st.session_state["participant_country"] = runtime_player.get("Country", "")
             st.session_state["participant_points"] = runtime_player.get("Points", 0)
             st.session_state["participant_event_name"] = runtime_player.get(
                 "EventName", "EXOS Event"
@@ -186,6 +177,7 @@ def restore_session_from_query_params(db):
     st.session_state["participant_event_id"] = event_id
     st.session_state["participant_name"] = participant_name
     st.session_state["participant_team"] = team_name
+    st.session_state["participant_country"] = ""
     st.session_state["participant_points"] = player.get("Points", 0)
     st.session_state["participant_event_name"] = event.get(
         "EventName",
@@ -198,13 +190,18 @@ def restore_session_from_query_params(db):
 
 
 def persist_session_in_query_params():
-    st.query_params["event_id"] = st.session_state["participant_event_id"]
-    st.query_params["participant_name"] = st.session_state["participant_name"]
-    st.query_params["participant_team"] = st.session_state["participant_team"]
-    st.query_params["event_name"] = st.session_state["participant_event_name"]
+    desired = {
+        "event_id": st.session_state["participant_event_id"],
+        "participant_name": st.session_state["participant_name"],
+        "participant_team": st.session_state["participant_team"],
+        "event_name": st.session_state["participant_event_name"],
+    }
     session_token = st.session_state.get("participant_session_token", "")
     if session_token:
-        st.query_params["session_token"] = session_token
+        desired["session_token"] = session_token
+    for key, value in desired.items():
+        if str(st.query_params.get(key, "")) != str(value):
+            st.query_params[key] = value
 
 
 def normalise_submission_type(mission):
@@ -245,12 +242,25 @@ def normalise_submission_type(mission):
     return raw_type or "PHOTO"
 
 
-def render_team_assignment_card():
+def render_team_assignment_card(db):
     team = st.session_state.get("participant_team", "")
+    country = st.session_state.get("participant_country", "")
     instruction = COUNTRY_LANGUAGE_PROMPTS.get(
-        team,
+        country or team,
         "Find your team members and gather together.",
     )
+    try:
+        roster = db.get_team_roster(
+            st.session_state.get("participant_event_id", ""), team,
+        )
+    except RuntimeDatabaseError:
+        roster = []
+    leader = next((row for row in roster if row.get("IsLeader")), None)
+    own_name = st.session_state.get("participant_name", "")
+    own_record = next(
+        (row for row in roster if row.get("Name") == own_name), {},
+    )
+    st.session_state["participant_is_leader"] = bool(own_record.get("IsLeader"))
 
     st.markdown(
         f"""
@@ -264,11 +274,29 @@ def render_team_assignment_card():
         ">
             <div style="font-size:18px;opacity:.8;">Your Team</div>
             <div style="font-size:46px;font-weight:900;margin-top:8px;">{team}</div>
+            <div style="font-size:20px;margin-top:6px;">{country or 'Country team'}</div>
             <div style="font-size:18px;margin-top:12px;opacity:.9;">{instruction}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    if roster:
+        st.markdown("#### Team Members")
+        for member in roster:
+            icon = "⭐" if member.get("IsLeader") else "•"
+            st.write(f"{icon} {member.get('Name', '')}")
+    if leader:
+        st.success(f"Team Leader: {leader.get('Name', '')}")
+    elif st.session_state.get("participant_session_token"):
+        if st.button("Become Team Leader", width="stretch"):
+            result = db.claim_team_leader(
+                st.session_state["participant_session_token"]
+            )
+            if result.get("Claimed"):
+                st.success("You are now the Team Leader.")
+            else:
+                st.info(f"{result.get('LeaderName', 'A teammate')} is already Team Leader.")
+            st.rerun()
 
 
 def find_existing_submission(db, mission, submission_type):
@@ -294,7 +322,13 @@ def find_existing_submission(db, mission, submission_type):
 
 
 def render_existing_submission(existing_submission):
-    st.success("✅ Submission received.")
+    status = str(existing_submission.get("Status", "PENDING")).strip().upper()
+    if status == "APPROVED":
+        st.success("✅ Evidence approved.")
+    elif status == "REJECTED":
+        st.error("Evidence rejected.")
+    else:
+        st.info("Evidence uploaded · Pending Review")
 
     submitted_at = existing_submission.get("SubmittedAt", "")
     if submitted_at:
@@ -849,8 +883,12 @@ def render_mission_content(mission):
             st.caption(evidence_instructions)
 
 
-def render_ai_response_after_submission(mission):
+def render_ai_response_after_submission(mission, submission=None):
     """Show the authored character response only after evidence is submitted."""
+    if submission is not None and str(
+        submission.get("Status", "PENDING")
+    ).strip().upper() != "APPROVED":
+        return False
     response = str(
         (mission or {}).get("MissionCompleteMessage", "") or ""
     ).strip()
@@ -995,7 +1033,16 @@ def mission_ai_help_enabled(mission):
     return value not in {"NO", "FALSE", "0", "OFF"}
 
 
-def render_character_card(character_name, portrait_reference, message=""):
+CHARACTER_ROLES = {
+    "EVA": "Expedition Virtual Assistant",
+    "Headquarters": "Command Centre",
+    "Captain Amelia Ross": "Expedition Alpha",
+    "Dr Marcus Hale": "Expedition Bravo",
+    "Unknown Transmission": "Unidentified Signal",
+}
+
+
+def render_character_card(character_name, portrait_reference, message="", role=""):
     """Render a portrait-led hologram card, or return False for text fallback."""
     portrait_url = get_mission_media_url(portrait_reference)
     if not portrait_url:
@@ -1003,6 +1050,7 @@ def render_character_card(character_name, portrait_reference, message=""):
     safe_name = html.escape(str(character_name or "AI Companion"))
     safe_url = html.escape(str(portrait_url), quote=True)
     safe_message = html.escape(str(message or "")).replace("\n", "<br>")
+    safe_role = html.escape(str(role or CHARACTER_ROLES.get(character_name, "")))
     message_html = (
         f'<div class="exos-character-message">{safe_message}</div>'
         if safe_message
@@ -1032,7 +1080,8 @@ def render_character_card(character_name, portrait_reference, message=""):
         <div class="exos-character-card">
           <div class="exos-character-layout">
             <img class="exos-character-portrait" src="{safe_url}" alt="{safe_name}">
-            <div><div class="exos-character-name">{safe_name}</div>{message_html}</div>
+            <div><div class="exos-character-name">{safe_name}</div>
+            <div class="exos-character-status">{safe_role}</div>{message_html}</div>
           </div>
         </div>
         """,
@@ -1431,6 +1480,171 @@ def render_road_hunt_navigator(session_token):
             st.caption(f"{len(arrivals)} route stop(s) reached.")
 
 
+BRIDGE_OF_TRUST_TRANSMISSION = """The entrance to The Labyrinth has been sealed.
+
+Your expedition must cross the bridge together.
+
+The first member must carry the secured line across and fasten it at the far side.
+
+Each member then crosses safely.
+
+The final member must release the line and bring it across.
+
+No expedition member may be left behind."""
+
+EVA_LABYRINTH_BRIEFING = """Commander...
+
+Access to The Labyrinth has been granted.
+
+Seventeen intelligence signals are now active across the island.
+
+Your expedition may complete them in any order.
+
+Every verified discovery earns Intelligence Credits.
+
+Collect as many Intelligence Credits as possible before 12:30 PM.
+
+Your Intelligence Credits will determine the resources available to your team during the afternoon operation.
+
+The Labyrinth is now open."""
+
+
+def _is_bayu_event():
+    return str(st.session_state.get("participant_event_id", "")) == "EVT-0004"
+
+
+def render_bridge_of_trust():
+    st.markdown("## Bridge of Trust")
+    st.markdown("#### Transmission")
+    st.info(BRIDGE_OF_TRUST_TRANSMISSION)
+    st.markdown("#### Task")
+    st.success("Cross the Bridge of Trust as one complete expedition team.")
+    st.markdown("#### Evidence")
+    st.write("**Facilitator verification.**")
+
+
+def render_mission_ai_briefing(db):
+    portrait = db.get_character_portrait("EVA")
+    st.markdown("## Mission AI Briefing")
+    if not render_character_card(
+        "EVA", portrait, EVA_LABYRINTH_BRIEFING,
+        role="Expedition Virtual Assistant",
+    ):
+        st.markdown("### EVA")
+        st.caption("Expedition Virtual Assistant")
+        st.info(EVA_LABYRINTH_BRIEFING)
+    if st.button("ENTER THE LABYRINTH", type="primary", width="stretch"):
+        st.session_state["bayu_board_open"] = True
+        st.rerun()
+
+
+def bayu_morning_experiences(db):
+    missions = db.get_event_missions("EVT-0004")
+    morning = []
+    for mission in missions:
+        mission_id = str(mission.get("MissionID", "")).strip().upper()
+        title = str(mission.get("Title", "")).strip()
+        try:
+            order = int(float(mission.get("DisplayOrder", 999) or 999))
+        except (TypeError, ValueError):
+            order = 999
+        if order == 18 or mission_id.endswith("18") or "KING" in title.upper():
+            continue
+        morning.append(mission)
+    return morning[:17]
+
+
+def _bayu_submission_status(submission):
+    if not submission:
+        return "Available"
+    status = str(submission.get("Status", "PENDING")).strip().upper()
+    if status == "APPROVED":
+        return "Approved"
+    if status == "REJECTED":
+        return "Rejected"
+    return "Submitted"
+
+
+def render_bayu_experience_board(db):
+    missions = bayu_morning_experiences(db)
+    team = st.session_state.get("participant_team", "")
+    submissions = {
+        str(row.get("MissionID", "")): row
+        for row in db.get_event_submissions("EVT-0004")
+        if str(row.get("TeamName", "")) == str(team)
+    }
+    selected_id = st.session_state.get("bayu_selected_experience", "")
+    if selected_id:
+        selected = next(
+            (row for row in missions if str(row.get("MissionID", "")) == selected_id),
+            None,
+        )
+        if selected:
+            if st.button("← Back to 17 Experiences"):
+                st.session_state.pop("bayu_selected_experience", None)
+                st.rerun()
+            st.markdown(f"## {selected.get('Title', 'Experience')}")
+            render_mission_content(selected)
+            credits = selected.get("CreditValue", selected.get("Points", 0))
+            st.metric("Intelligence Credits", _credit_number(credits))
+            existing = submissions.get(str(selected.get("MissionID", "")))
+            if existing:
+                status = _bayu_submission_status(existing)
+                if status == "Submitted":
+                    st.info("Evidence uploaded · Pending Review")
+                    st_autorefresh(
+                        interval=5000,
+                        key=f"bayu_pending_review_{selected.get('MissionID', '')}",
+                    )
+                elif status == "Approved":
+                    st.success(f"Approved · +{_credit_number(credits)} Intelligence Credits")
+                    render_ai_response_after_submission(selected, existing)
+                else:
+                    st.error("Evidence rejected. Your Team Leader may resubmit when enabled.")
+                return
+            if not st.session_state.get("participant_is_leader"):
+                st.info("Your Team Leader submits evidence for the team.")
+                return
+            render_submission_form(db, selected, normalise_submission_type(selected))
+            return
+
+    st.markdown("## The Labyrinth")
+    st.caption("Choose any available Experience. Experience 18 remains locked.")
+    if st.button("Check for Experience updates", width="stretch"):
+        st.rerun()
+    columns = st.columns(2)
+    for index, mission in enumerate(missions):
+        mission_id = str(mission.get("MissionID", ""))
+        status = _bayu_submission_status(submissions.get(mission_id))
+        with columns[index % 2]:
+            with st.container(border=True):
+                reference = str(mission.get("ReferenceImageURL", "") or "")
+                try:
+                    clue = cropped_reference_image(reference, mission)
+                    preview = clue or get_mission_media_url(reference)
+                    if preview:
+                        st.image(preview, width="stretch")
+                except Exception:
+                    pass
+                portrait = get_mission_media_url(
+                    mission.get("CharacterPortraitURL", "")
+                )
+                if portrait:
+                    st.image(portrait, width=110)
+                st.markdown(f"### {mission.get('Title', mission_id)}")
+                st.caption(
+                    f"{str(mission.get('MissionType', 'Observe')).title()} · "
+                    f"{_credit_number(mission.get('CreditValue', mission.get('Points', 0)))} Intelligence Credits"
+                )
+                st.write(f"**{status}**")
+                if st.button(
+                    "Open Experience", key=f"bayu_open_{mission_id}",
+                    width="stretch",
+                ):
+                    st.session_state["bayu_selected_experience"] = mission_id
+                    st.rerun()
+
+
 def show_participant():
     db = GoogleSheetsDB()
     restore_session_from_query_params(db)
@@ -1444,6 +1658,19 @@ def show_participant():
         join_code = st.text_input("Join Code").upper().strip()
         first_name = st.text_input("First / Given Name")
         last_name = st.text_input("Last / Family Name")
+        join_event = db.get_event_by_join_code(join_code) if join_code else None
+        country_options = []
+        if join_event:
+            country_options = list(dict.fromkeys(
+                str(team.get("Country", "")).strip()
+                for team in db.get_teams(join_event.get("EventID", ""))
+                if str(team.get("Country", "")).strip()
+            ))
+        country = st.selectbox(
+            "Country",
+            country_options or ["Enter a valid Join Code first"],
+            disabled=not country_options,
+        )
 
         if st.button("🚀 Join Event", width="stretch"):
             if not join_code:
@@ -1455,6 +1682,9 @@ def show_participant():
             if not last_name.strip():
                 st.warning("Enter your last / family name")
                 st.stop()
+            if not country_options:
+                st.warning("Enter a valid Join Code and select your country.")
+                st.stop()
 
             participant_name = " ".join([
                 first_name.strip(),
@@ -1465,6 +1695,7 @@ def show_participant():
                 player = db.join_player_by_code(
                     join_code,
                     participant_name.strip(),
+                    country=country,
                 )
             except RuntimeDatabaseError as error:
                 st.error(
@@ -1486,6 +1717,7 @@ def show_participant():
             st.session_state["participant_event_id"] = player["EventID"]
             st.session_state["participant_name"] = player["Name"]
             st.session_state["participant_team"] = player["Team"]
+            st.session_state["participant_country"] = player.get("Country", country)
             st.session_state["participant_points"] = player.get("Points", 0)
             st.session_state["participant_event_name"] = player.get(
                 "EventName", "EXOS Event"
@@ -1509,7 +1741,7 @@ def show_participant():
     )
     st.success(f"Welcome {st.session_state['participant_name']}")
     st.caption(st.session_state["participant_event_name"])
-    render_team_assignment_card()
+    render_team_assignment_card(db)
     participant_install_experience()
     st.divider()
 
@@ -1543,12 +1775,32 @@ def show_participant():
         )
     except Exception:
         hierarchy_module, hierarchy_activity = {}, {}
-    if hierarchy_module:
-        st.caption(
-            f"Current Module: {hierarchy_module.get('ModuleName', '')}  ·  "
-            f"Current Activity: {hierarchy_activity.get('StageName', '')}  ·  "
-            f"{friendly_type(hierarchy_activity)}"
-        )
+    current_stage_name = str(
+        live_runtime_state.get("StageName", "")
+        or (live_runtime_state.get("Stage", {}) or {}).get("StageName", "")
+        or hierarchy_activity.get("StageName", "")
+    ).strip()
+    if current_stage_name:
+        st.info(f"Current live stage: {current_stage_name}")
+
+    if _is_bayu_event():
+        stage_key = current_stage_name.casefold()
+        if "bridge of trust" in stage_key:
+            st.session_state.pop("bayu_board_open", None)
+            render_bridge_of_trust()
+            footer()
+            return
+        if (
+            "mission ai" in stage_key
+            or "mission board" in stage_key
+            or "labyrinth" in stage_key
+        ):
+            if "brief" in stage_key and not st.session_state.get("bayu_board_open"):
+                render_mission_ai_briefing(db)
+            else:
+                render_bayu_experience_board(db)
+            footer()
+            return
 
     if road_hunt_active:
         mission = road_hunt_mission
@@ -1636,7 +1888,7 @@ def show_participant():
         st.divider()
         if existing_submission:
             render_existing_submission(existing_submission)
-            render_ai_response_after_submission(mission)
+            render_ai_response_after_submission(mission, existing_submission)
             if not runtime_session:
                 st_autorefresh(interval=5000, key="submitted_mission_refresh")
         else:
@@ -1655,7 +1907,10 @@ def show_participant():
             ):
                 st.rerun()
 
-            render_submission_form(db, mission, submission_type)
+            if _is_bayu_event() and not st.session_state.get("participant_is_leader"):
+                st.info("Your Team Leader submits evidence for the team.")
+            else:
+                render_submission_form(db, mission, submission_type)
 
     render_ai_facilitator(db, mission, runtime_session)
 

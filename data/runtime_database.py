@@ -519,6 +519,16 @@ class SupabaseRuntimeDB:
         )
         return self._normalise_result(result) or {}
 
+    @staticmethod
+    def _participant_status(country="", leader=False):
+        value = f"COUNTRY:{str(country or '').strip()}"
+        return value + ("|LEADER" if leader else "")
+
+    @staticmethod
+    def _participant_country(status):
+        value = str(status or "")
+        return value.split("COUNTRY:", 1)[1].split("|", 1)[0] if "COUNTRY:" in value else ""
+
     def join_player(self, join_code, participant_name):
         result = self._request(
             "POST",
@@ -533,6 +543,55 @@ class SupabaseRuntimeDB:
             raise RuntimeDatabaseError("Registration returned no participant record.")
         return row
 
+    def assign_participant_country_team(self, session_token, team_name, country):
+        result = self._request(
+            "PATCH", "runtime_participants",
+            payload={
+                "team_name": str(team_name).strip(),
+                "status": self._participant_status(country),
+            },
+            query={"session_token": f"eq.{str(session_token).strip()}"},
+            admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def get_team_roster(self, event_id, team_name):
+        rows = self._request(
+            "GET", "runtime_participants",
+            query={
+                "event_id": f"eq.{str(event_id).strip()}",
+                "team_name": f"eq.{str(team_name).strip()}",
+                "select": "participant_id,display_name,team_name,status,session_token",
+                "order": "joined_at.asc",
+            },
+            admin=True,
+        ) or []
+        return [{
+            "ParticipantID": row.get("participant_id", ""),
+            "Name": row.get("display_name", ""),
+            "Team": row.get("team_name", ""),
+            "Country": self._participant_country(row.get("status", "")),
+            "IsLeader": "|LEADER" in str(row.get("status", "")),
+            "SessionToken": row.get("session_token", ""),
+        } for row in rows]
+
+    def claim_team_leader(self, session_token):
+        player = self.get_player_by_token(session_token)
+        if not player:
+            raise RuntimeDatabaseError("Participant session was not found.")
+        roster = self.get_team_roster(player["EventID"], player["Team"])
+        existing = next((row for row in roster if row["IsLeader"]), None)
+        if existing:
+            return {"Claimed": False, "LeaderName": existing["Name"]}
+        country = self._participant_country(player.get("Status", ""))
+        self._request(
+            "PATCH", "runtime_participants",
+            payload={"status": self._participant_status(country, leader=True)},
+            query={"session_token": f"eq.{str(session_token).strip()}"},
+            admin=True,
+        )
+        return {"Claimed": True, "LeaderName": player.get("Name", "")}
+
     def get_player_by_token(self, session_token):
         if not self.is_configured or not str(session_token).strip():
             return None
@@ -541,7 +600,11 @@ class SupabaseRuntimeDB:
             "rpc/exos_restore_participant",
             payload={"p_session_token": str(session_token).strip()},
         )
-        return self._normalise_result(result)
+        player = self._normalise_result(result)
+        if player:
+            player["Country"] = self._participant_country(player.get("Status", ""))
+            player["IsLeader"] = "|LEADER" in str(player.get("Status", ""))
+        return player
 
     def get_event_by_join_code(self, join_code):
         if not self.is_configured:
@@ -581,6 +644,8 @@ class SupabaseRuntimeDB:
                 "Team": row.get("team_name", ""),
                 "Points": row.get("points", 0),
                 "Status": row.get("status", "Waiting"),
+                "Country": self._participant_country(row.get("status", "")),
+                "IsLeader": "|LEADER" in str(row.get("status", "")),
                 "JoinedAt": row.get("joined_at", ""),
                 "SessionToken": row.get("session_token", ""),
             }
