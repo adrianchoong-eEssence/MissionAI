@@ -10,7 +10,15 @@ from screens.create_event import show_create_event
 from screens.events_home import show_events_home
 from screens.leaderboard_display import show_leaderboard_display
 from screens.mission_setup import show_mission_setup
+from screens.participant import show_participant
 from screens.programme_builder import show_programme_builder
+
+
+if str(st.query_params.get("view", "")).strip().casefold() == "participant":
+    configure_page(layout="centered")
+    apply_branding(participant_pwa=True)
+    show_participant()
+    st.stop()
 
 
 configure_page(layout="wide", initial_sidebar_state="expanded")

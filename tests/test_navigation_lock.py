@@ -27,3 +27,12 @@ def test_participant_and_facilitator_do_not_force_admin_navigation():
 
     assert "lock_sidebar=True" not in participant
     assert "lock_sidebar=True" not in facilitator
+
+
+def test_production_entrypoint_exposes_canonical_participant_route():
+    source = (ROOT / "MissionAI.py").read_text()
+
+    assert 'st.query_params.get("view", "")' in source
+    assert '== "participant"' in source
+    assert "show_participant()" in source
+    assert "participant_pwa=True" in source
