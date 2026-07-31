@@ -682,6 +682,32 @@ def render_programme_first_builder(db):
                     value=str(first_activity.get("IsActive", "Yes")).casefold() != "no",
                     key=f"module_active_{event_id}_{index}",
                 )
+                module_type = st.selectbox(
+                    "Module Type",
+                    ["Standard", "Experience Set"],
+                    index=(
+                        1 if str(module_details.get("ModuleType", "")).casefold()
+                        == "experience set" else 0
+                    ),
+                    key=f"module_type_{event_id}_{index}",
+                )
+                experience_sets = db.get_experience_sets(event_id)
+                linked_options = ["None"] + experience_sets
+                current_link = str(
+                    module_details.get("LinkedExperienceSet", "") or "None"
+                )
+                if current_link not in linked_options:
+                    linked_options.append(current_link)
+                linked_experience_set = st.selectbox(
+                    "Linked Experience Set",
+                    linked_options,
+                    index=linked_options.index(current_link),
+                    disabled=module_type != "Experience Set",
+                    format_func=lambda value: (
+                        value.replace("Operation: ", "") if value != "None" else value
+                    ),
+                    key=f"module_experience_set_{event_id}_{index}",
+                )
                 module_participant = st.text_area(
                     "Participant instructions",
                     value=str(module_details.get(
@@ -718,6 +744,9 @@ def render_programme_first_builder(db):
                 )
                 save_module_col, cancel_module_col = st.columns([3, 1])
                 if save_module_col.button("Save Module", type="primary", key=f"mod_save_{event_id}_{index}"):
+                    if module_type == "Experience Set" and linked_experience_set == "None":
+                        st.error("Select the Experience Set this module launches.")
+                        st.stop()
                     module["ModuleName"] = edited_name.strip() or "Untitled Module"
                     module["Day"] = int(edited_day)
                     remaining_minutes = sum(
@@ -744,6 +773,11 @@ def render_programme_first_builder(db):
                             "Objectives": module_objectives,
                             "Credits": int(module_credits),
                             "Scoring": module_scoring,
+                            "ModuleType": module_type,
+                            "LinkedExperienceSet": (
+                                linked_experience_set
+                                if module_type == "Experience Set" else ""
+                            ),
                         },
                     })
                     _save_modules(db, event_id, modules)

@@ -8,6 +8,8 @@ from engines.stage_timer import remaining_seconds
 from engines.programme_hierarchy import (
     build_programme_hierarchy,
     current_module_activity,
+    experience_set_config,
+    experience_set_stage,
     friendly_type,
 )
 from screens.app_state import select_active_event
@@ -66,6 +68,24 @@ def _set_stage(db, event_id, stage, status="READY"):
     if warning:
         st.warning(warning)
     st.rerun()
+
+
+def _start_programme_activity(db, event_id, stage, module):
+    """Activate a linked Experience Set before broadcasting its stage."""
+    config = experience_set_config(module)
+    live_stage = dict(stage)
+    if (
+        config["ModuleType"].casefold() == "experience set"
+        and config["LinkedExperienceSet"]
+    ):
+        result = db.activate_experience_set(
+            event_id, config["LinkedExperienceSet"],
+        )
+        live_stage = experience_set_stage(
+            stage, module, result["ExperiencesPublished"],
+        )
+    db.set_event_stage(event_id, live_stage)
+    return live_stage
 
 
 def _render_timer(db, event_id, stage):
@@ -280,7 +300,7 @@ def show_control_centre():
         type="primary",
         width="stretch",
     ):
-        db.set_event_stage(event_id, stage)
+        _start_programme_activity(db, event_id, stage, current_module)
         db.update_stage_timer(
             event_id,
             stage.get("StageNo", ""),

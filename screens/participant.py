@@ -18,8 +18,12 @@ from data.google_drive import get_photo_url, upload_photo
 from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
-from engines.programme_hierarchy import current_module_activity, friendly_type
-from screens.mission_setup import cropped_reference_image
+from engines.programme_hierarchy import (
+    current_module_activity,
+    experience_set_config,
+    friendly_type,
+)
+from screens.mission_setup import cropped_reference_image, mission_module_name
 
 
 COUNTRY_LANGUAGE_PROMPTS = {
@@ -1579,6 +1583,49 @@ def bayu_morning_experiences(db):
     return morning[:17]
 
 
+def active_experience_set_missions(db, event_id, experience_set):
+    if str(event_id) == "EVT-0004" and "labyrinth" in str(experience_set).casefold():
+        source = bayu_morning_experiences(db)
+    else:
+        source = db.get_event_missions(event_id)
+    hidden = {"INACTIVE", "CLOSED", "ARCHIVED"}
+    return [
+        mission for mission in source
+        if mission_module_name(mission).casefold()
+        == str(experience_set or "").strip().casefold()
+        and str(mission.get("Status", "ACTIVE") or "ACTIVE").strip().upper()
+        not in hidden
+    ]
+
+
+def experience_set_label(value):
+    return str(value or "Experience Set").replace("Operation: ", "").strip()
+
+
+def render_experience_set_entry(db, event_id, experience_set, state_version=""):
+    label = experience_set_label(experience_set)
+    state_key = (
+        f"experience_set_entered_{event_id}_"
+        f"{label.casefold().replace(' ', '_')}_{state_version}"
+    )
+    if st.session_state.get(state_key):
+        return True
+    st.markdown(f"## {label}")
+    portrait = bayu_ai_portrait_reference(db)
+    message = f"{label} is now active. Choose Experiences in any order."
+    if not render_character_card("EVA", portrait, message, role="Expedition AI Companion"):
+        st.info(message)
+    if st.button(
+        f"ENTER {label.upper()}",
+        type="primary",
+        width="stretch",
+        key=f"enter_experience_set_{event_id}_{label}",
+    ):
+        st.session_state[state_key] = True
+        st.rerun()
+    return False
+
+
 def _bayu_submission_status(submission):
     if not submission:
         return "Available"
@@ -1590,12 +1637,12 @@ def _bayu_submission_status(submission):
     return "Submitted"
 
 
-def render_bayu_experience_board(db):
-    missions = bayu_morning_experiences(db)
+def render_experience_set_board(db, event_id, experience_set):
+    missions = active_experience_set_missions(db, event_id, experience_set)
     team = st.session_state.get("participant_team", "")
     submissions = {
         str(row.get("MissionID", "")): row
-        for row in db.get_event_submissions("EVT-0004")
+        for row in db.get_event_submissions(event_id)
         if str(row.get("TeamName", "")) == str(team)
     }
     selected_id = st.session_state.get("bayu_selected_experience", "")
@@ -1605,7 +1652,7 @@ def render_bayu_experience_board(db):
             None,
         )
         if selected:
-            if st.button("← Back to 17 Experiences"):
+            if st.button(f"← Back to {len(missions)} Experiences"):
                 st.session_state.pop("bayu_selected_experience", None)
                 st.rerun()
             st.markdown(f"## {selected.get('Title', 'Experience')}")
@@ -1637,8 +1684,12 @@ def render_bayu_experience_board(db):
             render_submission_form(db, selected, normalise_submission_type(selected))
             return
 
-    st.markdown("## The Labyrinth")
-    st.caption("Choose any available Experience. Experience 18 remains locked.")
+    label = experience_set_label(experience_set)
+    st.markdown(f"## {label}")
+    if str(event_id) == "EVT-0004" and "labyrinth" in label.casefold():
+        st.caption("Choose any available Experience. Experience 18 remains locked.")
+    else:
+        st.caption("Choose any available Experience in this set.")
     if st.button("Check for Experience updates", width="stretch"):
         st.rerun()
     columns = st.columns(2)
@@ -1672,6 +1723,12 @@ def render_bayu_experience_board(db):
                 ):
                     st.session_state["bayu_selected_experience"] = mission_id
                     st.rerun()
+
+
+def render_bayu_experience_board(db):
+    render_experience_set_board(
+        db, "EVT-0004", "Operation: The Labyrinth",
+    )
 
 
 def show_participant():
@@ -1812,11 +1869,36 @@ def show_participant():
     if current_stage_name:
         st.info(f"Current live stage: {current_stage_name}")
 
+    stage_payload = live_runtime_state.get("Stage", {}) or {}
+    linked_config = {
+        "ModuleType": stage_payload.get("ModuleType", ""),
+        "LinkedExperienceSet": stage_payload.get("LinkedExperienceSet", ""),
+    }
+    if not linked_config["LinkedExperienceSet"] and hierarchy_module:
+        linked_config = experience_set_config(hierarchy_module)
+    linked_experience_set = str(
+        linked_config.get("LinkedExperienceSet", "") or ""
+    ).strip()
+
     if _is_bayu_event():
         stage_key = current_stage_name.casefold()
         if "bridge of trust" in stage_key:
             st.session_state.pop("bayu_board_open", None)
             render_bridge_of_trust()
+            footer()
+            return
+        if linked_experience_set:
+            if (
+                "labyrinth" in linked_experience_set.casefold()
+                and not st.session_state.get("bayu_board_open")
+            ):
+                render_mission_ai_briefing(db)
+            else:
+                render_experience_set_board(
+                    db,
+                    st.session_state["participant_event_id"],
+                    linked_experience_set,
+                )
             footer()
             return
         if (
@@ -1830,6 +1912,18 @@ def show_participant():
                 render_bayu_experience_board(db)
             footer()
             return
+
+    if linked_experience_set:
+        event_id = st.session_state["participant_event_id"]
+        if render_experience_set_entry(
+            db,
+            event_id,
+            linked_experience_set,
+            live_runtime_state.get("StateVersion", ""),
+        ):
+            render_experience_set_board(db, event_id, linked_experience_set)
+        footer()
+        return
 
     if road_hunt_active:
         mission = road_hunt_mission

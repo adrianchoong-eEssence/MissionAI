@@ -192,3 +192,30 @@ def current_module_activity(stages, current_stage_no):
             if str(activity.get("StageNo", "")) == str(current_stage_no):
                 return module, activity
     return (modules[0], modules[0]["Activities"][0]) if modules else ({}, {})
+
+
+def experience_set_config(module):
+    """Read an Experience Set link from a module's stable metadata envelope."""
+    activities = list((module or {}).get("Activities", []) or [])
+    if not activities:
+        return {"ModuleType": "Standard", "LinkedExperienceSet": ""}
+    details = activity_details(activities[0]).get("ModuleDetails", {})
+    module_type = str(details.get("ModuleType", "Standard") or "Standard").strip()
+    linked = str(details.get("LinkedExperienceSet", "") or "").strip()
+    return {
+        "ModuleType": module_type,
+        "LinkedExperienceSet": linked,
+    }
+
+
+def experience_set_stage(stage, module, experience_count=0):
+    """Enrich a live stage without changing the ProgrammeStages schema."""
+    config = experience_set_config(module)
+    payload = deepcopy(stage or {})
+    if config["ModuleType"].casefold() == "experience set" and config["LinkedExperienceSet"]:
+        payload.update({
+            "ModuleType": "Experience Set",
+            "LinkedExperienceSet": config["LinkedExperienceSet"],
+            "ExperienceCount": int(experience_count or 0),
+        })
+    return payload

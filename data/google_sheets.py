@@ -2296,6 +2296,49 @@ class GoogleSheetsDB:
             ),
         )
 
+    def get_experience_sets(self, event_id):
+        """Return event-owned Experience Studio collection names."""
+        values = []
+        for mission in self.get_event_missions(event_id):
+            name = str(mission.get("Module", "") or "").strip()
+            if name and name not in values:
+                values.append(name)
+        return values
+
+    def get_experience_set_missions(self, event_id, experience_set, active_only=True):
+        wanted = str(experience_set or "").strip().casefold()
+        missions = [
+            mission for mission in self.get_event_missions(event_id)
+            if str(mission.get("Module", "") or "").strip().casefold() == wanted
+        ]
+        if active_only:
+            hidden = {"INACTIVE", "CLOSED", "ARCHIVED"}
+            missions = [
+                mission for mission in missions
+                if str(mission.get("Status", "ACTIVE") or "ACTIVE").strip().upper()
+                not in hidden
+            ]
+        return missions
+
+    def activate_experience_set(self, event_id, experience_set):
+        """Publish one linked collection without changing participant progress."""
+        missions = self.get_experience_set_missions(
+            event_id, experience_set, active_only=True,
+        )
+        if not missions:
+            raise ValueError(
+                f"No active Experiences were found in {experience_set}."
+            )
+        runtime_result = {}
+        if self.runtime.can_publish:
+            runtime_result = self.runtime.publish_programme(event_id, missions)
+        return {
+            "EventID": str(event_id),
+            "ExperienceSet": str(experience_set),
+            "ExperiencesPublished": len(missions),
+            "RuntimePublished": bool(runtime_result),
+        }
+
     def get_character_portrait(self, character_source):
         wanted = str(character_source or "").strip().casefold()
         if not wanted or wanted == "none":
