@@ -214,7 +214,7 @@ def test_replacing_legacy_asset_reference_relinks_existing_experiences():
     }]
 
 
-def test_experience_studio_uses_asset_selectors_not_repeat_uploads():
+def test_experience_studio_uses_visual_reference_image_editor():
     source = (
         Path(__file__).resolve().parents[1]
         / "screens"
@@ -222,5 +222,10 @@ def test_experience_studio_uses_asset_selectors_not_repeat_uploads():
     ).read_text(encoding="utf-8")
 
     assert '"Select Character"' in source
-    assert '"Select Mission Image"' in source
+    assert '"Select Mission Image"' not in source
+    assert '"Choose Image"' in source
+    assert '"Upload New Image"' in source
+    assert '"Replace Image"' in source
+    assert '"Crop Image"' in source
+    assert '"Remove Image"' in source
     assert "Character Portrait Upload" not in source

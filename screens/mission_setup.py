@@ -2,9 +2,11 @@ import base64
 import html
 import io
 import re
+import urllib.request
 
 import pandas as pd
 import streamlit as st
+from PIL import Image
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
 from data.mission_media import (
@@ -41,6 +43,230 @@ def reference_image_preview_source(reference, uploaded_file=None):
         encoded = base64.b64encode(uploaded_file.getvalue()).decode("ascii")
         return f"data:{content_type};base64,{encoded}"
     return get_mission_media_url(reference)
+
+
+class _ImageUpload:
+    """Small UploadedFile-compatible wrapper for generated image bytes."""
+
+    def __init__(self, image_bytes, name="reference-image.png"):
+        self._image_bytes = image_bytes
+        self.name = name
+        self.type = "image/png"
+
+    def getvalue(self):
+        return self._image_bytes
+
+
+def crop_reference_image(image_bytes, crop_box):
+    """Crop an image using a validated pixel box and return browser-safe PNG."""
+    image = Image.open(io.BytesIO(image_bytes))
+    image.load()
+    left, top, right, bottom = (int(value) for value in crop_box)
+    left = max(0, min(left, image.width - 1))
+    top = max(0, min(top, image.height - 1))
+    right = max(left + 1, min(right, image.width))
+    bottom = max(top + 1, min(bottom, image.height))
+    cropped = image.crop((left, top, right, bottom))
+    if cropped.mode not in {"RGB", "RGBA"}:
+        cropped = cropped.convert("RGB")
+    output = io.BytesIO()
+    cropped.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _reference_image_bytes(reference):
+    preview_url = get_mission_media_url(reference)
+    if not preview_url:
+        return b""
+    if preview_url.startswith("data:"):
+        return base64.b64decode(preview_url.split(",", 1)[1])
+    with urllib.request.urlopen(preview_url, timeout=15) as response:
+        return response.read()
+
+
+def _reference_image_editor(db, key, title, reference, image_assets):
+    """Render a visual Asset Library-backed reference image workflow."""
+    state_key = f"{key}_reference_value"
+    source_key = f"{key}_reference_source"
+    if st.session_state.get(source_key) != reference:
+        st.session_state[state_key] = reference
+        st.session_state[source_key] = reference
+    current_reference = str(st.session_state.get(state_key, "") or "").strip()
+    image_by_id = {
+        str(asset.get("AssetID", "")).strip(): asset
+        for asset in image_assets
+        if str(asset.get("AssetID", "")).strip()
+    }
+    current_asset_id = next(
+        (
+            asset_id for asset_id, asset in image_by_id.items()
+            if str(asset.get("MediaReference", "")).strip() == current_reference
+        ),
+        "",
+    )
+
+    st.markdown("#### Reference Image")
+    preview = reference_image_preview_source(current_reference)
+    if preview:
+        st.image(preview, caption="Current reference image", width="stretch")
+    else:
+        st.info("No reference image selected.")
+
+    choose_col, upload_col = st.columns(2)
+    with choose_col:
+        with st.popover("Choose Image", width="stretch"):
+            st.caption("Choose a reusable image from the Asset Library.")
+            if not image_by_id:
+                st.info("No Mission Images are available yet.")
+            else:
+                grid = st.columns(2)
+                for index, (asset_id, asset) in enumerate(image_by_id.items()):
+                    with grid[index % 2]:
+                        asset_preview = reference_image_preview_source(
+                            str(asset.get("MediaReference", ""))
+                        )
+                        with st.container(border=True):
+                            if asset_preview:
+                                st.image(asset_preview, width="stretch")
+                            st.caption(str(asset.get("Name", "Untitled image")))
+                            if st.button(
+                                "Choose",
+                                key=f"{key}_choose_{asset_id}",
+                                width="stretch",
+                            ):
+                                selected_reference = str(
+                                    asset.get("MediaReference", "")
+                                ).strip()
+                                st.session_state[state_key] = selected_reference
+                                st.session_state[source_key] = reference
+                                st.rerun()
+    with upload_col:
+        with st.popover("Upload New Image", width="stretch"):
+            uploaded = st.file_uploader(
+                "Upload reference image",
+                type=["jpg", "jpeg", "png", "webp", "heic"],
+                key=f"{key}_new_reference_upload",
+            )
+            upload_name = st.text_input(
+                "Image name",
+                value=f"{title or 'Experience'} reference",
+                key=f"{key}_new_reference_name",
+            )
+            if st.button(
+                "Add and Use Image",
+                type="primary",
+                disabled=uploaded is None,
+                key=f"{key}_add_reference",
+                width="stretch",
+            ):
+                try:
+                    result = db.create_asset("Mission Images", upload_name, uploaded)
+                except Exception as error:
+                    st.error(str(error))
+                else:
+                    st.session_state[state_key] = result["MediaReference"]
+                    st.session_state[source_key] = reference
+                    st.rerun()
+
+    replace_col, crop_col, remove_col = st.columns(3)
+    with replace_col:
+        with st.popover("Replace Image", width="stretch"):
+            replacement = st.file_uploader(
+                "Replacement image",
+                type=["jpg", "jpeg", "png", "webp", "heic"],
+                key=f"{key}_replace_reference_upload",
+            )
+            st.caption("Updates this library image everywhere it is reused.")
+            if st.button(
+                "Replace",
+                type="primary",
+                disabled=not current_asset_id or replacement is None,
+                key=f"{key}_replace_reference",
+                width="stretch",
+            ):
+                asset = image_by_id[current_asset_id]
+                try:
+                    result = db.update_asset(
+                        current_asset_id,
+                        name=str(asset.get("Name", "Reference image")),
+                        uploaded_file=replacement,
+                    )
+                except Exception as error:
+                    st.error(str(error))
+                else:
+                    st.session_state[state_key] = current_reference
+                    st.session_state[source_key] = reference
+                    st.rerun()
+            if current_reference and not current_asset_id:
+                st.info("Choose or upload a library image before replacing it.")
+    with crop_col:
+        with st.popover("Crop Image", width="stretch"):
+            if not current_reference:
+                st.info("Choose an image before cropping.")
+            else:
+                try:
+                    source_bytes = _reference_image_bytes(current_reference)
+                    source_image = Image.open(io.BytesIO(source_bytes))
+                    width, height = source_image.size
+                except Exception:
+                    st.warning("This image could not be opened for cropping.")
+                else:
+                    st.caption("Adjust the framing. A new reusable crop is created automatically.")
+                    left_pct, right_pct = st.slider(
+                        "Horizontal crop (%)",
+                        0, 100, (0, 100),
+                        key=f"{key}_crop_horizontal",
+                    )
+                    top_pct, bottom_pct = st.slider(
+                        "Vertical crop (%)",
+                        0, 100, (0, 100),
+                        key=f"{key}_crop_vertical",
+                    )
+                    valid_crop = right_pct > left_pct and bottom_pct > top_pct
+                    box = (
+                        round(width * left_pct / 100),
+                        round(height * top_pct / 100),
+                        round(width * right_pct / 100),
+                        round(height * bottom_pct / 100),
+                    )
+                    if valid_crop:
+                        cropped_bytes = crop_reference_image(source_bytes, box)
+                        st.image(cropped_bytes, caption="Crop preview", width="stretch")
+                    else:
+                        cropped_bytes = b""
+                        st.error("The crop must have visible width and height.")
+                    if st.button(
+                        "Save Crop and Use",
+                        type="primary",
+                        disabled=not valid_crop,
+                        key=f"{key}_save_crop",
+                        width="stretch",
+                    ):
+                        try:
+                            result = db.create_asset(
+                                "Mission Images",
+                                f"{title or 'Experience'} — Crop",
+                                _ImageUpload(cropped_bytes),
+                            )
+                        except Exception as error:
+                            st.error(str(error))
+                        else:
+                            st.session_state[state_key] = result["MediaReference"]
+                            st.session_state[source_key] = reference
+                            st.rerun()
+    with remove_col:
+        if st.button(
+            "Remove Image",
+            disabled=not current_reference,
+            key=f"{key}_remove_reference",
+            width="stretch",
+        ):
+            st.session_state[state_key] = ""
+            st.session_state[source_key] = reference
+            st.rerun()
+
+    return current_reference, reference_image_preview_source(current_reference)
 
 
 def make_qr_png(value):
@@ -376,56 +602,15 @@ def _experience_designer(db, event_id, selected):
             companion_prompt = str(selected.get("AIPrompt", ""))
             time_limit = safe_int(selected.get("TimeLimitMinutes"), 10)
             if mission_type == "Observe":
-                image_by_id = {
-                    str(asset.get("AssetID", "")): asset
-                    for asset in mission_image_assets
-                }
-                image_options = [""] + list(image_by_id)
-                current_image_id = next(
-                    (
-                        asset_id for asset_id, asset in image_by_id.items()
-                        if str(asset.get("MediaReference", "")).strip()
-                        == reference.strip()
-                    ),
-                    "",
+                resolved_selected_reference, reference_preview = (
+                    _reference_image_editor(
+                        db,
+                        key,
+                        title,
+                        reference,
+                        mission_image_assets,
+                    )
                 )
-                selected_image_id = st.selectbox(
-                    "Select Mission Image",
-                    image_options,
-                    index=image_options.index(current_image_id),
-                    format_func=lambda asset_id: (
-                        "None"
-                        if not asset_id
-                        else str(image_by_id[asset_id].get("Name", "Untitled"))
-                    ),
-                    key=f"{key}_reference_asset",
-                    help="Add or replace reusable images in Administration → Asset Library.",
-                )
-                resolved_selected_reference = (
-                    str(
-                        image_by_id[selected_image_id].get(
-                            "MediaReference",
-                            "",
-                        )
-                    ).strip()
-                    if selected_image_id
-                    else ""
-                )
-                reference_preview = reference_image_preview_source(
-                    resolved_selected_reference
-                )
-                if reference_preview:
-                    try:
-                        st.image(
-                            reference_preview,
-                            caption="Reference image preview",
-                            width="stretch",
-                        )
-                    except Exception:
-                        st.warning(
-                            "This image is saved, but this browser cannot preview "
-                            "its format. JPG, PNG, or WEBP gives the widest support."
-                        )
                 crop_framing_note = st.text_input(
                     "Crop / Framing Note",
                     value=str(selected.get("CropFramingNote", "")),
