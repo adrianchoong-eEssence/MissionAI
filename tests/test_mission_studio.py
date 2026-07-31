@@ -2,7 +2,11 @@ import unittest
 from unittest.mock import patch
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
-from screens.mission_setup import mission_module_name, reference_image_preview_source
+from screens.mission_setup import (
+    event_module_options,
+    mission_module_name,
+    reference_image_preview_source,
+)
 from screens.mission_setup import EVIDENCE_TYPES
 
 
@@ -279,6 +283,52 @@ class MissionStudioDataTests(unittest.TestCase):
         with patch("data.google_sheets.get_sheet_records", return_value=rows):
             self.assertEqual(database.get_event_missions("EVT-A")[0]["Version"], "A")
             self.assertEqual(database.get_event_missions("EVT-B")[0]["Version"], "B")
+
+    def test_event_lookup_normalises_event_and_experience_identifiers(self):
+        database = self.make_db()
+        rows = [{
+            "EventID": " EVT-0004 ",
+            "MissionID": " lab01 ",
+            "Title": "The Paris Fragment",
+        }]
+        with patch("data.google_sheets.get_sheet_records", return_value=rows):
+            self.assertEqual(
+                database.get_event_missions("evt-0004")[0]["Title"],
+                "The Paris Fragment",
+            )
+            self.assertEqual(
+                database.get_mission("EVT-0004", "LAB01")["Title"],
+                "The Paris Fragment",
+            )
+
+    def test_labyrinth_module_is_available_for_all_seventeen_records(self):
+        rows = [
+            {
+                "EventID": "EVT-0004",
+                "MissionID": f"LAB{index:02d}",
+                "Title": f"Experience {index}",
+                "Module": "Operation: The Labyrinth",
+                "Status": "DRAFT",
+            }
+            for index in range(1, 18)
+        ]
+        rows.append({
+            "EventID": "EVT-0004",
+            "MissionID": "M01",
+            "Title": "Legacy Experience",
+            "Module": "Mission AI",
+        })
+
+        modules = event_module_options(rows)
+        visible = [
+            row for row in rows
+            if mission_module_name(row) == "Operation: The Labyrinth"
+        ]
+
+        self.assertIn("Operation: The Labyrinth", modules)
+        self.assertIn("Mission AI", modules)
+        self.assertEqual(len(visible), 17)
+        self.assertEqual(len({row["MissionID"] for row in visible}), 17)
 
     def test_experience_designer_fields_are_persisted_on_missions(self):
         headers = REQUIRED_WORKSHEETS["Missions"]

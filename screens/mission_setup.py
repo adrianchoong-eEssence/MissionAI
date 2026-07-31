@@ -72,6 +72,15 @@ def mission_module_name(mission):
     return "Other"
 
 
+def event_module_options(missions):
+    modules = []
+    for mission in missions:
+        module = mission_module_name(mission)
+        if module not in modules:
+            modules.append(module)
+    return modules or ["Mission AI"]
+
+
 def _mission_editor(db, event_id, selected):
     mission_id = str(selected.get("MissionID", "")).strip().upper()
     form_key = f"event_mission_editor_{event_id}_{mission_id or 'new'}"
@@ -621,18 +630,43 @@ def render_event_mission_editor(db):
             default_index,
         )
     event_label = st.selectbox("Event", options, index=default_index, key="mission_studio_event")
-    event_id = str(event_map[event_label].get("EventID", ""))
+    event_id = str(event_map[event_label].get("EventID", "")).strip()
+    refresh_col, count_col = st.columns([1, 2])
+    if refresh_col.button(
+        "Refresh Experiences",
+        key=f"refresh_experiences_{event_id}",
+        width="stretch",
+    ):
+        db.clear_cache()
+        st.session_state.pop("mission_studio_selected_mission", None)
+        st.rerun()
     migration_key = f"mission_editor_backfill_{event_id}"
     if event_id == "EVT-0004" and not st.session_state.get(migration_key):
         db.backfill_event_mission_editor_fields(
             event_id, ["M01", "M02", "M03", "M04"],
         )
         st.session_state[migration_key] = True
-    module = st.selectbox("Module", ["Mission AI"], key="mission_studio_module")
+    all_missions = db.get_event_missions(event_id)
+    modules = event_module_options(all_missions)
+    preferred_module = (
+        "Operation: The Labyrinth"
+        if event_id.casefold() == "evt-0004"
+        and "Operation: The Labyrinth" in modules
+        else modules[0]
+    )
+    module_key = f"mission_studio_module_{event_id}"
+    if st.session_state.get(module_key) not in modules:
+        st.session_state[module_key] = preferred_module
+    module = st.selectbox(
+        "Module",
+        modules,
+        key=module_key,
+    )
     missions = [
-        row for row in db.get_event_missions(event_id)
+        row for row in all_missions
         if mission_module_name(row).casefold() == module.casefold()
     ]
+    count_col.metric("Visible Experiences", len(missions))
 
     selected_id = str(st.session_state.get("mission_studio_selected_mission", ""))
     selected = next(

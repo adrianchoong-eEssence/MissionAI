@@ -2021,9 +2021,11 @@ class GoogleSheetsDB:
         return {"Created": created, "Updated": updated, "Errors": errors}
 
     def get_event_missions(self, event_id, include_closed=True):
+        wanted_event_id = str(event_id).strip().casefold()
         missions = [
             mission for mission in get_sheet_records("Missions")
-            if str(mission.get("EventID", "")) == str(event_id)
+            if str(mission.get("EventID", "")).strip().casefold()
+            == wanted_event_id
         ]
         if not include_closed:
             missions = [
@@ -2382,10 +2384,14 @@ class GoogleSheetsDB:
         return missions[-1] if missions else None
 
     def get_mission(self, event_id, mission_id):
+        wanted_event_id = str(event_id).strip().casefold()
+        wanted_mission_id = str(mission_id).strip().casefold()
         for mission in get_sheet_records("Missions"):
             if (
-                str(mission.get("EventID", "")) == str(event_id)
-                and str(mission.get("MissionID", "")) == str(mission_id)
+                str(mission.get("EventID", "")).strip().casefold()
+                == wanted_event_id
+                and str(mission.get("MissionID", "")).strip().casefold()
+                == wanted_mission_id
             ):
                 return mission
         return None
