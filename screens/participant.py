@@ -19,6 +19,7 @@ from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 from engines.programme_hierarchy import current_module_activity, friendly_type
+from screens.mission_setup import cropped_reference_image
 
 
 COUNTRY_LANGUAGE_PROMPTS = {
@@ -821,8 +822,12 @@ def render_mission_content(mission):
     ):
         st.markdown("#### Reference Image")
         try:
+            cropped_image = cropped_reference_image(
+                reference_image_url,
+                mission.get("CropCoordinates", ""),
+            )
             st.image(
-                display_reference_image_url,
+                cropped_image or display_reference_image_url,
                 width="stretch",
             )
             st.caption("Tap the image to enlarge where supported.")

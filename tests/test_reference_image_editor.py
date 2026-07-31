@@ -1,12 +1,15 @@
 import io
 import json
+from unittest.mock import patch
 
 from PIL import Image
 
 from screens.mission_setup import (
     assign_reference_crop,
+    cropped_reference_image,
     assign_reference_image,
     crop_reference_image,
+    reference_crop_coordinates,
 )
 
 
@@ -73,3 +76,25 @@ def test_crop_saves_only_original_asset_id_and_coordinates():
     assert db.payload["OriginalAssetID"] == "MISSION-IMAGES-001"
     assert json.loads(db.payload["CropCoordinates"]) == coords
     assert db.payload["ReferenceImageURL"] == "original"
+
+
+def test_saved_crop_coordinates_reopen_and_invalid_values_are_rejected():
+    saved = '{"x":0.1,"y":0.2,"width":0.5,"height":0.4}'
+
+    assert reference_crop_coordinates(saved) == {
+        "x": 0.1, "y": 0.2, "width": 0.5, "height": 0.4,
+    }
+    assert reference_crop_coordinates('{"x":0.8,"y":0,"width":0.5,"height":1}') is None
+
+
+def test_participant_crop_is_rendered_from_original_asset_bytes():
+    with patch(
+        "screens.mission_setup._reference_image_bytes",
+        return_value=_png(200, 100),
+    ):
+        cropped = cropped_reference_image(
+            "original-reference",
+            '{"x":0.25,"y":0.1,"width":0.5,"height":0.8}',
+        )
+
+    assert Image.open(io.BytesIO(cropped)).size == (100, 80)

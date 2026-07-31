@@ -78,6 +78,45 @@ def assign_reference_crop(db, mission, asset_id, coordinates):
     return db.upsert_event_mission(payload)
 
 
+def reference_crop_coordinates(value):
+    """Return validated normalized crop coordinates or no crop."""
+    try:
+        coordinates = json.loads(str(value or ""))
+        result = {
+            name: float(coordinates[name])
+            for name in ("x", "y", "width", "height")
+        }
+    except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return None
+    if (
+        result["x"] < 0 or result["y"] < 0
+        or result["width"] <= 0 or result["height"] <= 0
+        or result["x"] + result["width"] > 1.000001
+        or result["y"] + result["height"] > 1.000001
+    ):
+        return None
+    return result
+
+
+def cropped_reference_image(reference, coordinates):
+    """Render a saved crop from the original asset without modifying it."""
+    crop = reference_crop_coordinates(coordinates)
+    if not crop:
+        return None
+    source_bytes = _reference_image_bytes(reference)
+    image = Image.open(io.BytesIO(source_bytes))
+    width, height = image.size
+    return crop_reference_image(
+        source_bytes,
+        (
+            round(crop["x"] * width),
+            round(crop["y"] * height),
+            round((crop["x"] + crop["width"]) * width),
+            round((crop["y"] + crop["height"]) * height),
+        ),
+    )
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _reference_image_bytes(reference):
     preview_url = get_mission_media_url(reference)
@@ -242,13 +281,25 @@ def _reference_image_editor(
                     from streamlit_cropper import st_cropper
 
                     st.caption("Drag to pan. Drag handles to resize. Use Zoom for tighter framing.")
+                    stored_crop = reference_crop_coordinates(
+                        mission_record.get("CropCoordinates", "")
+                    ) if str(mission_record.get("OriginalAssetID", "")) == current_asset_id else None
+                    use_full_key = f"{key}_crop_use_full"
+                    if st.session_state.get(use_full_key) or not stored_crop:
+                        stored_crop = {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0}
                     zoom = st.slider("Zoom", 100, 400, 100, 10, key=f"{key}_crop_zoom")
                     pan_x = st.slider("Pan horizontally", -100, 100, 0, key=f"{key}_crop_pan_x")
                     pan_y = st.slider("Pan vertically", -100, 100, 0, key=f"{key}_crop_pan_y")
-                    crop_width = max(1, round(width * 100 / zoom))
-                    crop_height = max(1, round(height * 100 / zoom))
-                    left = max(0, min(width - crop_width, round((width - crop_width) * (pan_x + 100) / 200)))
-                    top = max(0, min(height - crop_height, round((height - crop_height) * (pan_y + 100) / 200)))
+                    base_width = stored_crop["width"] * width
+                    base_height = stored_crop["height"] * height
+                    crop_width = max(1, round(base_width * 100 / zoom))
+                    crop_height = max(1, round(base_height * 100 / zoom))
+                    base_center_x = (stored_crop["x"] + stored_crop["width"] / 2) * width
+                    base_center_y = (stored_crop["y"] + stored_crop["height"] / 2) * height
+                    center_x = base_center_x + pan_x * max(0, width - crop_width) / 200
+                    center_y = base_center_y + pan_y * max(0, height - crop_height) / 200
+                    left = max(0, min(width - crop_width, round(center_x - crop_width / 2)))
+                    top = max(0, min(height - crop_height, round(center_y - crop_height / 2)))
                     defaults = (left, left + crop_width, top, top + crop_height)
                     rect = st_cropper(
                         source_image,
@@ -261,6 +312,7 @@ def _reference_image_editor(
                     reset_col, save_col = st.columns(2)
                     with reset_col:
                         if st.button("Reset Crop", key=f"{key}_reset_crop", width="stretch"):
+                            st.session_state[use_full_key] = True
                             for suffix in ("crop_zoom", "crop_pan_x", "crop_pan_y"):
                                 st.session_state.pop(f"{key}_{suffix}", None)
                             st.rerun()
@@ -294,6 +346,7 @@ def _reference_image_editor(
                         except Exception as error:
                             st.error(str(error))
                         else:
+                            st.session_state[use_full_key] = False
                             st.success("Crop saved. Original asset unchanged.")
     with remove_col:
         if st.button(
