@@ -1,6 +1,8 @@
 import uuid
 import math
 import html
+import os
+import subprocess
 from datetime import datetime
 
 import streamlit as st
@@ -25,6 +27,25 @@ from engines.programme_hierarchy import (
     friendly_type,
 )
 from screens.mission_setup import cropped_reference_image, mission_module_name
+
+
+def running_build_sha():
+    """Return the deployed revision without hard-coding a commit hash."""
+    for variable in ("STREAMLIT_GIT_COMMIT", "GIT_COMMIT", "COMMIT_SHA"):
+        value = str(os.environ.get(variable, "") or "").strip()
+        if value:
+            return value[:7]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short=7", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        return result.stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
 
 
 COUNTRY_LANGUAGE_PROMPTS = {
@@ -2083,6 +2104,7 @@ def show_participant():
             persist_session_in_query_params()
             st.rerun()
 
+        st.caption(f"Build: {running_build_sha()}")
         return
 
     experience_header(
