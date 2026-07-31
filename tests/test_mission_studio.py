@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
 from screens.mission_setup import (
+    difficulty_options,
     event_module_options,
     mission_module_name,
     reference_image_preview_source,
@@ -347,6 +348,13 @@ class MissionStudioDataTests(unittest.TestCase):
         self.assertIn("Mission AI", modules)
         self.assertEqual(len(visible), 17)
         self.assertEqual(len({row["MissionID"] for row in visible}), 17)
+
+    def test_existing_nonstandard_difficulty_remains_editable(self):
+        options, selected = difficulty_options("Medium")
+
+        self.assertEqual(selected, "Medium")
+        self.assertIn("Medium", options)
+        self.assertIn("Moderate", options)
 
     def test_experience_designer_fields_are_persisted_on_missions(self):
         headers = REQUIRED_WORKSHEETS["Missions"]

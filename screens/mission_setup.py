@@ -81,6 +81,14 @@ def event_module_options(missions):
     return modules or ["Mission AI"]
 
 
+def difficulty_options(current):
+    value = str(current or "Moderate").strip() or "Moderate"
+    options = ["Easy", "Moderate", "Challenging", "Expert"]
+    if value not in options:
+        options.insert(0, value)
+    return options, value
+
+
 def _mission_editor(db, event_id, selected):
     mission_id = str(selected.get("MissionID", "")).strip().upper()
     form_key = f"event_mission_editor_{event_id}_{mission_id or 'new'}"
@@ -455,7 +463,15 @@ def _experience_designer(db, event_id, selected):
             reward1, reward2 = st.columns(2)
             with reward1:
                 credits = st.number_input("Credits", min_value=0, value=safe_int(selected.get("CreditValue", selected.get("Points")), 120), step=10, key=f"{key}_credits")
-                difficulty = st.select_slider("Difficulty", ["Easy", "Moderate", "Challenging", "Expert"], value=str(selected.get("Difficulty", "Moderate") or "Moderate"), key=f"{key}_difficulty")
+                difficulty_values, difficulty_default = difficulty_options(
+                    selected.get("Difficulty", "Moderate")
+                )
+                difficulty = st.select_slider(
+                    "Difficulty",
+                    difficulty_values,
+                    value=difficulty_default,
+                    key=f"{key}_difficulty",
+                )
             with reward2:
                 estimated_default = min(max(safe_int(selected.get("EstimatedTimeMinutes"), time_limit or 10), 1), 180)
                 estimated = st.slider("Estimated Time (minutes)", 1, 180, estimated_default, key=f"{key}_estimate")
