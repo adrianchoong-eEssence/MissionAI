@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import streamlit as st
+
 from data.runtime_database import SupabaseRuntimeDB
 from data.google_sheets import GoogleSheetsDB
 from screens.live_event_console import approval_score
@@ -11,6 +13,7 @@ from screens.participant import (
     _bayu_submission_status,
     bayu_ai_portrait_reference,
     bayu_morning_experiences,
+    current_team_leader,
     participant_ai_identity,
     render_ai_response_after_submission,
 )
@@ -219,5 +222,48 @@ def test_required_bayu_participant_copy_and_history_fix_are_present():
     assert "render_media_evidence_form(db, mission, \"AUDIO\")" in source
     assert "render_multiple_evidence_form(db, mission)" in source
     assert "📤 Submit Evidence" in source
+    assert "Only your Team Leader can submit evidence for the team." in source
     assert "check #" not in source
     assert 'if str(st.query_params.get(key, "")) != str(value)' in source
+
+
+def test_current_team_leader_grants_only_the_selected_participant():
+    class TeamDB:
+        @staticmethod
+        def get_team_roster(event_id, team_name):
+            assert (event_id, team_name) == ("EVT-0004", "Team EVA")
+            return [
+                {"Name": "Participant A", "IsLeader": True},
+                {"Name": "Participant B", "IsLeader": False},
+            ]
+
+    with patch.dict(
+        "screens.participant.st.session_state",
+        {
+            "participant_event_id": "EVT-0004",
+            "participant_team": "Team EVA",
+            "participant_name": "Participant B",
+        },
+        clear=True,
+    ):
+        assert current_team_leader(TeamDB()) == (False, "Participant A")
+
+
+def test_current_team_leader_refreshes_when_leadership_changes():
+    class TeamDB:
+        @staticmethod
+        def get_team_roster(event_id, team_name):
+            return [{"Name": "Participant B", "IsLeader": True}]
+
+    with patch.dict(
+        "screens.participant.st.session_state",
+        {
+            "participant_event_id": "EVT-0004",
+            "participant_team": "Team EVA",
+            "participant_name": "Participant B",
+            "participant_is_leader": False,
+        },
+        clear=True,
+    ):
+        assert current_team_leader(TeamDB()) == (True, "Participant B")
+        assert st.session_state["participant_is_leader"] is True

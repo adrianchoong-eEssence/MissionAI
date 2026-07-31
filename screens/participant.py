@@ -325,6 +325,39 @@ def find_existing_submission(db, mission, submission_type):
     )
 
 
+def current_team_leader(db):
+    """Return the current leader from the authoritative event team roster."""
+    roster = db.get_team_roster(
+        st.session_state.get("participant_event_id", ""),
+        st.session_state.get("participant_team", ""),
+    )
+    leader = next((row for row in roster if row.get("IsLeader")), None)
+    leader_name = str((leader or {}).get("Name", "") or "").strip()
+    participant_name = str(
+        st.session_state.get("participant_name", "") or ""
+    ).strip()
+    is_leader = bool(leader_name and leader_name == participant_name)
+    st.session_state["participant_is_leader"] = is_leader
+    return is_leader, leader_name
+
+
+def render_team_leader_submission_gate(db):
+    """Keep EVT-0004 submission controls exclusive to the active leader."""
+    try:
+        is_leader, leader_name = current_team_leader(db)
+    except RuntimeDatabaseError:
+        st.warning("Team leadership is reconnecting. Submission is temporarily locked.")
+        return False
+    if is_leader:
+        return True
+    st.info("Only your Team Leader can submit evidence for the team.")
+    if leader_name:
+        st.caption(f"Current Team Leader: {leader_name}")
+    else:
+        st.caption("No Team Leader has been selected yet.")
+    return False
+
+
 def render_existing_submission(existing_submission):
     status = str(existing_submission.get("Status", "PENDING")).strip().upper()
     if status == "APPROVED":
@@ -382,6 +415,23 @@ def save_structured_submission(
     image_url="",
     drive_file_id="",
 ):
+    if str(st.session_state.get("participant_event_id", "")) == "EVT-0004":
+        is_leader, leader_name = current_team_leader(db)
+        if not is_leader:
+            name = leader_name or "the selected Team Leader"
+            st.error(
+                f"Only {name} can submit evidence for this team. "
+                "Refresh to update leadership."
+            )
+            st.stop()
+        existing = db.get_team_submission(
+            event_id=st.session_state["participant_event_id"],
+            mission_id=mission["MissionID"],
+            team_name=st.session_state["participant_team"],
+        )
+        if existing:
+            st.info("Evidence has already been submitted for this Experience.")
+            st.stop()
     return db.save_submission(
         submission_id=str(uuid.uuid4()),
         event_id=st.session_state["participant_event_id"],
@@ -1808,7 +1858,12 @@ def render_experience_set_board(db, event_id, experience_set):
                 else:
                     st.error("Evidence rejected. Your Team Leader may resubmit when enabled.")
                 return
-            render_submission_form(db, selected, normalise_submission_type(selected))
+            if render_team_leader_submission_gate(db):
+                render_submission_form(
+                    db,
+                    selected,
+                    normalise_submission_type(selected),
+                )
             return
 
     label = experience_set_label(experience_set)
@@ -2223,7 +2278,8 @@ def show_participant():
             ):
                 st.rerun()
 
-            render_submission_form(db, mission, submission_type)
+            if not _is_bayu_event() or render_team_leader_submission_gate(db):
+                render_submission_form(db, mission, submission_type)
 
     render_ai_facilitator(db, mission, runtime_session)
 
