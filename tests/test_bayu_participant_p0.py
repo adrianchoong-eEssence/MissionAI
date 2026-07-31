@@ -215,6 +215,9 @@ def test_required_bayu_participant_copy_and_history_fix_are_present():
 
     assert "Seventeen intelligence signals" in EVA_LABYRINTH_BRIEFING
     assert "ENTER THE LABYRINTH" in source
-    assert "Your Team Leader submits evidence for the team." in source
+    assert "render_media_evidence_form(db, mission, \"VIDEO\")" in source
+    assert "render_media_evidence_form(db, mission, \"AUDIO\")" in source
+    assert "render_multiple_evidence_form(db, mission)" in source
+    assert "📤 Submit Evidence" in source
     assert "check #" not in source
     assert 'if str(st.query_params.get(key, "")) != str(value)' in source

@@ -14,7 +14,7 @@ from branding import (
 )
 from ai.facilitator import ask_facilitator
 from components.team_geolocation import team_geolocation
-from data.google_drive import get_photo_url, upload_photo
+from data.google_drive import get_photo_url, upload_evidence_file, upload_photo
 from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
@@ -360,7 +360,11 @@ def render_existing_submission(existing_submission):
         st.info(remarks)
 
     display_url = get_photo_url(image_url, drive_file_id)
-    if display_url:
+    if display_url and submission_type == "VIDEO":
+        st.video(display_url)
+    elif display_url and submission_type == "AUDIO":
+        st.audio(display_url)
+    elif display_url:
         try:
             st.image(display_url, width="stretch")
         except Exception:
@@ -651,7 +655,7 @@ def render_text_form(db, mission):
 
 
 def render_photo_form(db, mission):
-    st.subheader("📸 Experience Submission")
+    st.subheader("📸 Photo Evidence")
     uploaded_image = st.file_uploader(
         "Choose Photo",
         type=["jpg", "jpeg", "png"],
@@ -662,7 +666,7 @@ def render_photo_form(db, mission):
         st.image(uploaded_image, width="stretch")
 
         if st.button(
-            "📤 Submit Experience",
+            "📤 Submit Evidence",
             width="stretch",
             key=f"submit_photo_{mission['MissionID']}",
         ):
@@ -691,6 +695,73 @@ def render_photo_form(db, mission):
             st.rerun()
 
 
+def render_media_evidence_form(db, mission, evidence_type):
+    kind = str(evidence_type).strip().upper()
+    is_video = kind == "VIDEO"
+    icon = "🎥" if is_video else "🎙️"
+    label = "Video" if is_video else "Audio"
+    extensions = ["mp4", "mov", "m4v", "webm"] if is_video else [
+        "mp3", "m4a", "wav", "aac", "ogg",
+    ]
+    st.subheader(f"{icon} {label} Evidence")
+    uploaded_file = st.file_uploader(
+        f"Upload {label}",
+        type=extensions,
+        key=f"{kind.lower()}_upload_{mission['MissionID']}",
+    )
+    if uploaded_file is None:
+        return
+    if is_video:
+        st.video(uploaded_file)
+    else:
+        st.audio(uploaded_file)
+    if st.button(
+        "📤 Submit Evidence",
+        width="stretch",
+        key=f"submit_{kind.lower()}_{mission['MissionID']}",
+    ):
+        with st.spinner("Submitting evidence..."):
+            try:
+                uploaded = upload_evidence_file(
+                    event_id=st.session_state["participant_event_id"],
+                    mission_id=mission["MissionID"],
+                    team_name=st.session_state["participant_team"],
+                    participant_name=st.session_state["participant_name"],
+                    uploaded_file=uploaded_file,
+                    evidence_type=kind,
+                )
+            except (RuntimeDatabaseError, ValueError) as error:
+                st.error(str(error))
+                st.stop()
+            save_structured_submission(
+                db=db,
+                mission=mission,
+                submission_type=kind,
+                image_url=uploaded.get("url", ""),
+                drive_file_id=uploaded.get("file_id", ""),
+            )
+        st.success("✅ Evidence submitted successfully.")
+        st.rerun()
+
+
+def render_multiple_evidence_form(db, mission):
+    st.subheader("📎 Evidence")
+    selected_type = st.radio(
+        "Choose evidence type",
+        ["Photo", "Video", "Text", "Audio"],
+        horizontal=True,
+        key=f"multiple_type_{mission['MissionID']}",
+    )
+    if selected_type == "Photo":
+        render_photo_form(db, mission)
+    elif selected_type == "Video":
+        render_media_evidence_form(db, mission, "VIDEO")
+    elif selected_type == "Audio":
+        render_media_evidence_form(db, mission, "AUDIO")
+    else:
+        render_text_form(db, mission)
+
+
 def render_submission_form(db, mission, submission_type):
     if submission_type == "PIPELINE":
         render_pipeline_form(db, mission)
@@ -708,6 +779,12 @@ def render_submission_form(db, mission, submission_type):
         render_nasi_form(db, mission)
     elif submission_type == "TEXT":
         render_text_form(db, mission)
+    elif submission_type == "VIDEO":
+        render_media_evidence_form(db, mission, "VIDEO")
+    elif submission_type == "AUDIO":
+        render_media_evidence_form(db, mission, "AUDIO")
+    elif submission_type == "MULTIPLE":
+        render_multiple_evidence_form(db, mission)
     elif submission_type == "QR":
         render_qr_form(db, mission)
     elif submission_type == "GPS":
@@ -1731,9 +1808,6 @@ def render_experience_set_board(db, event_id, experience_set):
                 else:
                     st.error("Evidence rejected. Your Team Leader may resubmit when enabled.")
                 return
-            if not st.session_state.get("participant_is_leader"):
-                st.info("Your Team Leader submits evidence for the team.")
-                return
             render_submission_form(db, selected, normalise_submission_type(selected))
             return
 
@@ -2149,10 +2223,7 @@ def show_participant():
             ):
                 st.rerun()
 
-            if _is_bayu_event() and not st.session_state.get("participant_is_leader"):
-                st.info("Your Team Leader submits evidence for the team.")
-            else:
-                render_submission_form(db, mission, submission_type)
+            render_submission_form(db, mission, submission_type)
 
     render_ai_facilitator(db, mission, runtime_session)
 

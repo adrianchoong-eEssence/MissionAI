@@ -76,6 +76,51 @@ def upload_photo(
     }
 
 
+def upload_evidence_file(
+    event_id,
+    mission_id,
+    team_name,
+    participant_name,
+    uploaded_file,
+    evidence_type,
+):
+    """Store participant video/audio evidence in the existing private bucket."""
+    runtime = get_runtime_database()
+    if not runtime.can_publish:
+        raise RuntimeDatabaseError(
+            "Evidence storage is not configured for this app. Add "
+            "SUPABASE_SECRET_KEY to its Streamlit secrets."
+        )
+
+    file_bytes = uploaded_file.getvalue()
+    if not file_bytes:
+        raise ValueError("The selected evidence file is empty.")
+    kind = str(evidence_type or "file").strip().lower()
+    maximum = 200 * 1024 * 1024 if kind == "video" else 25 * 1024 * 1024
+    if len(file_bytes) > maximum:
+        raise ValueError(f"The {kind} file exceeds {maximum // (1024 * 1024)} MB.")
+
+    original_name = _safe_path_part(getattr(uploaded_file, "name", ""), kind)
+    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    filename = f"{timestamp}-{uuid.uuid4().hex}-{original_name}"
+    storage_path = "/".join([
+        _safe_path_part(event_id, "event"),
+        _safe_path_part(mission_id, "mission"),
+        _safe_path_part(team_name, "team"),
+        _safe_path_part(participant_name, "participant"),
+        filename,
+    ])
+    content_type = str(
+        getattr(uploaded_file, "type", "") or "application/octet-stream"
+    )
+    runtime.upload_submission_image(storage_path, file_bytes, content_type=content_type)
+    return {
+        "file_id": storage_path,
+        "url": f"{STORAGE_REFERENCE_PREFIX}{storage_path}",
+        "filename": filename,
+    }
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _private_photo_bytes(storage_path):
     return get_runtime_database().download_submission_image(storage_path)
