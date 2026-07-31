@@ -13,7 +13,7 @@ def show_asset_library():
         "Upload once, then reuse the same private media asset across Experiences."
     )
     db = GoogleSheetsDB()
-    db.ensure_existing_assets_catalogued()
+    db.ensure_existing_assets_catalogue()
 
     category = st.segmented_control(
         "Category",

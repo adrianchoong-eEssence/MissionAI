@@ -312,7 +312,7 @@ class GoogleSheetsDB:
         digest = hashlib.sha1(identity).hexdigest()[:12].upper()
         return f"{prefix}-{digest}"
 
-    def ensure_existing_assets_catalogued(self):
+    def ensure_existing_assets_catalogue(self):
         existing_references = {
             str(asset.get("MediaReference", "")).strip()
             for asset in self.get_assets()
@@ -362,6 +362,10 @@ class GoogleSheetsDB:
         if added:
             self.clear_cache()
         return {"Added": added}
+
+    def ensure_existing_assets_catalogued(self):
+        """Compatibility alias for deployments using the former spelling."""
+        return self.ensure_existing_assets_catalogue()
 
     def create_asset(self, category, name, uploaded_file):
         clean_category = str(category or "").strip()

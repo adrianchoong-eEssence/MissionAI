@@ -116,13 +116,41 @@ def test_existing_character_and_mission_image_references_are_catalogued_once():
         "data.google_sheets.get_sheet_records",
         side_effect=lambda name: records[name],
     ):
-        result = db.ensure_existing_assets_catalogued()
+        result = db.ensure_existing_assets_catalogue()
 
     assert result == {"Added": 3}
     assert len(db.assets.records) == 3
     assert {
         row["Category"] for row in db.assets.records
     } == {"Characters", "Mission Images"}
+
+
+def test_empty_catalogue_initialises_without_error():
+    db = GoogleSheetsDB.__new__(GoogleSheetsDB)
+    db.assets = Worksheet(REQUIRED_WORKSHEETS["Assets"])
+    db.clear_cache = lambda: None
+
+    with patch(
+        "data.google_sheets.get_sheet_records",
+        side_effect=lambda name: [],
+    ):
+        result = db.ensure_existing_assets_catalogue()
+
+    assert result == {"Added": 0}
+    assert db.assets.records == []
+
+
+def test_former_catalogued_spelling_remains_compatible():
+    db = GoogleSheetsDB.__new__(GoogleSheetsDB)
+    with patch.object(
+        db,
+        "ensure_existing_assets_catalogue",
+        return_value={"Added": 2},
+    ) as initialise:
+        result = db.ensure_existing_assets_catalogued()
+
+    assert result == {"Added": 2}
+    initialise.assert_called_once_with()
 
 
 def test_asset_delete_is_blocked_while_experience_uses_reference():
