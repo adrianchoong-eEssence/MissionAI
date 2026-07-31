@@ -383,7 +383,7 @@ class GoogleSheetsDB:
             and str(asset.get("MediaReference", "")).strip()
             and str(asset.get("AssetID", "")).strip()
         }
-        headers = self.missions.row_values(1)
+        headers = REQUIRED_WORKSHEETS["Missions"]
         column = headers.index("OriginalImageID") + 1
         updates = []
         for row_number, mission in enumerate(
@@ -398,7 +398,9 @@ class GoogleSheetsDB:
             cell = gspread.utils.rowcol_to_a1(row_number, column)
             updates.append({"range": cell, "values": [[asset_id]]})
         if updates:
-            self.missions.batch_update(updates)
+            _call_sheets_with_retry(
+                lambda: self.missions.batch_update(updates)
+            )
             self.clear_cache()
         return {"AssetsAdded": catalogue["Added"], "MissionsUpdated": len(updates)}
 
