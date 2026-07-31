@@ -1804,10 +1804,10 @@ def bayu_morning_experiences(db):
             order = int(float(mission.get("DisplayOrder", 999) or 999))
         except (TypeError, ValueError):
             order = 999
-        if order == 18 or mission_id.endswith("18") or "KING" in title.upper():
+        if order == 18 or mission_id == "LAB18" or "KING" in title.upper():
             continue
         morning.append(mission)
-    return morning[:17]
+    return morning
 
 
 def active_experience_set_missions(db, event_id, experience_set):

@@ -989,6 +989,8 @@ def render_event_mission_editor(db):
     ]
     count_col.metric("Visible Experiences", len(missions))
 
+    render_bulk_experience_activation_manager(db, event_id, all_missions)
+
     selected_id = str(st.session_state.get("mission_studio_selected_mission", ""))
     selected = next(
         (row for row in missions if str(row.get("MissionID")) == selected_id),
@@ -1082,6 +1084,223 @@ def render_event_mission_editor(db):
                     result = db.duplicate_event_mission(event_id, source_map[source_label]["MissionID"])
                     st.session_state["mission_studio_selected_mission"] = result["MissionID"]
                     st.rerun()
+
+
+def _bulk_status_label(value):
+    return "Active" if str(value or "").strip().upper() == "ACTIVE" else "Inactive"
+
+
+def filter_bulk_experiences(
+    missions,
+    status_filters,
+    type_filters,
+    character_filters,
+    difficulty_filters,
+    search_text="",
+):
+    """Return Experience records matching the activation-manager filters."""
+    wanted_statuses = set(status_filters or [])
+    wanted_types = set(type_filters or [])
+    wanted_characters = set(character_filters or [])
+    wanted_difficulties = set(difficulty_filters or [])
+    query = str(search_text or "").strip().casefold()
+    return [
+        mission for mission in missions
+        if (not wanted_statuses or _bulk_status_label(mission.get("Status")) in wanted_statuses)
+        and (not wanted_types or str(mission.get("MissionType", "Observe") or "Observe").title() in wanted_types)
+        and (not wanted_characters or str(mission.get("CharacterSource", "None") or "None") in wanted_characters)
+        and (not wanted_difficulties or str(mission.get("Difficulty", "Unspecified") or "Unspecified").title() in wanted_difficulties)
+        and (not query or query in str(mission.get("Title", "")).casefold())
+    ]
+
+
+def render_bulk_experience_activation_manager(db, event_id, missions):
+    """Stage and save event-level Experience status changes in one operation."""
+    selection_key = f"bulk_experience_selection_{event_id}"
+    pending_key = f"bulk_experience_pending_{event_id}"
+    version_key = f"bulk_experience_editor_version_{event_id}"
+    selected_ids = set(st.session_state.get(selection_key, []))
+    pending = dict(st.session_state.get(pending_key, {}))
+    mission_by_id = {
+        str(mission.get("MissionID", "")).strip().upper(): mission
+        for mission in missions
+        if str(mission.get("MissionID", "")).strip()
+    }
+    selected_ids.intersection_update(mission_by_id)
+    pending = {
+        mission_id: status for mission_id, status in pending.items()
+        if mission_id in mission_by_id
+    }
+
+    with st.expander("Manage Active Experiences", expanded=False):
+        st.caption(
+            "Filter, select and stage status changes here. Nothing is saved until "
+            "you confirm and press Save Changes."
+        )
+        filter1, filter2, filter3 = st.columns(3)
+        status_filters = filter1.multiselect(
+            "Status", ["Active", "Inactive"], default=["Active", "Inactive"],
+            key=f"bulk_status_filter_{event_id}",
+        )
+        type_values = sorted({
+            str(row.get("MissionType", "Observe") or "Observe").title()
+            for row in missions
+        })
+        type_filters = filter2.multiselect(
+            "Experience Type", type_values, default=type_values,
+            key=f"bulk_type_filter_{event_id}",
+        )
+        character_values = sorted({
+            str(row.get("CharacterSource", "None") or "None") for row in missions
+        })
+        character_filters = filter3.multiselect(
+            "Character", character_values, default=character_values,
+            key=f"bulk_character_filter_{event_id}",
+        )
+        filter4, filter5 = st.columns([1, 2])
+        difficulty_values = sorted({
+            str(row.get("Difficulty", "Unspecified") or "Unspecified").title()
+            for row in missions
+        })
+        difficulty_filters = filter4.multiselect(
+            "Difficulty", difficulty_values, default=difficulty_values,
+            key=f"bulk_difficulty_filter_{event_id}",
+        )
+        search_text = filter5.text_input(
+            "Search by Experience name", key=f"bulk_search_{event_id}",
+        )
+        visible = filter_bulk_experiences(
+            missions, status_filters, type_filters, character_filters,
+            difficulty_filters, search_text,
+        )
+        visible_ids = {
+            str(row.get("MissionID", "")).strip().upper() for row in visible
+        }
+
+        select_cols = st.columns(4)
+        selection_action = None
+        if select_cols[0].button("Select All", key=f"bulk_select_all_{event_id}", width="stretch"):
+            selection_action = selected_ids | visible_ids
+        if select_cols[1].button("Clear Selection", key=f"bulk_clear_{event_id}", width="stretch"):
+            selection_action = selected_ids - visible_ids
+        if select_cols[2].button("Select Active", key=f"bulk_select_active_{event_id}", width="stretch"):
+            active_ids = {
+                str(row.get("MissionID", "")).strip().upper() for row in visible
+                if _bulk_status_label(row.get("Status")) == "Active"
+            }
+            selection_action = (selected_ids - visible_ids) | active_ids
+        if select_cols[3].button("Select Inactive", key=f"bulk_select_inactive_{event_id}", width="stretch"):
+            inactive_ids = {
+                str(row.get("MissionID", "")).strip().upper() for row in visible
+                if _bulk_status_label(row.get("Status")) == "Inactive"
+            }
+            selection_action = (selected_ids - visible_ids) | inactive_ids
+
+        invert_col, activate_col, deactivate_col = st.columns(3)
+        if invert_col.button("Invert Selection", key=f"bulk_invert_{event_id}", width="stretch"):
+            selection_action = selected_ids.symmetric_difference(visible_ids)
+        if selection_action is not None:
+            st.session_state[selection_key] = sorted(selection_action)
+            st.session_state[version_key] = int(st.session_state.get(version_key, 0)) + 1
+            st.rerun()
+
+        table_rows = []
+        for mission in visible:
+            mission_id = str(mission.get("MissionID", "")).strip().upper()
+            table_rows.append({
+                "Selected": mission_id in selected_ids,
+                "Reference Image": reference_image_preview_source(
+                    mission.get("ReferenceImageURL", "")
+                ),
+                "Experience Name": str(mission.get("Title", "Untitled Experience")),
+                "Experience Type": str(mission.get("MissionType", "Observe") or "Observe").title(),
+                "Intelligence Credits": safe_int(
+                    mission.get("CreditValue", mission.get("Points", 0)), 0,
+                ),
+                "Current Status": _bulk_status_label(mission.get("Status")),
+                "Character": str(mission.get("CharacterSource", "None") or "None"),
+                "Order": safe_int(mission.get("DisplayOrder"), 9999),
+                "Experience ID": mission_id,
+            })
+        frame = pd.DataFrame(table_rows)
+        if frame.empty:
+            st.info("No Experiences match the current filters.")
+        else:
+            edited = st.data_editor(
+                frame,
+                key=(
+                    f"bulk_experience_editor_{event_id}_"
+                    f"{int(st.session_state.get(version_key, 0))}"
+                ),
+                hide_index=True,
+                width="stretch",
+                height=min(720, 42 + len(frame) * 36),
+                disabled=[
+                    "Reference Image", "Experience Name", "Experience Type",
+                    "Intelligence Credits", "Current Status", "Character",
+                    "Order", "Experience ID",
+                ],
+                column_config={
+                    "Selected": st.column_config.CheckboxColumn("Select", width="small"),
+                    "Reference Image": st.column_config.ImageColumn("Image", width="small"),
+                    "Experience Name": st.column_config.TextColumn("Experience Name", width="large"),
+                    "Experience ID": None,
+                },
+            )
+            edited_visible_ids = set(
+                edited.loc[edited["Selected"], "Experience ID"].astype(str)
+            )
+            selected_ids = (selected_ids - visible_ids) | edited_visible_ids
+            st.session_state[selection_key] = sorted(selected_ids)
+
+        if activate_col.button(
+            "Activate Selected", key=f"bulk_activate_{event_id}", width="stretch",
+            disabled=not selected_ids,
+        ):
+            pending.update({mission_id: "ACTIVE" for mission_id in selected_ids})
+            st.session_state[pending_key] = pending
+            st.rerun()
+        if deactivate_col.button(
+            "Deactivate Selected", key=f"bulk_deactivate_{event_id}", width="stretch",
+            disabled=not selected_ids,
+        ):
+            pending.update({mission_id: "INACTIVE" for mission_id in selected_ids})
+            st.session_state[pending_key] = pending
+            st.rerun()
+
+        will_activate = sum(
+            1 for mission_id, status in pending.items()
+            if status == "ACTIVE"
+            and _bulk_status_label(mission_by_id[mission_id].get("Status")) != "Active"
+        )
+        will_deactivate = sum(
+            1 for mission_id, status in pending.items()
+            if status == "INACTIVE"
+            and _bulk_status_label(mission_by_id[mission_id].get("Status")) != "Inactive"
+        )
+        summary1, summary2, summary3 = st.columns(3)
+        summary1.metric("Selected Experiences", len(selected_ids))
+        summary2.metric("Will Activate", will_activate)
+        summary3.metric("Will Deactivate", will_deactivate)
+        confirm = st.checkbox(
+            "Apply these status changes?",
+            key=f"bulk_confirm_status_{event_id}",
+            disabled=not (will_activate or will_deactivate),
+        )
+        if st.button(
+            "Save Changes", type="primary", width="stretch",
+            key=f"bulk_save_status_{event_id}",
+            disabled=not confirm or not (will_activate or will_deactivate),
+        ):
+            result = db.bulk_update_event_mission_statuses(event_id, pending)
+            st.session_state[pending_key] = {}
+            st.session_state[selection_key] = []
+            st.session_state[version_key] = int(st.session_state.get(version_key, 0)) + 1
+            st.success(
+                f"Saved {result['Updated']} status change(s): "
+                f"{result['Activated']} activated, {result['Deactivated']} deactivated."
+            )
+            st.rerun()
 
 
 

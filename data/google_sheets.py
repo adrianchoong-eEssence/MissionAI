@@ -2529,6 +2529,65 @@ class GoogleSheetsDB:
         self.clear_cache()
         return {"MissionID": mission_id, "Action": action}
 
+    def bulk_update_event_mission_statuses(self, event_id, status_by_mission_id):
+        """Update only Status cells for event missions in one Sheets request."""
+        wanted_event_id = str(event_id or "").strip()
+        requested = {
+            str(mission_id or "").strip().upper(): str(status or "").strip().upper()
+            for mission_id, status in dict(status_by_mission_id or {}).items()
+            if str(mission_id or "").strip()
+        }
+        if not wanted_event_id or not requested:
+            return {"Updated": 0, "Activated": 0, "Deactivated": 0, "Unchanged": 0}
+        invalid = sorted(
+            status for status in set(requested.values())
+            if status not in {"ACTIVE", "INACTIVE"}
+        )
+        if invalid:
+            raise ValueError(f"Unsupported Experience status: {', '.join(invalid)}")
+
+        rows = get_sheet_records("Missions")
+        headers = self.missions.row_values(1)
+        status_column = headers.index("Status") + 1
+        found = set()
+        updates = []
+        activated = 0
+        deactivated = 0
+        unchanged = 0
+        for row_number, row in enumerate(rows, start=2):
+            if str(row.get("EventID", "")).strip() != wanted_event_id:
+                continue
+            mission_id = str(row.get("MissionID", "")).strip().upper()
+            if mission_id not in requested:
+                continue
+            found.add(mission_id)
+            target = requested[mission_id]
+            current = str(row.get("Status", "") or "").strip().upper()
+            if current == target:
+                unchanged += 1
+                continue
+            cell = gspread.utils.rowcol_to_a1(row_number, status_column)
+            updates.append({"range": cell, "values": [[target]]})
+            if target == "ACTIVE":
+                activated += 1
+            else:
+                deactivated += 1
+
+        missing = sorted(set(requested) - found)
+        if missing:
+            raise ValueError(
+                "Experience IDs were not found for this event: " + ", ".join(missing)
+            )
+        if updates:
+            self.missions.batch_update(updates)
+            self.clear_cache()
+        return {
+            "Updated": len(updates),
+            "Activated": activated,
+            "Deactivated": deactivated,
+            "Unchanged": unchanged,
+        }
+
     def add_template_to_event(self, template_id, event_id, mission_id=""):
         template = self.get_mission_template(template_id)
         if not template:

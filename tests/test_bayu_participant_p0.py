@@ -253,6 +253,8 @@ def test_required_bayu_participant_copy_and_history_fix_are_present():
     assert 'if str(st.query_params.get(key, "")) != str(value)' in source
     assert "or _is_bayu_event()" in source
     assert 'st.caption(f"Build: {running_build_sha()}")' in source
+    assert 'mission_id == "LAB18"' in source
+    assert "return morning[:17]" not in source
 
 
 def test_current_team_leader_grants_only_the_selected_participant():

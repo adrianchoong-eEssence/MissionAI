@@ -5,6 +5,7 @@ from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
 from screens.mission_setup import (
     difficulty_options,
     event_module_options,
+    filter_bulk_experiences,
     mission_module_name,
     reference_image_preview_source,
 )
@@ -109,6 +110,54 @@ class MissionStudioDataTests(unittest.TestCase):
         self.assertEqual(result["Errors"], [])
         self.assertEqual(len(database.mission_templates.batch_updated), 1)
         self.assertEqual(len(database.mission_templates.appended), 1)
+
+    def test_bulk_status_update_changes_only_status_cells_in_one_batch(self):
+        database = self.make_db()
+        records = [
+            {"EventID": "EVT-1", "MissionID": "M01", "Status": "INACTIVE", "Title": "One"},
+            {"EventID": "EVT-1", "MissionID": "M02", "Status": "ACTIVE", "Title": "Two"},
+            {"EventID": "EVT-2", "MissionID": "M01", "Status": "ACTIVE", "Title": "Other"},
+        ]
+        with patch("data.google_sheets.get_sheet_records", return_value=records):
+            result = database.bulk_update_event_mission_statuses(
+                "EVT-1", {"M01": "ACTIVE", "M02": "INACTIVE"},
+            )
+
+        self.assertEqual(result, {
+            "Updated": 2, "Activated": 1, "Deactivated": 1, "Unchanged": 0,
+        })
+        self.assertEqual(len(database.missions.batch_updated), 2)
+        self.assertEqual(
+            [update["values"] for update in database.missions.batch_updated],
+            [[["ACTIVE"]], [["INACTIVE"]]],
+        )
+        self.assertTrue(all(":" not in update["range"] for update in database.missions.batch_updated))
+
+    def test_bulk_status_update_rejects_cross_event_or_missing_ids(self):
+        database = self.make_db()
+        records = [{"EventID": "EVT-1", "MissionID": "M01", "Status": "ACTIVE"}]
+        with patch("data.google_sheets.get_sheet_records", return_value=records):
+            with self.assertRaisesRegex(ValueError, "were not found"):
+                database.bulk_update_event_mission_statuses(
+                    "EVT-1", {"MISSING": "INACTIVE"},
+                )
+        self.assertEqual(database.missions.batch_updated, [])
+
+    def test_bulk_experience_filters_combine_status_type_character_and_search(self):
+        missions = [
+            {
+                "MissionID": "M01", "Title": "Garden Signal", "Status": "ACTIVE",
+                "MissionType": "Observe", "CharacterSource": "EVA", "Difficulty": "Easy",
+            },
+            {
+                "MissionID": "M02", "Title": "Engine Code", "Status": "INACTIVE",
+                "MissionType": "Think", "CharacterSource": "Headquarters", "Difficulty": "Medium",
+            },
+        ]
+        filtered = filter_bulk_experiences(
+            missions, ["Inactive"], ["Think"], ["Headquarters"], ["Medium"], "engine",
+        )
+        self.assertEqual([row["MissionID"] for row in filtered], ["M02"])
 
     def test_add_template_to_event_maps_instructions_and_media(self):
         database = self.make_db()
