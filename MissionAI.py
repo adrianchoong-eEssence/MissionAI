@@ -1,6 +1,6 @@
 import streamlit as st
 
-from branding import apply_branding, configure_page, footer
+from branding import apply_branding, configure_page, footer, sidebar_identity
 from screens.administration import APP_VERSION, show_administration
 from screens.asset_library import show_asset_library
 from screens.app_state import ACTIVE_EVENT_KEY, NAVIGATION_REQUEST_KEY
@@ -42,7 +42,7 @@ def apply_navigation_request():
 
 apply_navigation_request()
 
-st.sidebar.caption("eEssence eXperiential OS")
+sidebar_identity()
 page = st.sidebar.radio(
     "Workspace",
     PAGES,
@@ -55,8 +55,6 @@ if active_event_id:
     st.sidebar.divider()
     st.sidebar.caption("Active event")
     st.sidebar.info(active_event_id)
-st.sidebar.divider()
-st.sidebar.caption(APP_VERSION)
 
 if page == "Events":
     show_events_home()

@@ -3,10 +3,11 @@ from datetime import datetime
 
 import streamlit as st
 
+from branding import PLATFORM_EXPANSION, PLATFORM_VERSION
 from data.google_sheets import GoogleSheetsDB
 
 
-APP_VERSION = "EXOS 2026.07 Consolidation RC1"
+APP_VERSION = PLATFORM_VERSION
 BUILD_TIMESTAMP = "2026-07-28"
 
 
@@ -14,6 +15,11 @@ def show_administration():
     st.title("Administration")
     st.caption("System information, data safety and recoverable archives.")
     st.info(f"Version: {APP_VERSION} · Build: {BUILD_TIMESTAMP}")
+    with st.container(border=True):
+        st.subheader("About EXOS")
+        st.markdown("### EXOS")
+        st.write(PLATFORM_EXPANSION)
+        st.caption("Powered by eEssence Consultants Sdn Bhd")
     st.toggle(
         "Administration mode",
         key="exos_administration_mode",

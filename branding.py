@@ -20,7 +20,9 @@ EXOS_GOLD = "#B59A37"
 EXOS_INK = "#082D58"
 EXOS_PAPER = "#FFFFFF"
 PLATFORM_NAME = "EXOS"
-PLATFORM_EXPANSION = "eEssence eXperiential OS"
+PLATFORM_EXPANSION = "eEssence Xperiential Operating System"
+PLATFORM_TAGLINE = "Where Experiences Come Alive."
+PLATFORM_VERSION = "Version 1.0"
 COMPANY_NAME = "eEssence"
 BROWSER_TITLE = "EXOS"
 
@@ -199,6 +201,35 @@ def apply_branding(
             color:{EXOS_NAVY}; font-size:clamp(2rem,5vw,4.3rem);
             font-weight:800; line-height:1.02; margin:.3rem 0 .7rem;
           }}
+          .exos-product-hero {{
+            margin:0 0 2.5rem; max-width:980px;
+          }}
+          .exos-product-mark {{
+            color:{EXOS_NAVY}; font-size:clamp(4rem,9vw,8rem);
+            font-weight:950; letter-spacing:-.055em; line-height:.88;
+          }}
+          .exos-product-name {{
+            color:{EXOS_NAVY}; font-size:clamp(1.25rem,2.4vw,2rem);
+            font-weight:720; letter-spacing:.015em; line-height:1.25;
+            margin-top:1.15rem;
+          }}
+          .exos-product-tagline {{
+            color:{EXOS_BLUE}; font-size:clamp(1rem,1.7vw,1.3rem);
+            font-weight:650; letter-spacing:.08em; margin-top:.8rem;
+          }}
+          .exos-sidebar-identity {{
+            color:{EXOS_NAVY}; padding:.2rem .65rem 1rem;
+          }}
+          .exos-sidebar-mark {{
+            font-size:1.5rem; font-weight:950; letter-spacing:.06em;
+          }}
+          .exos-sidebar-name {{
+            font-size:.84rem; font-weight:650; line-height:1.35;
+            margin-top:.3rem;
+          }}
+          .exos-sidebar-version {{
+            font-size:.76rem; font-weight:650; opacity:.65; margin-top:.3rem;
+          }}
           .exos-powered {{
             color:inherit; opacity:.68; font-size:.82rem; letter-spacing:.08em;
           }}
@@ -262,7 +293,7 @@ def apply_branding(
             const splash=d.createElement('div');
             splash.id='exos-splash';
             splash.innerHTML='<div style="font:800 64px Eurostile,Arial;letter-spacing:.06em">E<span style="color:{EXOS_GOLD}">X</span>OS</div>'
-              + '<div style="margin-top:18px;letter-spacing:.18em;font:15px Eurostile,Arial">eEssence eXperiential OS</div>';
+              + '<div style="margin-top:18px;letter-spacing:.12em;font:15px Eurostile,Arial">eEssence Xperiential Operating System</div>';
             splash.style.cssText='position:fixed;inset:0;z-index:999999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:{EXOS_NAVY};color:white;transition:opacity .35s ease';
             d.body.appendChild(splash);
             setTimeout(() => {{ splash.style.opacity='0'; setTimeout(() => splash.remove(), 380); }}, 850);
@@ -413,14 +444,39 @@ def experience_header(
     )
 
 
+def platform_hero() -> None:
+    st.markdown(
+        f"""
+        <div class="exos-product-hero">
+          <div class="exos-product-mark">EXOS</div>
+          <div class="exos-product-name">{html.escape(PLATFORM_EXPANSION)}</div>
+          <div class="exos-product-tagline">{html.escape(PLATFORM_TAGLINE)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def sidebar_identity() -> None:
+    st.sidebar.markdown(
+        f"""
+        <div class="exos-sidebar-identity">
+          <div class="exos-sidebar-mark">EXOS</div>
+          <div class="exos-sidebar-name">{html.escape(PLATFORM_EXPANSION)}</div>
+          <div class="exos-sidebar-version">{PLATFORM_VERSION}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def footer(*, report: bool = False) -> None:
-    second_line = "Designed by eEssence Consultants" if report else PLATFORM_EXPANSION
     st.markdown(
         f"""
         <div class="exos-footer">
           <strong>EXOS</strong><br>
-          <span style="font-size:.78rem;opacity:.72;">{html.escape(second_line)}</span>
-          <br><span style="font-size:.72rem;opacity:.62;">by eEssence</span>
+          <span style="font-size:.78rem;opacity:.72;">{html.escape(PLATFORM_EXPANSION)}</span>
+          <br><span style="font-size:.72rem;opacity:.62;">{PLATFORM_VERSION}</span>
         </div>
         """,
         unsafe_allow_html=True,

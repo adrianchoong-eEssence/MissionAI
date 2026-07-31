@@ -207,7 +207,7 @@ def display_header(event, mode):
                 {mode}
             </div>
             <div class="projector-brand">
-                eEssence eXperiential OS
+                eEssence Xperiential Operating System
             </div>
             <div class="projector-brand-by">
                 by eEssence

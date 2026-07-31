@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-label="EXOS — eEssence eXperiential OS">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-label="EXOS — eEssence Xperiential Operating System">
   <rect width="1200" height="360" fill="none"/>
   <g font-family="Eurostile, Arial Narrow, Arial, sans-serif" font-weight="700">
     <text x="108" y="210" font-size="205" letter-spacing="4" fill="#FFFFFF">E</text>
@@ -8,7 +8,7 @@
   <path d="M250 237 Q386 328 520 237" fill="none" stroke="#B59A37" stroke-width="22"/>
   <path d="M277 90 L327 90 L493 212 L441 212 Z" fill="#FFFFFF"/>
   <path d="M443 90 L493 90 L327 212 L275 212 Z" fill="#B59A37"/>
-  <text x="600" y="310" text-anchor="middle" font-family="Eurostile, Arial Narrow, Arial, sans-serif" font-size="41" letter-spacing="11" fill="#FFFFFF">
-    <tspan fill="#FFFFFF">e</tspan><tspan fill="#B59A37">E</tspan><tspan>ssence e</tspan><tspan fill="#FFFFFF">X</tspan><tspan>periential OS</tspan>
+  <text x="600" y="310" text-anchor="middle" font-family="Eurostile, Arial Narrow, Arial, sans-serif" font-size="28" letter-spacing="3" fill="#FFFFFF">
+    <tspan fill="#FFFFFF">e</tspan><tspan fill="#B59A37">E</tspan><tspan>ssence </tspan><tspan fill="#FFFFFF">X</tspan><tspan>periential Operating System</tspan>
   </text>
 </svg>
