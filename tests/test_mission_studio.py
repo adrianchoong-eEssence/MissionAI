@@ -5,6 +5,7 @@ from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
 from screens.mission_setup import (
     difficulty_options,
     event_module_options,
+    filter_and_sort_experience_cards,
     filter_bulk_experiences,
     mission_module_name,
     reference_image_preview_source,
@@ -158,6 +159,36 @@ class MissionStudioDataTests(unittest.TestCase):
             missions, ["Inactive"], ["Think"], ["Headquarters"], ["Medium"], "engine",
         )
         self.assertEqual([row["MissionID"] for row in filtered], ["M02"])
+
+    def test_visual_cards_filter_and_sort_without_changing_records(self):
+        missions = [
+            {
+                "MissionID": "C02", "Title": "Tree Signal", "Status": "INACTIVE",
+                "DisplayOrder": 20, "ReferenceImageURL": "tree.jpg",
+            },
+            {
+                "MissionID": "M01", "Title": "Paris Fragment", "Status": "ACTIVE",
+                "DisplayOrder": 1, "ReferenceImageURL": "paris.jpg",
+            },
+            {
+                "MissionID": "C01", "Title": "Garden Tree", "Status": "INACTIVE",
+                "DisplayOrder": 10, "ReferenceImageURL": "garden.jpg",
+            },
+        ]
+        originals = [dict(row) for row in missions]
+
+        inactive = filter_and_sort_experience_cards(
+            missions, "Inactive only", "tree", "Experience name",
+        )
+        active_first = filter_and_sort_experience_cards(
+            missions, "All", "", "Active status",
+        )
+
+        self.assertEqual(
+            [row["MissionID"] for row in inactive], ["C01", "C02"],
+        )
+        self.assertEqual(active_first[0]["MissionID"], "M01")
+        self.assertEqual(missions, originals)
 
     def test_add_template_to_event_maps_instructions_and_media(self):
         database = self.make_db()

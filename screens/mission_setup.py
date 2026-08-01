@@ -1022,32 +1022,135 @@ def render_event_mission_editor(db):
         return
 
     st.markdown("## Experiences")
-    st.caption("Choose an experience to start authoring.")
+    st.caption("Review images and curate Experiences without opening each record.")
+    filter_col, search_col, sort_col = st.columns([1, 2, 1])
+    card_status_filter = filter_col.radio(
+        "Show",
+        ["All", "Active only", "Inactive only"],
+        horizontal=True,
+        key=f"experience_card_status_{event_id}_{clean_id(module)}",
+    )
+    card_search = search_col.text_input(
+        "Search by name",
+        key=f"experience_card_search_{event_id}_{clean_id(module)}",
+    )
+    card_sort = sort_col.selectbox(
+        "Sort by",
+        ["Created order", "Experience name", "Active status"],
+        key=f"experience_card_sort_{event_id}_{clean_id(module)}",
+    )
+    visible_missions = filter_and_sort_experience_cards(
+        missions, card_status_filter, card_search, card_sort,
+    )
     if not missions:
         st.info("No experiences belong to this event and module yet.")
-    for row_index, mission in enumerate(missions):
+    elif not visible_missions:
+        st.info("No Experiences match the selected filters.")
+    delete_key = f"mission_studio_delete_candidate_{event_id}"
+    for row_index, mission in enumerate(visible_missions):
+        mission_id = str(mission.get("MissionID", "")).strip()
+        card_token = f"{mission_id}:{row_index}"
+        title = str(mission.get("Title", "Untitled Experience"))
+        status = _bulk_status_label(mission.get("Status"))
+        reference = reference_image_preview_source(
+            mission.get("ReferenceImageURL", "")
+        )
         with st.container(border=True):
-            title_col, action_col = st.columns([5, 1])
-            with title_col:
-                st.markdown(f"### {mission.get('Title', 'Untitled Experience')}")
-                status = str(mission.get("Status", "DRAFT") or "DRAFT").title()
-                category = str(mission.get("Category", "") or "").strip()
-                st.caption(" · ".join(item for item in (category, status) if item))
+            image_col, detail_col, action_col = st.columns([2.4, 4, 1.5])
+            with image_col:
+                if reference:
+                    st.image(reference, width="stretch")
+                else:
+                    st.info("No reference image")
+            with detail_col:
+                st.markdown(f"### {title}")
+                experience_type = str(
+                    mission.get("MissionType", "Observe") or "Observe"
+                ).title()
+                credits = safe_int(
+                    mission.get("CreditValue", mission.get("Points", 0)), 0,
+                )
+                st.markdown(
+                    f"**{experience_type}** · **{credits} Intelligence Credits**"
+                )
+                st.caption(f"Status: {status}")
                 if st.session_state.get("exos_administration_mode"):
-                    st.caption(f"Experience code: {mission.get('MissionID', '')}")
+                    st.caption(f"Experience code: {mission_id}")
             with action_col:
+                is_active = status == "Active"
+                toggled_active = st.toggle(
+                    "Active",
+                    value=is_active,
+                    key=(
+                        f"experience_card_active_{event_id}_{mission_id}_"
+                        f"{row_index}_{is_active}"
+                    ),
+                )
+                if toggled_active != is_active:
+                    db.bulk_update_event_mission_statuses(
+                        event_id,
+                        {mission_id: "ACTIVE" if toggled_active else "INACTIVE"},
+                    )
+                    st.session_state["mission_studio_message"] = (
+                        f"{title} is now {'Active' if toggled_active else 'Inactive'}."
+                    )
+                    st.rerun()
                 if st.button(
                     "Edit",
                     key=(
                         f"edit_event_mission_{event_id}_"
-                        f"{mission.get('MissionID')}_{row_index}"
+                        f"{mission_id}_{row_index}"
                     ),
                     width="stretch",
                 ):
-                    st.session_state["mission_studio_selected_mission"] = str(
-                        mission.get("MissionID", "")
-                    )
+                    st.session_state["mission_studio_selected_mission"] = mission_id
                     st.rerun()
+                if st.button(
+                    "Delete",
+                    key=f"delete_event_mission_card_{event_id}_{mission_id}_{row_index}",
+                    width="stretch",
+                ):
+                    st.session_state[delete_key] = card_token
+                    st.rerun()
+            if str(st.session_state.get(delete_key, "")) == card_token:
+                st.divider()
+                confirm_image_col, confirm_text_col = st.columns([1, 4])
+                with confirm_image_col:
+                    if reference:
+                        st.image(reference, width="stretch")
+                with confirm_text_col:
+                    st.error("Delete this Experience?")
+                    st.markdown(f"**{title}**")
+                    st.caption(
+                        "This permanently removes only this Experience record. "
+                        "Its shared Asset Library image is preserved."
+                    )
+                    cancel_col, delete_col = st.columns(2)
+                    if cancel_col.button(
+                        "Cancel",
+                        key=(
+                            f"cancel_delete_card_{event_id}_{mission_id}_"
+                            f"{row_index}"
+                        ),
+                        width="stretch",
+                    ):
+                        st.session_state.pop(delete_key, None)
+                        st.rerun()
+                    if delete_col.button(
+                        "Delete",
+                        type="primary",
+                        key=(
+                            f"confirm_delete_card_{event_id}_{mission_id}_"
+                            f"{row_index}"
+                        ),
+                        width="stretch",
+                    ):
+                        db.delete_event_mission(event_id, mission_id)
+                        st.session_state.pop(delete_key, None)
+                        st.session_state["mission_studio_message"] = (
+                            f"Deleted experience {title}."
+                        )
+                        st.rerun()
 
     with st.expander("New Experience"):
         creation_mode = st.radio(
@@ -1112,6 +1215,47 @@ def filter_bulk_experiences(
         and (not wanted_difficulties or str(mission.get("Difficulty", "Unspecified") or "Unspecified").title() in wanted_difficulties)
         and (not query or query in str(mission.get("Title", "")).casefold())
     ]
+
+
+def filter_and_sort_experience_cards(
+    missions, status_filter="All", search_text="", sort_by="Created order",
+):
+    """Return main-list Experience cards using lightweight event-level controls."""
+    query = str(search_text or "").strip().casefold()
+    wanted_status = str(status_filter or "All").strip().casefold()
+    visible = [
+        mission for mission in missions
+        if (
+            wanted_status == "all"
+            or _bulk_status_label(mission.get("Status")).casefold()
+            == wanted_status.removesuffix(" only")
+        )
+        and (not query or query in str(mission.get("Title", "")).casefold())
+    ]
+    if sort_by == "Experience name":
+        return sorted(
+            visible,
+            key=lambda row: (
+                str(row.get("Title", "")).casefold(),
+                str(row.get("MissionID", "")).casefold(),
+            ),
+        )
+    if sort_by == "Active status":
+        return sorted(
+            visible,
+            key=lambda row: (
+                0 if _bulk_status_label(row.get("Status")) == "Active" else 1,
+                safe_int(row.get("DisplayOrder"), 9999),
+                str(row.get("Title", "")).casefold(),
+            ),
+        )
+    return sorted(
+        visible,
+        key=lambda row: (
+            safe_int(row.get("DisplayOrder"), 9999),
+            str(row.get("MissionID", "")).casefold(),
+        ),
+    )
 
 
 def render_bulk_experience_activation_manager(db, event_id, missions):
