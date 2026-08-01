@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from data.google_sheets import GoogleSheetsDB, REQUIRED_WORKSHEETS
@@ -15,7 +16,7 @@ class UploadedPortrait:
 
     @staticmethod
     def getvalue():
-        return b"eva-portrait-bytes"
+        return Path("Assets/exos/exos-mobile-192.png").read_bytes()
 
 
 class CharacterPortraitTests(unittest.TestCase):

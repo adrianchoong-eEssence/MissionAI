@@ -13,7 +13,7 @@ class UploadedImage:
 
     @staticmethod
     def getvalue():
-        return b"asset-bytes"
+        return Path("Assets/exos/exos-mobile-192.png").read_bytes()
 
 
 class Runtime:
@@ -81,6 +81,16 @@ def test_replacing_library_asset_reuses_deterministic_storage_object():
         "assets/asset-001/file",
         "assets/asset-001/file",
     ]
+
+
+def test_renamed_non_image_is_rejected_before_storage():
+    runtime = Runtime()
+    invalid = UploadedImage()
+    invalid.getvalue = lambda: b"not-an-image"
+    with patch("data.mission_media.get_runtime_database", return_value=runtime):
+        with pytest.raises(ValueError, match="not a valid image"):
+            upload_library_asset(invalid, "ASSET-INVALID")
+    assert runtime.paths == []
 
 
 def test_existing_character_and_mission_image_references_are_catalogued_once():

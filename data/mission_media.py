@@ -4,7 +4,7 @@ import uuid
 import streamlit as st
 
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
-from data.upload_safety import validate_upload
+from data.upload_safety import validate_image_content, validate_upload
 
 
 BUCKET = "exos-mission-media"
@@ -56,6 +56,8 @@ def upload_mission_media(uploaded_file, template_id, media_kind):
     file_bytes = validate_upload(
         uploaded_file, extensions, mime_types, MEDIA_LIMITS[kind], kind,
     )
+    if kind == "image":
+        validate_image_content(file_bytes, "image")
 
     template_segment = _safe_segment(str(template_id).upper(), "UNASSIGNED")
     filename = _safe_segment(uploaded_file.name, f"{kind}-file")
@@ -83,6 +85,7 @@ def upload_character_portrait(uploaded_file, character_source):
         uploaded_file, extensions, mime_types,
         MEDIA_LIMITS["image"], "portrait image",
     )
+    validate_image_content(file_bytes, "portrait image")
 
     character_segment = _safe_segment(
         str(character_source).lower(),
@@ -109,6 +112,7 @@ def upload_library_asset(uploaded_file, asset_id, current_reference=""):
     file_bytes = validate_upload(
         uploaded_file, extensions, mime_types, MEDIA_LIMITS["image"], "asset image",
     )
+    validate_image_content(file_bytes, "asset image")
 
     asset_segment = _safe_segment(str(asset_id).lower(), "unassigned-asset")
     storage_path = (

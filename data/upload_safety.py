@@ -1,5 +1,8 @@
 import logging
+import io
 import uuid
+
+from PIL import Image
 
 
 LOGGER = logging.getLogger(__name__)
@@ -31,4 +34,16 @@ def validate_upload(uploaded_file, allowed_extensions, allowed_mime_types, max_b
         raise ValueError(f"The selected {label.lower()} is empty.")
     if len(file_bytes) > max_bytes:
         raise ValueError(f"The {label.lower()} exceeds the {max_bytes // (1024 * 1024)} MB limit.")
+    return file_bytes
+
+
+def validate_image_content(file_bytes, label="image"):
+    """Reject renamed or corrupt files before they reach image storage."""
+    try:
+        with Image.open(io.BytesIO(file_bytes)) as image:
+            image.verify()
+    except Exception:
+        raise ValueError(
+            f"The selected {label.lower()} is not a valid image file."
+        ) from None
     return file_bytes
