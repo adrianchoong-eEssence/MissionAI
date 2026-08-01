@@ -449,7 +449,7 @@ class RuntimeProgrammeTests(unittest.TestCase):
             cleanup_calls.append((method, path, payload, query, admin))
             return []
 
-        def fake_join(join_code, name):
+        def fake_join(join_code, name, device_id):
             number = int(name.split("-")[-1].split()[0])
             return {
                 "Name": name,

@@ -187,39 +187,27 @@ def test_bayu_join_auto_assigns_the_least_populated_country():
         is_configured = True
         can_publish = True
 
-        def ensure_event_teams(self, event, teams):
-            self.ensured_teams = [team["TeamName"] for team in teams]
-
-        def join_player(self, join_code, name):
+        def join_player(self, join_code, name, device_id):
+            self.join_args = (join_code, name, device_id)
             return {
                 "EventID": "EVT-0004", "Name": name,
-                "Team": "Wrong Round Robin Team", "SessionToken": "TOKEN",
+                "Team": "🇹🇭 Thailand", "SessionToken": "TOKEN",
+                "Status": "COUNTRY:Thailand",
             }
-
-        def assign_participant_country_team(self, token, team, country):
-            self.assignment = (token, team, country)
-
-        @staticmethod
-        def get_players(event_id):
-            return [
-                {"Team": "🇰🇷 Korea", "SessionToken": "K1"},
-                {"Team": "🇰🇷 Korea", "SessionToken": "K2"},
-                {"Team": "🇯🇵 Japan", "SessionToken": "J1"},
-            ]
 
     db = GoogleSheetsDB.__new__(GoogleSheetsDB)
     db.runtime = Runtime()
     db.get_event_by_join_code = lambda code: {"EventID": "EVT-0004"}
 
-    player = db.join_player_by_code("12DYLD", "Adrian Choong")
+    player = db.join_player_by_code(
+        "12DYLD", "Adrian Choong", device_id="DEVICE-1",
+    )
 
     assert player["Team"] == "🇹🇭 Thailand"
     assert player["Country"] == "Thailand"
-    assert db.runtime.assignment == ("TOKEN", "🇹🇭 Thailand", "Thailand")
-    assert db.runtime.ensured_teams == [
-        "🇰🇷 Korea", "🇯🇵 Japan", "🇹🇭 Thailand",
-        "🇵🇭 Philippines", "🇲🇾 Malaysia", "🇮🇳 India",
-    ]
+    assert db.runtime.join_args == (
+        "12DYLD", "Adrian Choong", "DEVICE-1",
+    )
 
 
 def test_bayu_country_catalogue_contains_exactly_the_approved_six():

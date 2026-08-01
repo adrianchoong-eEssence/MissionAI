@@ -3,6 +3,7 @@ import json
 import os
 import time
 import uuid
+import statistics
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -548,19 +549,32 @@ class SupabaseRuntimeDB:
         value = str(status or "")
         return value.split("COUNTRY:", 1)[1].split("|", 1)[0] if "COUNTRY:" in value else ""
 
-    def join_player(self, join_code, participant_name):
+    def join_player(self, join_code, participant_name, device_id):
         result = self._request(
             "POST",
             "rpc/exos_join_event",
             payload={
                 "p_join_code": str(join_code).strip().upper(),
                 "p_participant_name": str(participant_name).strip(),
+                "p_device_id": str(device_id).strip(),
             },
         )
         row = self._normalise_result(result)
         if not row:
             raise RuntimeDatabaseError("Registration returned no participant record.")
         return row
+
+    def restore_join(self, join_code, participant_name, device_id):
+        result = self._request(
+            "POST",
+            "rpc/exos_restore_join",
+            payload={
+                "p_join_code": str(join_code).strip().upper(),
+                "p_participant_name": str(participant_name).strip(),
+                "p_device_id": str(device_id).strip(),
+            },
+        )
+        return self._normalise_result(result)
 
     def assign_participant_country_team(self, session_token, team_name, country):
         result = self._request(
@@ -670,6 +684,60 @@ class SupabaseRuntimeDB:
             }
             for row in rows
         ]
+
+    def audit_participant_duplicates(self, event_id):
+        """Report likely duplicates without changing participant records."""
+        rows = self._request(
+            "GET", "runtime_participants",
+            query={
+                "event_id": f"eq.{str(event_id).strip()}",
+                "select": (
+                    "participant_id,event_id,normalized_name,display_name,"
+                    "team_name,status,joined_at,session_token,idempotency_key"
+                ),
+                "order": "normalized_name.asc,joined_at.asc",
+            },
+            admin=True,
+        ) or []
+        grouped = {}
+        for row in rows:
+            normalized = " ".join(
+                str(row.get("normalized_name") or row.get("display_name") or "")
+                .strip().lower().split()
+            )
+            grouped.setdefault(normalized, []).append(row)
+
+        duplicates = []
+        for normalized, matches in grouped.items():
+            if not normalized or len(matches) < 2:
+                continue
+            duplicates.append({
+                "EventID": str(event_id).strip(),
+                "NormalizedName": normalized,
+                "Count": len(matches),
+                "ParticipantIDs": [row.get("participant_id", "") for row in matches],
+                "DisplayNames": [row.get("display_name", "") for row in matches],
+                "Teams": [row.get("team_name", "") for row in matches],
+                "Countries": [self._participant_country(row.get("status", "")) for row in matches],
+                "JoinedAt": [row.get("joined_at", "") for row in matches],
+                "SessionTokens": [row.get("session_token", "") for row in matches],
+                "IdempotencyKeys": [row.get("idempotency_key", "") for row in matches],
+            })
+        return {"Participants": len(rows), "DuplicateGroups": duplicates}
+
+    def delete_load_test_participants(self, event_id, run_id):
+        """Delete only participants carrying one explicit LOAD run marker."""
+        marker = str(run_id).strip().upper()
+        if not marker or any(character not in "0123456789ABCDEF" for character in marker):
+            raise ValueError("A valid LOAD run ID is required.")
+        return self._request(
+            "DELETE", "runtime_participants",
+            query={
+                "event_id": f"eq.{str(event_id).strip()}",
+                "display_name": f"ilike.LOAD-{marker}-%",
+            },
+            admin=True,
+        ) or []
 
     def reset_event_registration(self, event_id):
         result = self._request(
@@ -1192,60 +1260,107 @@ class SupabaseRuntimeDB:
         )
         return self._normalise_result(result) or {}
 
-    def run_join_load_test(self, join_code, total_participants=100, max_workers=40):
+    def run_join_load_test(self, join_code, total_participants=100, max_workers=100):
+        """Exercise atomic joins and retries through the real production RPC."""
         total = max(1, int(total_participants))
-        workers = max(1, min(int(max_workers), total, 50))
+        workers = max(1, min(int(max_workers), total * 2, 100))
         run_id = uuid.uuid4().hex[:8].upper()
         started = time.perf_counter()
         joined = []
         errors = []
+        latencies = []
 
         def join_test_participant(number):
-            name = f"LOAD-{run_id}-{number:03d}"
-            return self.join_player(join_code, name)
+            name = f"LOAD-{run_id}-{number:03d} Tester"
+            call_started = time.perf_counter()
+            player = self.join_player(
+                join_code, name, f"LOAD-DEVICE-{run_id}-{number:03d}",
+            )
+            return player, time.perf_counter() - call_started
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
                 executor.submit(join_test_participant, number): number
                 for number in range(1, total + 1)
             }
+            futures.update({
+                executor.submit(join_test_participant, number): number
+                for number in range(1, total + 1)
+            })
             for future in as_completed(futures):
                 number = futures[future]
                 try:
-                    joined.append(future.result())
+                    player, latency = future.result()
+                    joined.append(player)
+                    latencies.append(latency)
                 except Exception as error:
                     errors.append({
                         "Participant": f"LOAD-{run_id}-{number:03d}",
                         "Error": str(error),
                     })
 
-        team_counts = Counter(
-            str(player.get("Team", "Unassigned"))
-            for player in joined
-        )
-        counts = list(team_counts.values())
-        spread = max(counts) - min(counts) if counts else total
         session_tokens = [
             str(player.get("SessionToken", ""))
             for player in joined
             if player.get("SessionToken")
         ]
         duplicate_tokens = len(session_tokens) - len(set(session_tokens))
+        participant_ids = [
+            str(player.get("ParticipantID", ""))
+            for player in joined if player.get("ParticipantID")
+        ]
+        unique_participant_ids = len(set(participant_ids))
+        unique_players = {
+            str(player.get("ParticipantID", "")): player
+            for player in joined if player.get("ParticipantID")
+        }
+        team_counts = Counter(
+            str(player.get("Team", "Unassigned"))
+            for player in unique_players.values()
+        )
+        counts = list(team_counts.values())
+        spread = max(counts) - min(counts) if counts else total
+
+        restored = 0
+        for token in sorted(set(session_tokens)):
+            try:
+                if self.get_player_by_token(token):
+                    restored += 1
+            except RuntimeDatabaseError:
+                pass
+
+        def percentile(values, fraction):
+            if not values:
+                return 0.0
+            ordered = sorted(values)
+            index = min(len(ordered) - 1, max(0, int(len(ordered) * fraction) - 1))
+            return round(ordered[index] * 1000, 1)
+
+        error_text = " ".join(item["Error"] for item in errors)
 
         return {
             "RunID": run_id,
             "Requested": total,
-            "Joined": len(joined),
+            "Requests": total * 2,
+            "Joined": unique_participant_ids,
             "Failed": len(errors),
             "DurationSeconds": round(time.perf_counter() - started, 2),
+            "MedianLatencyMs": round(statistics.median(latencies) * 1000, 1) if latencies else 0.0,
+            "P95LatencyMs": percentile(latencies, 0.95),
+            "P99LatencyMs": percentile(latencies, 0.99),
             "TeamCounts": dict(sorted(team_counts.items())),
             "DistributionSpread": spread,
-            "DuplicateSessionTokens": duplicate_tokens,
+            "DuplicateRows": max(0, unique_participant_ids - total),
+            "IdempotentRetries": duplicate_tokens,
+            "SessionRestorationSuccess": restored,
+            "GoogleSheets429Errors": error_text.count("429"),
+            "ApplicationTimeouts": error_text.lower().count("timed out"),
             "Passed": (
-                len(joined) == total
+                unique_participant_ids == total
                 and not errors
                 and spread <= 1
-                and duplicate_tokens == 0
+                and duplicate_tokens == total
+                and restored == total
             ),
             "Errors": errors,
         }
@@ -1285,7 +1400,9 @@ class SupabaseRuntimeDB:
 
         def join_test_participant(number):
             name = f"LOAD-{run_id}-{number:03d} Tester"
-            return self.join_player(join_code, name)
+            return self.join_player(
+                join_code, name, f"LOAD-DEVICE-{run_id}-{number:03d}",
+            )
 
         try:
             with ThreadPoolExecutor(max_workers=workers) as executor:

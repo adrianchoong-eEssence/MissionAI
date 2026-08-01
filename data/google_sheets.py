@@ -1799,53 +1799,17 @@ class GoogleSheetsDB:
     # Participants
     # -------------------------
 
-    def join_player_by_code(self, join_code, name, country=""):
+    def join_player_by_code(self, join_code, name, country="", device_id=""):
         if self.runtime.is_configured:
             event = self.get_event_by_join_code(join_code)
             event_id = str((event or {}).get("EventID", "")).strip()
-            teams = self.get_teams(event_id) if event else []
             if event_id == "EVT-0004":
-                if self.runtime.can_publish:
-                    self.runtime.ensure_event_teams(event, teams)
-                player = self.runtime.join_player(join_code, name)
-                existing_country = str(player.get("Country", "") or "").strip()
-                if not existing_country:
-                    existing_country = _country_from_participant_status(
-                        player.get("Status", "")
-                    )
-                canonical = {
-                    str(team["Country"]).casefold(): team for team in teams
-                }
-                if existing_country.casefold() in canonical:
-                    selected = canonical[existing_country.casefold()]
-                else:
-                    players = self.runtime.get_players(event_id)
-                    counts = {str(team["TeamName"]): 0 for team in teams}
-                    current_token = str(player.get("SessionToken", ""))
-                    for row in players:
-                        if str(row.get("SessionToken", "")) == current_token:
-                            continue
-                        team_name = str(row.get("Team", ""))
-                        if team_name in counts:
-                            counts[team_name] += 1
-                    selected = min(
-                        teams,
-                        key=lambda team: (
-                            counts[str(team["TeamName"])],
-                            next(
-                                index for index, item in enumerate(teams)
-                                if item["TeamName"] == team["TeamName"]
-                            ),
-                        ),
-                    )
-                    self.runtime.assign_participant_country_team(
-                        player.get("SessionToken", ""),
-                        selected["TeamName"],
-                        selected["Country"],
-                    )
-                player["Team"] = selected["TeamName"]
-                player["Country"] = selected["Country"]
+                player = self.runtime.join_player(join_code, name, device_id)
+                player["Country"] = _country_from_participant_status(
+                    player.get("Status", "")
+                )
                 return player
+            teams = self.get_teams(event_id) if event else []
             matching = [
                 team for team in teams
                 if str(team.get("Country", "")).strip().casefold()
@@ -1853,7 +1817,7 @@ class GoogleSheetsDB:
             ]
             if country and not matching:
                 raise ValueError("Select a country configured for this event.")
-            player = self.runtime.join_player(join_code, name)
+            player = self.runtime.join_player(join_code, name, device_id)
             if matching and self.runtime.can_publish:
                 self.runtime.assign_participant_country_team(
                     player.get("SessionToken", ""),

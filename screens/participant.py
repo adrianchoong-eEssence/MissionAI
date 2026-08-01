@@ -81,7 +81,29 @@ SESSION_KEYS = [
     "participant_runtime_state",
     "participant_runtime_poll_count",
     "participant_runtime_error",
+    "participant_device_id",
+    "participant_join_request",
 ]
+
+
+def participant_device_id():
+    """Return a refresh-stable, non-secret browser registration identifier."""
+    value = str(
+        st.session_state.get("participant_device_id", "")
+        or st.query_params.get("device_id", "")
+    ).strip()
+    if not value:
+        value = uuid.uuid4().hex
+    st.session_state["participant_device_id"] = value
+    if str(st.query_params.get("device_id", "")) != value:
+        st.query_params["device_id"] = value
+    return value
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def participant_event_by_code(join_code):
+    """One lightweight runtime lookup; no Sheets or Experience content."""
+    return get_runtime_database().get_event_by_join_code(join_code)
 
 
 def reset_session():
@@ -135,7 +157,7 @@ def watch_live_mission_state(session_token):
         st.rerun(scope="app")
 
 
-def restore_session_from_query_params(db):
+def restore_session_from_query_params(runtime):
     if "participant_event_id" in st.session_state:
         return
 
@@ -145,13 +167,12 @@ def restore_session_from_query_params(db):
 
     if session_token:
         try:
-            runtime_player = db.get_player_by_session_token(session_token)
+            runtime_player = runtime.get_player_by_token(session_token)
         except RuntimeDatabaseError:
             runtime_player = None
 
         if runtime_player:
             team_name = str(runtime_player.get("Team", ""))
-            ai = db.assign_ai_facilitator(team_name) or {}
             st.session_state["participant_id"] = runtime_player.get(
                 "ParticipantID",
                 "",
@@ -169,13 +190,9 @@ def restore_session_from_query_params(db):
             st.session_state["participant_session_token"] = runtime_player.get(
                 "SessionToken", session_token
             )
-            apply_participant_ai_identity(
-                ai,
-                runtime_player.get("EventID", ""),
-            )
             return
 
-    if db.runtime.is_configured:
+    if runtime.is_configured:
         for key in [
             "event_id",
             "participant_name",
@@ -187,6 +204,7 @@ def restore_session_from_query_params(db):
                 del st.query_params[key]
         return
 
+    db = GoogleSheetsDB()
     if not event_id or not participant_name:
         return
 
@@ -2042,25 +2060,38 @@ def render_sync_ai_participant(db, event_id, session_token):
 
 
 def show_participant():
-    db = GoogleSheetsDB()
-    restore_session_from_query_params(db)
+    runtime = get_runtime_database()
+    restore_session_from_query_params(runtime)
 
     if "participant_event_id" in st.session_state:
         persist_session_in_query_params()
 
     if "participant_event_id" not in st.session_state:
         experience_header("Mission AI")
+        device_id = participant_device_id()
+        pending = st.session_state.get("participant_join_request") or {}
 
-        join_code = st.text_input("Join Code").upper().strip()
-        first_name = st.text_input("First / Given Name")
-        last_name = st.text_input("Last / Family Name")
-        join_event = db.get_event_by_join_code(join_code) if join_code else None
+        with st.form("participant_join_form", clear_on_submit=False):
+            join_code = st.text_input("Join Code").upper().strip()
+            first_name = st.text_input("First / Given Name")
+            last_name = st.text_input("Last / Family Name")
+            submitted = st.form_submit_button(
+                "Joining…" if pending else "🚀 Join Event",
+                disabled=bool(pending),
+                width="stretch",
+            )
+
+        join_event = (
+            participant_event_by_code(join_code) if join_code else None
+        )
         country_options = []
         is_bayu_join = bool(
             join_event
             and str(join_event.get("EventID", "")) == "EVT-0004"
         )
-        if join_event:
+        db = None
+        if join_event and not is_bayu_join:
+            db = GoogleSheetsDB()
             country_options = list(dict.fromkeys(
                 str(team.get("Country", "")).strip()
                 for team in db.get_teams(join_event.get("EventID", ""))
@@ -2075,7 +2106,7 @@ def show_participant():
         elif join_event:
             st.info("Your country will be assigned automatically when you join.")
 
-        if st.button("🚀 Join Event", width="stretch"):
+        if submitted and not pending:
             if not join_code:
                 st.warning("Enter Join Code")
                 st.stop()
@@ -2089,28 +2120,53 @@ def show_participant():
                 st.warning("Enter a valid Join Code and select your country.")
                 st.stop()
 
-            participant_name = " ".join([
-                first_name.strip(),
-                last_name.strip(),
-            ])
+            participant_name = " ".join(
+                " ".join([first_name, last_name]).split()
+            )
+            st.session_state["participant_join_request"] = {
+                "join_code": join_code,
+                "participant_name": participant_name,
+                "country": country,
+                "device_id": device_id,
+                "is_bayu": is_bayu_join,
+            }
+            st.rerun()
 
+        pending = st.session_state.get("participant_join_request") or {}
+        if pending:
+            st.info("Joining your expedition…")
+            st.caption("Please do not refresh or tap again.")
             try:
-                player = db.join_player_by_code(
-                    join_code,
-                    participant_name.strip(),
-                    country=country,
-                )
+                if pending.get("is_bayu"):
+                    player = runtime.join_player(
+                        pending["join_code"],
+                        pending["participant_name"],
+                        pending["device_id"],
+                    )
+                    player["Country"] = runtime._participant_country(
+                        player.get("Status", "")
+                    )
+                else:
+                    db = db or GoogleSheetsDB()
+                    player = db.join_player_by_code(
+                        pending["join_code"],
+                        pending["participant_name"],
+                        country=pending.get("country", ""),
+                        device_id=pending["device_id"],
+                    )
             except RuntimeDatabaseError as error:
+                st.session_state.pop("participant_join_request", None)
                 st.error(
-                    "Registration is temporarily busy. Your team has not been changed. "
-                    "Please wait a few seconds and press Join Event again."
+                    "Your join request is still being processed. Do not submit again."
                 )
-                st.caption(str(error))
+                st.caption("Use Check Existing Registration to restore the result.")
                 st.stop()
             except ValueError as error:
+                st.session_state.pop("participant_join_request", None)
                 st.error(str(error))
                 st.stop()
 
+            db = db or GoogleSheetsDB()
             ai = db.assign_ai_facilitator(player["Team"]) or {}
 
             st.session_state["participant_id"] = player.get(
@@ -2129,11 +2185,54 @@ def show_participant():
                 "SessionToken", ""
             )
             apply_participant_ai_identity(ai, player["EventID"])
+            st.session_state.pop("participant_join_request", None)
+            persist_session_in_query_params()
+            st.rerun()
+
+        if st.button(
+            "Check Existing Registration",
+            disabled=bool(pending),
+            width="stretch",
+        ):
+            if not join_code or not first_name.strip() or not last_name.strip():
+                st.warning("Enter your Join Code, first name and last name first.")
+                st.stop()
+            participant_name = " ".join(
+                " ".join([first_name, last_name]).split()
+            )
+            try:
+                player = runtime.restore_join(
+                    join_code, participant_name, device_id,
+                )
+            except RuntimeDatabaseError:
+                player = None
+            if not player:
+                st.info("No completed registration was found for this device.")
+                st.stop()
+            db = GoogleSheetsDB()
+            ai = db.assign_ai_facilitator(player["Team"]) or {}
+            st.session_state["participant_id"] = player.get("ParticipantID", "")
+            st.session_state["participant_event_id"] = player["EventID"]
+            st.session_state["participant_name"] = player["Name"]
+            st.session_state["participant_team"] = player["Team"]
+            st.session_state["participant_country"] = runtime._participant_country(
+                player.get("Status", "")
+            )
+            st.session_state["participant_points"] = player.get("Points", 0)
+            st.session_state["participant_event_name"] = player.get(
+                "EventName", "EXOS Event"
+            )
+            st.session_state["participant_session_token"] = player.get(
+                "SessionToken", ""
+            )
+            apply_participant_ai_identity(ai, player["EventID"])
             persist_session_in_query_params()
             st.rerun()
 
         st.caption(f"Build: {running_build_sha()}")
         return
+
+    db = GoogleSheetsDB()
 
     experience_header(
         experience_title(
