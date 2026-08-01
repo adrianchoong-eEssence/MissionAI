@@ -29,7 +29,6 @@ declare
     v_device_id text;
     v_idempotency_key text;
     v_team_name text;
-    v_rejoined boolean := false;
 begin
     if nullif(trim(p_participant_name), '') is null then
         raise exception 'Participant full name is required';
@@ -75,14 +74,11 @@ begin
          limit 1;
 
         if found then
-            v_rejoined := true;
             update public.runtime_participants
                set idempotency_key = v_idempotency_key
              where participant_id = v_participant.participant_id
             returning * into v_participant;
         end if;
-    else
-        v_rejoined := true;
     end if;
 
     if not found then
@@ -127,7 +123,7 @@ begin
         'Points', v_participant.points,
         'Status', v_participant.status,
         'SessionToken', v_participant.session_token::text,
-        'Rejoined', v_rejoined
+        'Rejoined', v_participant.joined_at < now() - interval '100 milliseconds'
     );
 end;
 $$;
