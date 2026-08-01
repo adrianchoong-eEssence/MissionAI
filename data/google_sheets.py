@@ -448,9 +448,10 @@ class GoogleSheetsDB:
 
         reference = upload_library_asset(uploaded_file, asset_id)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self._append_record(
-            self.assets,
-            {
+        try:
+            self._append_record(
+                self.assets,
+                {
                 "AssetID": asset_id,
                 "Category": clean_category,
                 "Name": clean_name,
@@ -459,8 +460,16 @@ class GoogleSheetsDB:
                 "ContentType": str(getattr(uploaded_file, "type", "") or ""),
                 "CreatedAt": now,
                 "UpdatedAt": now,
-            },
-        )
+                },
+            )
+        except Exception:
+            from data.mission_media import delete_mission_media_references
+
+            try:
+                delete_mission_media_references([reference])
+            except Exception:
+                pass
+            raise
         self.clear_cache()
         return {"AssetID": asset_id, "MediaReference": reference}
 

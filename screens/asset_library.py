@@ -2,6 +2,7 @@ import streamlit as st
 
 from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
+from data.upload_safety import upload_error_message
 
 
 CATEGORIES = ["Characters", "Mission Images", "Logos", "Backgrounds"]
@@ -42,7 +43,9 @@ def show_asset_library():
             try:
                 db.create_asset(category, name, uploaded)
             except Exception as error:
-                st.error(str(error))
+                st.error(upload_error_message(
+                    "Asset upload", saved=False, retry=True, error=error,
+                ))
             else:
                 st.success(f"{name.strip()} added to {category}.")
                 st.rerun()
@@ -91,7 +94,10 @@ def show_asset_library():
                                 uploaded_file=replacement,
                             )
                         except Exception as error:
-                            st.error(str(error))
+                            st.error(upload_error_message(
+                                "Replacement upload", saved=False,
+                                retry=True, error=error,
+                            ))
                         else:
                             st.success("Asset updated.")
                             st.rerun()

@@ -16,10 +16,16 @@ from branding import (
 )
 from ai.facilitator import ask_facilitator
 from components.team_geolocation import team_geolocation
-from data.google_drive import get_photo_url, upload_evidence_file, upload_photo
+from data.google_drive import (
+    delete_evidence_file,
+    get_photo_url,
+    upload_evidence_file,
+    upload_photo,
+)
 from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+from data.upload_safety import upload_error_message
 from engines.programme_hierarchy import (
     activity_content_config,
     activity_details,
@@ -474,30 +480,42 @@ def save_structured_submission(
             team_name=st.session_state["participant_team"],
         )
         if existing:
+            if drive_file_id:
+                try:
+                    delete_evidence_file(drive_file_id)
+                except Exception:
+                    pass
             st.info("Evidence has already been submitted for this Experience.")
             st.stop()
-    return db.save_submission(
-        submission_id=str(uuid.uuid4()),
-        event_id=st.session_state["participant_event_id"],
-        mission_id=mission["MissionID"],
-        team_name=st.session_state["participant_team"],
-        participant_name=st.session_state["participant_name"],
-        image_url=image_url,
-        drive_file_id=drive_file_id,
-        submitted_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        score="",
-        judged="No",
-        remarks=remarks,
-        submission_type=submission_type,
-        metric1=metric1,
-        metric2=metric2,
-        metric3=metric3,
-        status="PENDING",
-        session_token=st.session_state.get(
-            "participant_session_token",
-            "",
-        ),
-    )
+    try:
+        return db.save_submission(
+            submission_id=str(uuid.uuid4()),
+            event_id=st.session_state["participant_event_id"],
+            mission_id=mission["MissionID"],
+            team_name=st.session_state["participant_team"],
+            participant_name=st.session_state["participant_name"],
+            image_url=image_url,
+            drive_file_id=drive_file_id,
+            submitted_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            score="",
+            judged="No",
+            remarks=remarks,
+            submission_type=submission_type,
+            metric1=metric1,
+            metric2=metric2,
+            metric3=metric3,
+            status="PENDING",
+            session_token=st.session_state.get("participant_session_token", ""),
+        )
+    except Exception as error:
+        if drive_file_id:
+            try:
+                delete_evidence_file(drive_file_id)
+            except Exception:
+                pass
+        raise RuntimeDatabaseError(upload_error_message(
+            "Evidence metadata save", saved=False, retry=True, error=error,
+        )) from None
 
 
 def render_pipeline_form(db, mission):
@@ -644,7 +662,9 @@ def render_catalyst_form(db, mission):
                     uploaded_file=uploaded_image,
                 )
             except (RuntimeDatabaseError, ValueError) as error:
-                st.error(str(error))
+                st.error(upload_error_message(
+                    "Photo upload", saved=False, retry=True, error=error,
+                ))
                 st.stop()
             image_url = uploaded.get("url", "")
             drive_file_id = uploaded.get("file_id", "")
@@ -774,15 +794,19 @@ def render_photo_form(db, mission):
                         uploaded_file=uploaded_image,
                     )
                 except (RuntimeDatabaseError, ValueError) as error:
+                    st.error(upload_error_message(
+                        "Photo upload", saved=False, retry=True, error=error,
+                    ))
+                    st.stop()
+                try:
+                    save_structured_submission(
+                        db=db, mission=mission, submission_type="PHOTO",
+                        image_url=uploaded.get("url", ""),
+                        drive_file_id=uploaded.get("file_id", ""),
+                    )
+                except RuntimeDatabaseError as error:
                     st.error(str(error))
                     st.stop()
-                save_structured_submission(
-                    db=db,
-                    mission=mission,
-                    submission_type="PHOTO",
-                    image_url=uploaded.get("url", ""),
-                    drive_file_id=uploaded.get("file_id", ""),
-                )
 
             st.success("✅ Experience submitted successfully.")
             st.balloons()
@@ -825,15 +849,19 @@ def render_media_evidence_form(db, mission, evidence_type):
                     evidence_type=kind,
                 )
             except (RuntimeDatabaseError, ValueError) as error:
+                st.error(upload_error_message(
+                    f"{label} upload", saved=False, retry=True, error=error,
+                ))
+                st.stop()
+            try:
+                save_structured_submission(
+                    db=db, mission=mission, submission_type=kind,
+                    image_url=uploaded.get("url", ""),
+                    drive_file_id=uploaded.get("file_id", ""),
+                )
+            except RuntimeDatabaseError as error:
                 st.error(str(error))
                 st.stop()
-            save_structured_submission(
-                db=db,
-                mission=mission,
-                submission_type=kind,
-                image_url=uploaded.get("url", ""),
-                drive_file_id=uploaded.get("file_id", ""),
-            )
         st.success("✅ Evidence submitted successfully.")
         st.rerun()
 

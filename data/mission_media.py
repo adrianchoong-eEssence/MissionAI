@@ -4,6 +4,7 @@ import uuid
 import streamlit as st
 
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+from data.upload_safety import validate_upload
 
 
 BUCKET = "exos-mission-media"
@@ -13,6 +14,21 @@ MEDIA_LIMITS = {
     "image": 10 * 1024 * 1024,
     "video": 200 * 1024 * 1024,
     "document": 25 * 1024 * 1024,
+}
+
+MEDIA_FORMATS = {
+    "image": (
+        {"jpg", "jpeg", "png", "webp", "heic"},
+        {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"},
+    ),
+    "video": (
+        {"mp4", "mov", "m4v", "webm"},
+        {"video/mp4", "video/quicktime", "video/x-m4v", "video/webm"},
+    ),
+    "document": (
+        {"pdf", "doc", "docx", "ppt", "pptx"},
+        {"application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
+    ),
 }
 
 
@@ -36,12 +52,10 @@ def upload_mission_media(uploaded_file, template_id, media_kind):
     if kind not in MEDIA_LIMITS:
         raise ValueError(f"Unsupported mission media type: {media_kind}")
 
-    file_bytes = uploaded_file.getvalue()
-    if not file_bytes:
-        raise ValueError("The selected media file is empty.")
-    if len(file_bytes) > MEDIA_LIMITS[kind]:
-        limit_mb = MEDIA_LIMITS[kind] // (1024 * 1024)
-        raise ValueError(f"The {kind} file exceeds the {limit_mb} MB limit.")
+    extensions, mime_types = MEDIA_FORMATS[kind]
+    file_bytes = validate_upload(
+        uploaded_file, extensions, mime_types, MEDIA_LIMITS[kind], kind,
+    )
 
     template_segment = _safe_segment(str(template_id).upper(), "UNASSIGNED")
     filename = _safe_segment(uploaded_file.name, f"{kind}-file")
@@ -64,11 +78,11 @@ def upload_character_portrait(uploaded_file, character_source):
     """Upsert one reusable portrait object for a named character."""
     if uploaded_file is None:
         return ""
-    file_bytes = uploaded_file.getvalue()
-    if not file_bytes:
-        raise ValueError("The selected portrait file is empty.")
-    if len(file_bytes) > MEDIA_LIMITS["image"]:
-        raise ValueError("The portrait file exceeds the 10 MB limit.")
+    extensions, mime_types = MEDIA_FORMATS["image"]
+    file_bytes = validate_upload(
+        uploaded_file, extensions, mime_types,
+        MEDIA_LIMITS["image"], "portrait image",
+    )
 
     character_segment = _safe_segment(
         str(character_source).lower(),
@@ -91,11 +105,10 @@ def upload_library_asset(uploaded_file, asset_id, current_reference=""):
     """Store or replace one reusable Asset Library object."""
     if uploaded_file is None:
         return ""
-    file_bytes = uploaded_file.getvalue()
-    if not file_bytes:
-        raise ValueError("The selected asset file is empty.")
-    if len(file_bytes) > MEDIA_LIMITS["image"]:
-        raise ValueError("The asset file exceeds the 10 MB limit.")
+    extensions, mime_types = MEDIA_FORMATS["image"]
+    file_bytes = validate_upload(
+        uploaded_file, extensions, mime_types, MEDIA_LIMITS["image"], "asset image",
+    )
 
     asset_segment = _safe_segment(str(asset_id).lower(), "unassigned-asset")
     storage_path = (

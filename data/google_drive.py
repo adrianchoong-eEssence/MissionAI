@@ -7,6 +7,7 @@ import streamlit as st
 from PIL import Image, ImageOps
 
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+from data.upload_safety import validate_upload
 
 
 SUBMISSION_BUCKET = "exos-submissions"
@@ -52,7 +53,16 @@ def upload_photo(
             "SUPABASE_SECRET_KEY to its Streamlit secrets."
         )
 
-    image_bytes = _prepare_image(uploaded_file)
+    raw_bytes = validate_upload(
+        uploaded_file,
+        {"jpg", "jpeg", "png"},
+        {"image/jpeg", "image/png"},
+        10 * 1024 * 1024,
+        "photo evidence",
+    )
+    prepared_file = io.BytesIO(raw_bytes)
+    prepared_file.name = str(getattr(uploaded_file, "name", "photo"))
+    image_bytes = _prepare_image(prepared_file)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     filename = f"{timestamp}-{uuid.uuid4().hex}.jpg"
     storage_path = "/".join([
@@ -92,13 +102,23 @@ def upload_evidence_file(
             "SUPABASE_SECRET_KEY to its Streamlit secrets."
         )
 
-    file_bytes = uploaded_file.getvalue()
-    if not file_bytes:
-        raise ValueError("The selected evidence file is empty.")
     kind = str(evidence_type or "file").strip().lower()
     maximum = 200 * 1024 * 1024 if kind == "video" else 25 * 1024 * 1024
-    if len(file_bytes) > maximum:
-        raise ValueError(f"The {kind} file exceeds {maximum // (1024 * 1024)} MB.")
+    formats = {
+        "video": (
+            {"mp4", "mov", "m4v", "webm"},
+            {"video/mp4", "video/quicktime", "video/x-m4v", "video/webm"},
+        ),
+        "audio": (
+            {"mp3", "m4a", "wav", "aac", "ogg"},
+            {"audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/wav", "audio/x-wav", "audio/aac", "audio/ogg"},
+        ),
+    }
+    if kind not in formats:
+        raise ValueError("The selected evidence type is not supported.")
+    file_bytes = validate_upload(
+        uploaded_file, *formats[kind], maximum, f"{kind} evidence",
+    )
 
     original_name = _safe_path_part(getattr(uploaded_file, "name", ""), kind)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
@@ -119,6 +139,13 @@ def upload_evidence_file(
         "url": f"{STORAGE_REFERENCE_PREFIX}{storage_path}",
         "filename": filename,
     }
+
+
+def delete_evidence_file(storage_path):
+    """Compensate a failed metadata write without touching existing evidence."""
+    path = str(storage_path or "").strip().lstrip("/")
+    if path:
+        get_runtime_database().delete_submission_images([path])
 
 
 @st.cache_data(ttl=300, show_spinner=False)

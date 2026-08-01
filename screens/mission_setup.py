@@ -15,6 +15,7 @@ from data.mission_media import (
     get_mission_media_url,
     upload_mission_media,
 )
+from data.upload_safety import upload_error_message
 from screens.app_state import active_event_index
 
 
@@ -241,7 +242,10 @@ def _reference_image_editor(
                 try:
                     result = db.create_asset("Mission Images", upload_name, uploaded)
                 except Exception as error:
-                    st.error(str(error))
+                    st.error(upload_error_message(
+                        "Reference-image upload", saved=False,
+                        retry=True, error=error,
+                    ))
                 else:
                     try:
                         assign_reference_image(
@@ -284,7 +288,10 @@ def _reference_image_editor(
                         uploaded_file=replacement,
                     )
                 except Exception as error:
-                    st.error(str(error))
+                    st.error(upload_error_message(
+                        "Replacement-image upload", saved=False,
+                        retry=True, error=error,
+                    ))
                 else:
                     st.session_state[state_key] = current_reference
                     st.session_state[source_key] = reference
@@ -1654,7 +1661,10 @@ def render_template_editor(db):
                     "document",
                 )
         except Exception as error:
-            st.error(f"Experience media upload failed: {error}")
+            st.error(upload_error_message(
+                "Experience media upload", saved=False,
+                retry=True, error=error,
+            ))
             return
 
         result = db.upsert_mission_template({
