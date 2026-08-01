@@ -70,6 +70,7 @@ The audit returns duplicate candidates, team mutation candidates, leader inconsi
 - Code implementation: complete locally.
 - Database migration: not applied.
 - Production participant mutation: none.
-- Commit/push: pending final verification.
+- Local implementation commit: `c4b516a` (`Build durable participant identity engine`).
+- Push: not completed; the shared `origin/main` mutation requires explicit approval and unrestricted network access.
 - Deployment: not performed; production access is unavailable.
 - Production certification still required: physical 52-cell mobile matrix, live load/latency telemetry, migration audit review, backup/rollback rehearsal, and facilitator recovery UAT.
