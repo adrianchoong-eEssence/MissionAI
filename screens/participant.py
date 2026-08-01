@@ -86,6 +86,7 @@ SESSION_KEYS = [
     "participant_runtime_error",
     "participant_device_id",
     "participant_join_request",
+    "participant_recovery_candidate",
 ]
 
 
@@ -149,6 +150,29 @@ def restore_participant_identity(player, fallback_token="", fallback_country="")
     st.session_state["participant_session_token"] = player.get(
         "SessionToken", fallback_token,
     )
+
+
+def render_recovery_candidate(candidate):
+    """Require an explicit human choice before resuming a found identity."""
+    st.info("Existing expedition record found.")
+    st.write(f"**Participant:** {candidate.get('Name', '')}")
+    st.write(
+        f"**Country:** {candidate.get('Flag', '')} "
+        f"{candidate.get('Country', '')}".strip()
+    )
+    st.write(f"**Team:** {candidate.get('Team', '')}")
+    resume, reject = st.columns(2)
+    if resume.button("Resume Expedition", type="primary", width="stretch"):
+        restore_participant_identity(candidate)
+        st.session_state.pop("participant_recovery_candidate", None)
+        persist_session_in_query_params()
+        st.rerun()
+    if reject.button("This Is Not Me", width="stretch"):
+        st.session_state.pop("participant_recovery_candidate", None)
+        st.session_state.pop("participant_join_request", None)
+        st.warning("Use a distinct full name or ask the facilitator to resolve duplicate identities.")
+        st.stop()
+    st.stop()
 
 
 @st.fragment(run_every="5s")
@@ -421,11 +445,15 @@ def current_team_leader(db):
 def render_team_leader_submission_gate(db):
     """Keep EVT-0004 submission controls exclusive to the active leader."""
     try:
+        session_token = st.session_state.get("participant_session_token", "")
+        authorization = db.runtime.can_participant_submit(session_token)
         is_leader, leader_name = current_team_leader(db)
     except RuntimeDatabaseError:
         st.warning("Team leadership is reconnecting. Submission is temporarily locked.")
         return False
-    if is_leader:
+    if authorization.get("Allowed"):
+        if authorization.get("Reason") in {"EVENT_OVERRIDE", "TEAM_OVERRIDE"}:
+            st.warning("Emergency submission access is active. This action is audited.")
         return True
     st.info("Only your Team Leader can submit evidence for the team.")
     if leader_name:
@@ -2072,6 +2100,11 @@ def show_participant():
     runtime = get_runtime_database()
     restore_session_from_query_params(runtime)
 
+    candidate = st.session_state.get("participant_recovery_candidate")
+    if candidate:
+        experience_header("Mission AI")
+        render_recovery_candidate(candidate)
+
     if "participant_event_id" in st.session_state:
         persist_session_in_query_params()
 
@@ -2174,6 +2207,15 @@ def show_participant():
                 st.session_state.pop("participant_join_request", None)
                 st.error(str(error))
                 st.stop()
+
+            if player.get("Ambiguous"):
+                st.session_state.pop("participant_join_request", None)
+                st.error(player.get("Message", "Multiple expedition records match this name."))
+                st.stop()
+            if player.get("RecoveryRequired"):
+                st.session_state["participant_recovery_candidate"] = player
+                st.session_state.pop("participant_join_request", None)
+                st.rerun()
 
             db = db or GoogleSheetsDB()
             ai = db.assign_ai_facilitator(player["Team"]) or {}

@@ -666,8 +666,8 @@ class SupabaseRuntimeDB:
 
         query = {
             "select": (
-                "participant_id,event_id,display_name,team_name,points,"
-                "status,joined_at,session_token"
+                "participant_id,event_id,display_name,team_name,team_id,country,flag,points,"
+                "status,joined_at,last_seen_at,session_token"
             ),
             "order": "joined_at.asc",
         }
@@ -686,11 +686,14 @@ class SupabaseRuntimeDB:
                 "EventID": row.get("event_id", ""),
                 "Name": row.get("display_name", ""),
                 "Team": row.get("team_name", ""),
+                "TeamID": row.get("team_id", ""),
                 "Points": row.get("points", 0),
                 "Status": row.get("status", "Waiting"),
-                "Country": self._participant_country(row.get("status", "")),
+                "Country": row.get("country", "") or self._participant_country(row.get("status", "")),
+                "Flag": row.get("flag", ""),
                 "IsLeader": "|LEADER" in str(row.get("status", "")),
                 "JoinedAt": row.get("joined_at", ""),
+                "LastSeenAt": row.get("last_seen_at", ""),
                 "SessionToken": row.get("session_token", ""),
             }
             for row in rows
@@ -735,6 +738,71 @@ class SupabaseRuntimeDB:
                 "IdempotencyKeys": [row.get("idempotency_key", "") for row in matches],
             })
         return {"Participants": len(rows), "DuplicateGroups": duplicates}
+
+    def identity_migration_audit(self, event_id):
+        """Read-only production identity audit; never mutates participant rows."""
+        result = self._request(
+            "POST", "rpc/exos_identity_migration_audit",
+            payload={"p_event_id": str(event_id).strip()}, admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def set_submission_override(self, event_id, team_id="", enabled=False, actor="Facilitator"):
+        result = self._request(
+            "POST", "rpc/exos_admin_set_submission_override",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_team_id": str(team_id).strip() or "*",
+                "p_enabled": bool(enabled),
+                "p_actor": str(actor).strip() or "Facilitator",
+            }, admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def transfer_team_leader(self, event_id, team_id, participant_id, actor="Facilitator"):
+        result = self._request(
+            "POST", "rpc/exos_admin_transfer_leader",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_team_id": str(team_id).strip(),
+                "p_participant_id": str(participant_id).strip(),
+                "p_actor": str(actor).strip() or "Facilitator",
+            }, admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def move_participant(self, participant_id, team_id, reason, actor="Facilitator"):
+        result = self._request(
+            "POST", "rpc/exos_admin_move_participant",
+            payload={
+                "p_participant_id": str(participant_id).strip(),
+                "p_team_id": str(team_id).strip(),
+                "p_actor": str(actor).strip() or "Facilitator",
+                "p_reason": str(reason).strip(),
+            }, admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def can_participant_submit(self, session_token):
+        result = self._request(
+            "POST", "rpc/exos_can_participant_submit",
+            payload={"p_session_token": str(session_token).strip()},
+        )
+        return self._normalise_result(result) or {"Allowed": False, "Reason": "NO_SESSION"}
+
+    def decide_duplicate(self, event_id, canonical_id, duplicate_id, decision, reason, actor="Facilitator"):
+        result = self._request(
+            "POST", "rpc/exos_admin_duplicate_decision",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_canonical_participant_id": str(canonical_id).strip(),
+                "p_duplicate_participant_id": str(duplicate_id).strip(),
+                "p_decision": str(decision).strip().upper(),
+                "p_actor": str(actor).strip() or "Facilitator",
+                "p_reason": str(reason).strip(),
+            }, admin=True,
+        )
+        return self._normalise_result(result) or {}
 
     def delete_load_test_participants(self, event_id, run_id):
         """Delete only participants carrying one explicit LOAD run marker."""

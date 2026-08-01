@@ -163,6 +163,143 @@ def _render_registration(db, event_id):
         )
 
 
+def _render_team_management(db, event_id):
+    """Facilitator-only recovery controls backed by audited runtime RPCs."""
+    runtime = db.runtime
+    st.subheader("Team Management")
+    if not runtime.can_publish:
+        st.warning("Team Management requires the protected runtime service credential.")
+        return
+    participants = runtime.get_players(event_id)
+    teams = db.get_teams(event_id)
+    if not participants:
+        st.info("No runtime participants are registered for this event.")
+        return
+
+    actor = st.text_input("Facilitator name", key=f"identity_actor_{event_id}")
+    st.caption("Every recovery override is written to the identity audit log.")
+    event_override = st.toggle(
+        "Allow any team member in this event to submit",
+        key=f"event_submission_override_{event_id}",
+    )
+    if event_override:
+        st.warning("Emergency event-wide submission override is enabled in this control session.")
+    if st.button("Apply event submission policy", key=f"apply_event_override_{event_id}"):
+        runtime.set_submission_override(event_id, "*", event_override, actor)
+        st.success("Event submission policy updated and audited.")
+
+    for team in teams:
+        team_id = str(team.get("TeamID", ""))
+        team_name = str(team.get("TeamName", ""))
+        members = [row for row in participants if row.get("Team") == team_name]
+        leader = next((row for row in members if row.get("IsLeader")), None)
+        with st.expander(f"{team_name} · {team_id}"):
+            st.caption(
+                f"Leader: {(leader or {}).get('Name', 'Not assigned')} · "
+                f"{len(members)} participant(s)"
+            )
+            st.dataframe([{
+                "ParticipantID": row.get("ParticipantID", ""),
+                "Name": row.get("Name", ""),
+                "Country": row.get("Country", ""),
+                "Leader": row.get("IsLeader", False),
+                "Last active": row.get("LastSeenAt", row.get("JoinedAt", "")),
+            } for row in members], hide_index=True, width="stretch")
+            if members:
+                choices = {row.get("ParticipantID", ""): row for row in members}
+                selected = st.selectbox(
+                    "Team member", list(choices),
+                    format_func=lambda value: choices[value].get("Name", value),
+                    key=f"identity_member_{event_id}_{team_id}",
+                )
+                if st.button("Transfer Team Leader", key=f"transfer_leader_{event_id}_{team_id}"):
+                    runtime.transfer_team_leader(event_id, team_id, selected, actor)
+                    st.success("Leadership transferred immediately and audited.")
+                    st.rerun()
+                destination_ids = [
+                    str(item.get("TeamID", "")) for item in teams
+                    if str(item.get("TeamID", "")) != team_id
+                ]
+                if destination_ids:
+                    destination = st.selectbox(
+                        "Correct team", destination_ids,
+                        format_func=lambda value: next(
+                            str(item.get("TeamName", value)) for item in teams
+                            if str(item.get("TeamID", "")) == value
+                        ),
+                        key=f"identity_destination_{event_id}_{team_id}",
+                    )
+                    move_reason = st.text_input(
+                        "Team correction reason",
+                        key=f"identity_move_reason_{event_id}_{team_id}",
+                    )
+                    move_confirmed = st.checkbox(
+                        "Confirm authorised team correction",
+                        key=f"identity_move_confirm_{event_id}_{team_id}",
+                    )
+                    if st.button(
+                        "Move Participant to Correct Team",
+                        disabled=not move_confirmed or not move_reason.strip(),
+                        key=f"identity_move_{event_id}_{team_id}",
+                    ):
+                        runtime.move_participant(selected, destination, move_reason, actor)
+                        st.success("Participant identity restored to the selected team and audited.")
+                        st.rerun()
+            team_override = st.toggle(
+                "Allow any member of this team to submit",
+                key=f"team_override_{event_id}_{team_id}",
+            )
+            if team_override:
+                st.warning("Leader-only submission is temporarily disabled for this team.")
+            if st.button("Apply team submission policy", key=f"apply_team_override_{event_id}_{team_id}"):
+                runtime.set_submission_override(event_id, team_id, team_override, actor)
+                st.success("Team submission policy updated and audited.")
+
+    with st.expander("Duplicate and migration audit"):
+        st.warning("Audit only. Records are never merged or deleted automatically.")
+        if st.button("Run identity audit", key=f"run_identity_audit_{event_id}"):
+            st.json(runtime.identity_migration_audit(event_id))
+        duplicate_report = runtime.audit_participant_duplicates(event_id)
+        groups = duplicate_report.get("DuplicateGroups", [])
+        if not groups:
+            st.success("No normalized-name duplicate candidates found.")
+        for position, group in enumerate(groups):
+            st.markdown(f"**{group.get('NormalizedName', '')}** · {group.get('Count', 0)} records")
+            ids = group.get("ParticipantIDs", [])
+            if len(ids) < 2:
+                continue
+            canonical = st.selectbox(
+                "Canonical ParticipantID", ids,
+                key=f"duplicate_canonical_{event_id}_{position}",
+            )
+            duplicate_choices = [value for value in ids if value != canonical]
+            duplicate = st.selectbox(
+                "Duplicate ParticipantID", duplicate_choices,
+                key=f"duplicate_record_{event_id}_{position}",
+            )
+            reason = st.text_input(
+                "Decision reason", key=f"duplicate_reason_{event_id}_{position}",
+            )
+            confirmed = st.checkbox(
+                "I verified these production records and understand merge is permanent",
+                key=f"duplicate_confirm_{event_id}_{position}",
+            )
+            keep, confirm, merge = st.columns(3)
+            if keep.button("Keep Separate", key=f"keep_duplicate_{event_id}_{position}"):
+                runtime.decide_duplicate(event_id, canonical, duplicate, "KEEP_SEPARATE", reason, actor)
+                st.success("Decision recorded; neither record changed.")
+            if confirm.button("Confirm Same Participant", key=f"confirm_duplicate_{event_id}_{position}"):
+                runtime.decide_duplicate(event_id, canonical, duplicate, "CONFIRM_SAME", reason, actor)
+                st.success("Identity relationship recorded; records remain unchanged.")
+            if merge.button(
+                "Merge Records", disabled=not confirmed,
+                key=f"merge_duplicate_{event_id}_{position}",
+            ):
+                runtime.decide_duplicate(event_id, canonical, duplicate, "MERGE", reason, actor)
+                st.success("Records merged into the selected canonical ParticipantID and audited.")
+                st.rerun()
+
+
 def _render_mission_board(db, event_id):
     mission = db.get_current_mission(event_id)
     submissions = db.get_submissions(event_id)
@@ -399,3 +536,5 @@ def show_control_centre():
 
     st.divider()
     _render_stage_widgets(db, event_id, stage_family(stage))
+    st.divider()
+    _render_team_management(db, event_id)
