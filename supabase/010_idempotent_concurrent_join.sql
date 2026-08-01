@@ -1,4 +1,4 @@
--- Atomic, device-scoped participant joins. Safe to apply without resetting events.
+-- Atomic normalized-name participant joins. Safe to apply without resetting events.
 
 alter table public.runtime_participants
     add column if not exists idempotency_key text;
@@ -29,6 +29,8 @@ declare
     v_device_id text;
     v_idempotency_key text;
     v_team_name text;
+    v_team_id text;
+    v_rejoined boolean := false;
 begin
     if nullif(trim(p_participant_name), '') is null then
         raise exception 'Participant full name is required';
@@ -56,29 +58,20 @@ begin
         v_event.event_id || '|' || v_normalized_name || '|' || v_device_id
     );
 
+    -- Durable event + normalized-name identity is the source of truth.  This
+    -- lookup must happen before idempotency/device matching and allocation.
+    -- Existing historical duplicates are left untouched; the earliest record
+    -- is restored deterministically.
     select * into v_participant
       from public.runtime_participants
      where event_id = v_event.event_id
-       and idempotency_key = v_idempotency_key
+       and normalized_name = v_normalized_name
+     order by joined_at, participant_id
+     for update
      limit 1;
 
-    if not found then
-        -- Bind one pre-migration registration to this device instead of duplicating it.
-        select * into v_participant
-          from public.runtime_participants
-         where event_id = v_event.event_id
-           and normalized_name = v_normalized_name
-           and idempotency_key is null
-         order by joined_at, participant_id
-         for update skip locked
-         limit 1;
-
-        if found then
-            update public.runtime_participants
-               set idempotency_key = v_idempotency_key
-             where participant_id = v_participant.participant_id
-            returning * into v_participant;
-        end if;
+    if found then
+        v_rejoined := true;
     end if;
 
     if not found then
@@ -114,16 +107,31 @@ begin
         returning * into v_participant;
     end if;
 
+    select team_id into v_team_id
+      from public.runtime_teams
+     where event_id = v_event.event_id
+       and team_name = v_participant.team_name
+     order by position
+     limit 1;
+
     return jsonb_build_object(
         'ParticipantID', v_participant.participant_id::text,
         'EventID', v_event.event_id,
         'EventName', v_event.event_name,
         'Name', v_participant.display_name,
         'Team', v_participant.team_name,
+        'TeamID', coalesce(v_team_id, ''),
+        'Country', case
+            when v_participant.status like 'COUNTRY:%'
+            then split_part(split_part(v_participant.status, 'COUNTRY:', 2), '|', 1)
+            else regexp_replace(v_participant.team_name, '^\S+\s*', '')
+        end,
+        'Flag', split_part(v_participant.team_name, ' ', 1),
         'Points', v_participant.points,
         'Status', v_participant.status,
+        'IsLeader', position('|LEADER' in v_participant.status) > 0,
         'SessionToken', v_participant.session_token::text,
-        'Rejoined', v_participant.joined_at < now() - interval '100 milliseconds'
+        'Rejoined', v_rejoined
     );
 end;
 $$;
@@ -145,24 +153,74 @@ as $$
         'EventName', event.event_name,
         'Name', participant.display_name,
         'Team', participant.team_name,
+        'TeamID', coalesce(team.team_id, ''),
+        'Country', case
+            when participant.status like 'COUNTRY:%'
+            then split_part(split_part(participant.status, 'COUNTRY:', 2), '|', 1)
+            else regexp_replace(participant.team_name, '^\S+\s*', '')
+        end,
+        'Flag', split_part(participant.team_name, ' ', 1),
         'Points', participant.points,
         'Status', participant.status,
+        'IsLeader', position('|LEADER' in participant.status) > 0,
         'SessionToken', participant.session_token::text,
         'Rejoined', true
     )
       from public.runtime_events event
       join public.runtime_participants participant
         on participant.event_id = event.event_id
+      left join public.runtime_teams team
+        on team.event_id = participant.event_id
+       and team.team_name = participant.team_name
      where event.join_code = upper(trim(p_join_code))
-       and participant.idempotency_key = md5(
-           event.event_id || '|' ||
-           lower(regexp_replace(trim(p_participant_name), '\s+', ' ', 'g')) ||
-           '|' || lower(trim(p_device_id))
+       and participant.normalized_name = lower(
+           regexp_replace(trim(p_participant_name), '\s+', ' ', 'g')
        )
+     order by participant.joined_at, participant.participant_id, team.position
+     limit 1;
+$$;
+
+create or replace function public.exos_restore_participant(
+    p_session_token text
+)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    select jsonb_build_object(
+        'ParticipantID', participant.participant_id::text,
+        'EventID', event.event_id,
+        'EventName', event.event_name,
+        'Name', participant.display_name,
+        'Team', participant.team_name,
+        'TeamID', coalesce(team.team_id, ''),
+        'Country', case
+            when participant.status like 'COUNTRY:%'
+            then split_part(split_part(participant.status, 'COUNTRY:', 2), '|', 1)
+            else regexp_replace(participant.team_name, '^\S+\s*', '')
+        end,
+        'Flag', split_part(participant.team_name, ' ', 1),
+        'Points', participant.points,
+        'Status', participant.status,
+        'IsLeader', position('|LEADER' in participant.status) > 0,
+        'SessionToken', participant.session_token::text,
+        'Rejoined', true
+    )
+      from public.runtime_participants participant
+      join public.runtime_events event using (event_id)
+      left join public.runtime_teams team
+        on team.event_id = participant.event_id
+       and team.team_name = participant.team_name
+     where participant.session_token::text = trim(p_session_token)
+     order by team.position
      limit 1;
 $$;
 
 revoke all on function public.exos_join_event(text, text, text) from public;
 revoke all on function public.exos_restore_join(text, text, text) from public;
+revoke all on function public.exos_restore_participant(text) from public;
 grant execute on function public.exos_join_event(text, text, text) to anon, authenticated;
 grant execute on function public.exos_restore_join(text, text, text) to anon, authenticated;
+grant execute on function public.exos_restore_participant(text) to anon, authenticated;

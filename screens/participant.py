@@ -70,7 +70,10 @@ SESSION_KEYS = [
     "participant_event_id",
     "participant_name",
     "participant_team",
+    "participant_team_id",
     "participant_country",
+    "participant_flag",
+    "participant_is_leader",
     "participant_points",
     "participant_event_name",
     "participant_session_token",
@@ -125,6 +128,29 @@ def reset_session():
             st.session_state.pop(key, None)
 
 
+def restore_participant_identity(player, fallback_token="", fallback_country=""):
+    """Restore the complete participant identity returned by the durable store."""
+    st.session_state["participant_id"] = player.get("ParticipantID", "")
+    st.session_state["participant_event_id"] = player.get("EventID", "")
+    st.session_state["participant_name"] = player.get("Name", "")
+    st.session_state["participant_team"] = player.get("Team", "")
+    st.session_state["participant_team_id"] = player.get("TeamID", "")
+    st.session_state["participant_country"] = player.get(
+        "Country", fallback_country,
+    )
+    st.session_state["participant_flag"] = player.get("Flag", "")
+    st.session_state["participant_is_leader"] = bool(
+        player.get("IsLeader", False)
+    )
+    st.session_state["participant_points"] = player.get("Points", 0)
+    st.session_state["participant_event_name"] = player.get(
+        "EventName", "EXOS Event",
+    )
+    st.session_state["participant_session_token"] = player.get(
+        "SessionToken", fallback_token,
+    )
+
+
 @st.fragment(run_every="5s")
 def watch_live_mission_state(session_token):
     """Poll Supabase and rerun the full app when the live stage changes."""
@@ -172,24 +198,7 @@ def restore_session_from_query_params(runtime):
             runtime_player = None
 
         if runtime_player:
-            team_name = str(runtime_player.get("Team", ""))
-            st.session_state["participant_id"] = runtime_player.get(
-                "ParticipantID",
-                "",
-            )
-            st.session_state["participant_event_id"] = runtime_player.get(
-                "EventID", ""
-            )
-            st.session_state["participant_name"] = runtime_player.get("Name", "")
-            st.session_state["participant_team"] = team_name
-            st.session_state["participant_country"] = runtime_player.get("Country", "")
-            st.session_state["participant_points"] = runtime_player.get("Points", 0)
-            st.session_state["participant_event_name"] = runtime_player.get(
-                "EventName", "EXOS Event"
-            )
-            st.session_state["participant_session_token"] = runtime_player.get(
-                "SessionToken", session_token
-            )
+            restore_participant_identity(runtime_player, session_token)
             return
 
     if runtime.is_configured:
@@ -2169,21 +2178,7 @@ def show_participant():
             db = db or GoogleSheetsDB()
             ai = db.assign_ai_facilitator(player["Team"]) or {}
 
-            st.session_state["participant_id"] = player.get(
-                "ParticipantID",
-                "",
-            )
-            st.session_state["participant_event_id"] = player["EventID"]
-            st.session_state["participant_name"] = player["Name"]
-            st.session_state["participant_team"] = player["Team"]
-            st.session_state["participant_country"] = player.get("Country", country)
-            st.session_state["participant_points"] = player.get("Points", 0)
-            st.session_state["participant_event_name"] = player.get(
-                "EventName", "EXOS Event"
-            )
-            st.session_state["participant_session_token"] = player.get(
-                "SessionToken", ""
-            )
+            restore_participant_identity(player, fallback_country=country)
             apply_participant_ai_identity(ai, player["EventID"])
             st.session_state.pop("participant_join_request", None)
             persist_session_in_query_params()
@@ -2211,20 +2206,7 @@ def show_participant():
                 st.stop()
             db = GoogleSheetsDB()
             ai = db.assign_ai_facilitator(player["Team"]) or {}
-            st.session_state["participant_id"] = player.get("ParticipantID", "")
-            st.session_state["participant_event_id"] = player["EventID"]
-            st.session_state["participant_name"] = player["Name"]
-            st.session_state["participant_team"] = player["Team"]
-            st.session_state["participant_country"] = runtime._participant_country(
-                player.get("Status", "")
-            )
-            st.session_state["participant_points"] = player.get("Points", 0)
-            st.session_state["participant_event_name"] = player.get(
-                "EventName", "EXOS Event"
-            )
-            st.session_state["participant_session_token"] = player.get(
-                "SessionToken", ""
-            )
+            restore_participant_identity(player)
             apply_participant_ai_identity(ai, player["EventID"])
             persist_session_in_query_params()
             st.rerun()

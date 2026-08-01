@@ -549,6 +549,21 @@ class SupabaseRuntimeDB:
         value = str(status or "")
         return value.split("COUNTRY:", 1)[1].split("|", 1)[0] if "COUNTRY:" in value else ""
 
+    @classmethod
+    def _participant_record(cls, row):
+        """Return a consistent durable identity payload from every restore path."""
+        if not row:
+            return None
+        player = dict(row)
+        status = str(player.get("Status", "") or "")
+        player["Country"] = str(
+            player.get("Country", "") or cls._participant_country(status)
+        )
+        player["IsLeader"] = bool(
+            player.get("IsLeader", False) or "|LEADER" in status
+        )
+        return player
+
     def join_player(self, join_code, participant_name, device_id):
         result = self._request(
             "POST",
@@ -562,7 +577,7 @@ class SupabaseRuntimeDB:
         row = self._normalise_result(result)
         if not row:
             raise RuntimeDatabaseError("Registration returned no participant record.")
-        return row
+        return self._participant_record(row)
 
     def restore_join(self, join_code, participant_name, device_id):
         result = self._request(
@@ -574,7 +589,7 @@ class SupabaseRuntimeDB:
                 "p_device_id": str(device_id).strip(),
             },
         )
-        return self._normalise_result(result)
+        return self._participant_record(self._normalise_result(result))
 
     def assign_participant_country_team(self, session_token, team_name, country):
         result = self._request(
@@ -633,11 +648,7 @@ class SupabaseRuntimeDB:
             "rpc/exos_restore_participant",
             payload={"p_session_token": str(session_token).strip()},
         )
-        player = self._normalise_result(result)
-        if player:
-            player["Country"] = self._participant_country(player.get("Status", ""))
-            player["IsLeader"] = "|LEADER" in str(player.get("Status", ""))
-        return player
+        return self._participant_record(self._normalise_result(result))
 
     def get_event_by_join_code(self, join_code):
         if not self.is_configured:
