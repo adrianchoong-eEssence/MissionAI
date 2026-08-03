@@ -6,23 +6,27 @@ Never paste secret values into chat, logs, screenshots, commits, command history
 
 - Repository: `https://github.com/adrianchoong-eEssence/MissionAI`
 - Branch: `main`
-- Remote main before RC2 execution: `cb9dc5f56676a56b523f551028388114f7ff7554`
+- Remote main and verified running commit: `cb9dc5f56676a56b523f551028388114f7ff7554`
+- Admin application: `https://missionai-eessencemaster.streamlit.app/` (`MissionAI.py`)
+- Facilitator application: `https://missionai-facilitator.streamlit.app/` (`Facilitator.py`)
+- Participant application: `https://missionai-participant.streamlit.app/` (`Participant.py`)
+- Hosting: Streamlit Community Cloud account `adrianchoong-eessence`, connected to repository `missionai`, branch `main`
+- Hosting runtime: Python 3.14.6; production dependency installation and HTTPS workbook access succeeded
 - Google workbook: `MissionAI_Database`
 - Google spreadsheet ID: `1XWCW9UVj_1cxA32ItsE8-nAr9q0NEgOhhD5e3C64Hvw`
 - L'Oréal RACE event: `EVT-0006`, event name `RACE`, client `Loreal`, event date `2026-08-19`
 - RACE state in the workbook: Draft; ten Teams exist; no Participants, ProgrammeStages, Missions or Submissions exist for EVT-0006.
-- Production application URL: not present in repository, GitHub deployments, GitHub Actions, open browser tabs or relevant browser history.
 - Supabase project reference: not present in repository, environment or browser session.
 
 ## Required secrets
 
 | Secret name | Enter in | Expected format | Verification that does not reveal the value |
 |---|---|---|---|
-| `SUPABASE_URL` | Production app secret manager and authorised audit shell | HTTPS Supabase project endpoint ending in `.supabase.co`, without a trailing path | `SupabaseRuntimeDB().url` is non-empty; a read-only request to `runtime_events?select=event_id&limit=1` returns HTTP 200 |
-| `SUPABASE_PUBLISHABLE_KEY` | Production app secret manager | Supabase publishable/anon key for the same project | `SupabaseRuntimeDB().is_configured` is true and an anonymous read allowed by RLS returns HTTP 200 |
-| `SUPABASE_SECRET_KEY` | Production app secret manager and temporary authorised audit shell only | Supabase service-role/secret key for the same project | `SupabaseRuntimeDB().can_publish` is true; run only the SELECT-only RC2 audit before any approved mutation |
-| `gcp_service_account` | Production app secret manager as a Streamlit TOML table | Complete Google service-account JSON fields represented as TOML keys; `private_key` retains newline escapes | `get_workbook()` opens spreadsheet ID `1XWCW9UVj_1cxA32ItsE8-nAr9q0NEgOhhD5e3C64Hvw` and reads the Events header |
-| `OPENAI_API_KEY` | Production app secret manager | OpenAI project API key authorised for EXOS Sync AI | Run one isolated Sync AI smoke request and verify a successful response without logging prompt secrets or the key |
+| `SUPABASE_URL` | Each Streamlit app's Settings → Secrets and authorised audit shell | HTTPS Supabase project endpoint ending in `.supabase.co`, without a trailing path | `SupabaseRuntimeDB().url` is non-empty; a read-only request to `runtime_events?select=event_id&limit=1` returns HTTP 200 |
+| `SUPABASE_PUBLISHABLE_KEY` | Each Streamlit app's Settings → Secrets | Supabase publishable/anon key for the same project | `SupabaseRuntimeDB().is_configured` is true and an anonymous read allowed by RLS returns HTTP 200 |
+| `SUPABASE_SECRET_KEY` | Each Streamlit app's Settings → Secrets and temporary authorised audit shell only | Supabase service-role/secret key for the same project | `SupabaseRuntimeDB().can_publish` is true; run only the SELECT-only RC2 audit before any approved mutation |
+| `gcp_service_account` | Each Streamlit app's Settings → Secrets as a TOML table | Complete Google service-account JSON fields represented as TOML keys; `private_key` retains newline escapes | `get_workbook()` opens spreadsheet ID `1XWCW9UVj_1cxA32ItsE8-nAr9q0NEgOhhD5e3C64Hvw` and reads the Events header |
+| `OPENAI_API_KEY` | Each Streamlit app's Settings → Secrets | OpenAI project API key authorised for EXOS Sync AI | Run one isolated Sync AI smoke request and verify a successful response without logging prompt secrets or the key |
 
 Aliases supported by the code are `SUPABASE_ANON_KEY` for the publishable key and `SUPABASE_SERVICE_ROLE_KEY` for the secret key. Configure one canonical name only to prevent drift.
 

@@ -2,6 +2,8 @@
 
 Evidence date: 3 August 2026. Event: `EVT-0006` (Loreal, RACE, 19 August 2026). Google Sheets evidence was read live from `MissionAI_Database`. Supabase sections remain unverified because the production project and credentials are not available.
 
+The three production Streamlit applications were verified at their exact URLs. Admin, facilitator and participant started successfully; participant displayed running build `cb9dc5f`. The facilitator and participant apps had been asleep and were woken for verification. No application form was submitted and no production record changed.
+
 ## Consolidated findings
 
 | Category | Exact finding | Status |
