@@ -16,7 +16,11 @@ Never paste secret values into chat, logs, screenshots, commits, command history
 - Google spreadsheet ID: `1XWCW9UVj_1cxA32ItsE8-nAr9q0NEgOhhD5e3C64Hvw`
 - L'Oréal RACE event: `EVT-0006`, event name `RACE`, client `Loreal`, event date `2026-08-19`
 - RACE state in the workbook: Draft; ten Teams exist; no Participants, ProgrammeStages, Missions or Submissions exist for EVT-0006.
-- Supabase project reference: not present in repository, environment or browser session.
+- Supabase project: `EXOS Runtime`
+- Supabase project reference: `bqsbkdfzqyiodivhyxnq`
+- Supabase URL: `https://bqsbkdfzqyiodivhyxnq.supabase.co`
+- Supabase region/tier: AWS `ap-southeast-1`, Free `nano`
+- Supabase dashboard status during RC2 verification: Unhealthy; no tracked migrations and no backups
 
 ## Required secrets
 
