@@ -1,9 +1,10 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import streamlit as st
 
-from data.runtime_database import SupabaseRuntimeDB
+from data.runtime_database import RuntimeDatabaseError, SupabaseRuntimeDB
 from data.google_sheets import GoogleSheetsDB, bayu_country_teams
 from screens.live_event_console import approval_score
 from screens.participant import (
@@ -136,7 +137,7 @@ def test_bayu_ai_response_keeps_label_but_uses_shared_hologram():
     )
 
 
-def test_runtime_country_assignment_and_roster_preserve_one_reference_team():
+def test_post_join_country_assignment_is_blocked():
     runtime = SupabaseRuntimeDB.__new__(SupabaseRuntimeDB)
     calls = []
 
@@ -153,33 +154,22 @@ def test_runtime_country_assignment_and_roster_preserve_one_reference_team():
         return []
 
     runtime._request = request
-    runtime.assign_participant_country_team("TOKEN", "Malaysia", "Malaysia")
-    roster = runtime.get_team_roster("EVT-0004", "Malaysia")
-
-    assignment = calls[0][2]["payload"]
-    assert assignment == {
-        "team_name": "Malaysia", "status": "COUNTRY:Malaysia",
-    }
-    assert roster[0]["Country"] == "Malaysia"
-    assert roster[0]["IsLeader"] is True
+    with pytest.raises(RuntimeDatabaseError):
+        runtime.assign_participant_country_team("TOKEN", "Malaysia", "Malaysia")
+    assert calls == []
 
 
 def test_existing_team_leader_prevents_a_second_claim():
     runtime = SupabaseRuntimeDB.__new__(SupabaseRuntimeDB)
-    runtime.get_player_by_token = lambda token: {
-        "EventID": "EVT-0004", "Team": "Team Malaysia",
-        "Name": "Second Member", "Status": "COUNTRY:Malaysia",
+    calls = []
+    runtime._request = lambda *args, **kwargs: calls.append((args, kwargs)) or {
+        "Claimed": False, "LeaderName": "Existing Leader",
     }
-    runtime.get_team_roster = lambda event_id, team: [
-        {"Name": "Existing Leader", "IsLeader": True},
-    ]
-    runtime._request = lambda *args, **kwargs: (_ for _ in ()).throw(
-        AssertionError("A second leader must not be written")
-    )
 
     result = runtime.claim_team_leader("SECOND-TOKEN")
 
     assert result == {"Claimed": False, "LeaderName": "Existing Leader"}
+    assert calls[0][0][1] == "rpc/exos_claim_team_leader"
 
 
 def test_bayu_join_auto_assigns_the_least_populated_country():
@@ -187,17 +177,20 @@ def test_bayu_join_auto_assigns_the_least_populated_country():
         is_configured = True
         can_publish = True
 
-        def join_player(self, join_code, name, device_id):
-            self.join_args = (join_code, name, device_id)
+        def get_event_by_join_code(self, join_code):
+            return {"EventID": "EVT-0004"}
+
+        def join_player(self, join_code, name, device_id, requested_team_id=""):
+            self.join_args = (join_code, name, device_id, requested_team_id)
             return {
-                "EventID": "EVT-0004", "Name": name,
-                "Team": "🇹🇭 Thailand", "SessionToken": "TOKEN",
-                "Status": "COUNTRY:Thailand",
+                    "EventID": "EVT-0004", "Name": name,
+                    "Team": "🇹🇭 Thailand", "SessionToken": "TOKEN",
+                    "Status": "COUNTRY:Thailand", "Country": "Thailand",
             }
 
     db = GoogleSheetsDB.__new__(GoogleSheetsDB)
     db.runtime = Runtime()
-    db.get_event_by_join_code = lambda code: {"EventID": "EVT-0004"}
+    db.get_teams = lambda event_id: []
 
     player = db.join_player_by_code(
         "12DYLD", "Adrian Choong", device_id="DEVICE-1",
@@ -206,7 +199,7 @@ def test_bayu_join_auto_assigns_the_least_populated_country():
     assert player["Team"] == "🇹🇭 Thailand"
     assert player["Country"] == "Thailand"
     assert db.runtime.join_args == (
-        "12DYLD", "Adrian Choong", "DEVICE-1",
+        "12DYLD", "Adrian Choong", "DEVICE-1", "",
     )
 
 

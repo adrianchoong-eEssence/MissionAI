@@ -564,20 +564,43 @@ class SupabaseRuntimeDB:
         )
         return player
 
-    def join_player(self, join_code, participant_name, device_id):
+    def join_player(self, join_code, participant_name, device_id, requested_team_id=""):
         result = self._request(
             "POST",
-            "rpc/exos_join_event",
+            "rpc/exos_join_event_v2",
             payload={
                 "p_join_code": str(join_code).strip().upper(),
                 "p_participant_name": str(participant_name).strip(),
                 "p_device_id": str(device_id).strip(),
+                "p_requested_team_id": str(requested_team_id).strip(),
             },
         )
         row = self._normalise_result(result)
         if not row:
             raise RuntimeDatabaseError("Registration returned no participant record.")
         return self._participant_record(row)
+
+    def get_runtime_control_state(self, event_id):
+        if not self.can_publish:
+            raise RuntimeDatabaseError("Runtime control state requires SUPABASE_SECRET_KEY.")
+        result = self._request(
+            "POST", "rpc/exos_runtime_control_state",
+            payload={"p_event_id": str(event_id).strip()}, admin=True,
+        )
+        return self._normalise_result(result) or {}
+
+    def set_runtime_control_state(self, event_id, key, value):
+        if not self.can_publish:
+            raise RuntimeDatabaseError("Runtime control mutation requires SUPABASE_SECRET_KEY.")
+        result = self._request(
+            "POST", "rpc/exos_set_runtime_control_state",
+            payload={
+                "p_event_id": str(event_id).strip(),
+                "p_key": str(key).strip(),
+                "p_value": value,
+            }, admin=True,
+        )
+        return self._normalise_result(result) or {}
 
     def restore_join(self, join_code, participant_name, device_id):
         result = self._request(
@@ -592,16 +615,11 @@ class SupabaseRuntimeDB:
         return self._participant_record(self._normalise_result(result))
 
     def assign_participant_country_team(self, session_token, team_name, country):
-        result = self._request(
-            "PATCH", "runtime_participants",
-            payload={
-                "team_name": str(team_name).strip(),
-                "status": self._participant_status(country),
-            },
-            query={"session_token": f"eq.{str(session_token).strip()}"},
-            admin=True,
+        raise RuntimeDatabaseError(
+            "Automatic post-join team mutation is disabled. New assignments "
+            "must be committed by exos_join_event_v2; corrections require "
+            "the audited facilitator move operation."
         )
-        return self._normalise_result(result) or {}
 
     def get_team_roster(self, event_id, team_name):
         rows = self._request(
@@ -624,21 +642,11 @@ class SupabaseRuntimeDB:
         } for row in rows]
 
     def claim_team_leader(self, session_token):
-        player = self.get_player_by_token(session_token)
-        if not player:
-            raise RuntimeDatabaseError("Participant session was not found.")
-        roster = self.get_team_roster(player["EventID"], player["Team"])
-        existing = next((row for row in roster if row["IsLeader"]), None)
-        if existing:
-            return {"Claimed": False, "LeaderName": existing["Name"]}
-        country = self._participant_country(player.get("Status", ""))
-        self._request(
-            "PATCH", "runtime_participants",
-            payload={"status": self._participant_status(country, leader=True)},
-            query={"session_token": f"eq.{str(session_token).strip()}"},
-            admin=True,
+        result = self._request(
+            "POST", "rpc/exos_claim_team_leader",
+            payload={"p_session_token": str(session_token).strip()},
         )
-        return {"Claimed": True, "LeaderName": player.get("Name", "")}
+        return self._normalise_result(result) or {}
 
     def get_player_by_token(self, session_token):
         if not self.is_configured or not str(session_token).strip():

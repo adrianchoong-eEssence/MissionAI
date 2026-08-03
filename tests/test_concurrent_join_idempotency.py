@@ -15,11 +15,12 @@ def test_join_rpc_carries_device_scoped_idempotency_input():
     assert player["ParticipantID"] == "P1"
     assert calls == [(
         "POST",
-        "rpc/exos_join_event",
+        "rpc/exos_join_event_v2",
         {
             "p_join_code": "12DYLD",
             "p_participant_name": "Adrian  Choong",
             "p_device_id": "DEVICE-1",
+            "p_requested_team_id": "",
         },
     )]
 

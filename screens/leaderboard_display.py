@@ -8,7 +8,7 @@ from engines.programme_hierarchy import current_module_activity, friendly_type
 from engines.stage_timer import remaining_seconds
 from screens.app_state import select_active_event
 from screens.projector_broadcast import (
-    projector_broadcast_state,
+    DEFAULT_BROADCAST,
     render_projector_broadcast,
 )
 
@@ -778,7 +778,8 @@ def show_leaderboard_display():
     leaderboard = calculate_leaderboard(submissions)
     mission = db.get_current_mission(event_id)
     teams_count = db.get_team_count(event_id)
-    broadcast_state = projector_broadcast_state(event)
+    broadcast_state = dict(DEFAULT_BROADCAST)
+    broadcast_state.update(db.get_broadcast_state(event_id))
 
     wallet_status = {}
     if (

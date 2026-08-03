@@ -12,6 +12,7 @@ import threading
 import time
 
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+from data.runtime_authority import RuntimeAuthorityError, require_runtime
 from engines.stage_timer import new_timer, transition_timer
 
 SPREADSHEET_ID = "1XWCW9UVj_1cxA32ItsE8-nAr9q0NEgOhhD5e3C64Hvw"
@@ -692,6 +693,24 @@ class GoogleSheetsDB:
         return value if isinstance(value, dict) else {}
 
     def update_event_metadata(self, event_id, updates):
+        live_keys = {
+            "StageTimers", "ProjectorBroadcast", "CurrentStageStatus",
+            "RegistrationOpen",
+        }
+        runtime_updates = {
+            key: value for key, value in dict(updates or {}).items()
+            if key in live_keys
+        }
+        if runtime_updates:
+            require_runtime(self.runtime, "Runtime control metadata mutation", admin=True)
+            for key, value in runtime_updates.items():
+                self.runtime.set_runtime_control_state(event_id, key, value)
+            updates = {
+                key: value for key, value in dict(updates or {}).items()
+                if key not in live_keys
+            }
+            if not updates:
+                return self.runtime.get_runtime_control_state(event_id)
         event = self.get_event(event_id)
         if not event:
             raise ValueError(f"Event {event_id} was not found.")
@@ -702,10 +721,20 @@ class GoogleSheetsDB:
             {"Notes": json.dumps(metadata, ensure_ascii=False, sort_keys=True)},
         )
 
+    def get_runtime_control_state(self, event_id):
+        require_runtime(self.runtime, "Runtime control state read", admin=True)
+        return self.runtime.get_runtime_control_state(event_id)
+
+    def get_broadcast_state(self, event_id):
+        return dict(
+            self.get_runtime_control_state(event_id).get("ProjectorBroadcast", {})
+            or {}
+        )
+
     def get_stage_timer(self, event_id, stage_no, duration_minutes=0):
-        event = self.get_event(event_id)
-        metadata = self.event_metadata(event)
-        timers = metadata.get("StageTimers", {}) or {}
+        require_runtime(self.runtime, "Stage timer read", admin=True)
+        control = self.runtime.get_runtime_control_state(event_id)
+        timers = control.get("StageTimers", {}) or {}
         key = str(stage_no)
         return dict(
             timers.get(key)
@@ -719,9 +748,9 @@ class GoogleSheetsDB:
         action,
         duration_minutes=0,
     ):
-        event = self.get_event(event_id)
-        metadata = self.event_metadata(event)
-        timers = dict(metadata.get("StageTimers", {}) or {})
+        require_runtime(self.runtime, "Stage timer mutation", admin=True)
+        control = self.runtime.get_runtime_control_state(event_id)
+        timers = dict(control.get("StageTimers", {}) or {})
         key = str(stage_no)
         timer = timers.get(key) or new_timer(
             max(int(float(duration_minutes or 0) * 60), 0)
@@ -734,11 +763,7 @@ class GoogleSheetsDB:
                 0,
             ),
         )
-        metadata["StageTimers"] = timers
-        self.update_event(
-            event_id,
-            {"Notes": json.dumps(metadata, ensure_ascii=False, sort_keys=True)},
-        )
+        self.runtime.set_runtime_control_state(event_id, "StageTimers", timers)
         return timers[key]
 
     def archive_event(self, event_id):
@@ -1077,9 +1102,7 @@ class GoogleSheetsDB:
 
     def get_event_by_join_code(self, join_code):
         if self.runtime.is_configured:
-            runtime_event = self.runtime.get_event_by_join_code(join_code)
-            if runtime_event:
-                return runtime_event
+            return self.runtime.get_event_by_join_code(join_code)
 
         for event in self.get_events():
             if str(event.get("JoinCode", "")).upper() == str(join_code).upper():
@@ -1800,42 +1823,24 @@ class GoogleSheetsDB:
     # -------------------------
 
     def join_player_by_code(self, join_code, name, country="", device_id=""):
-        if self.runtime.is_configured:
-            event = self.get_event_by_join_code(join_code)
-            event_id = str((event or {}).get("EventID", "")).strip()
-            if event_id == "EVT-0004":
-                player = self.runtime.join_player(join_code, name, device_id)
-                player["Country"] = _country_from_participant_status(
-                    player.get("Status", "")
-                )
-                return player
-            teams = self.get_teams(event_id) if event else []
-            matching = [
-                team for team in teams
-                if str(team.get("Country", "")).strip().casefold()
-                == str(country or "").strip().casefold()
-            ]
-            if country and not matching:
-                raise ValueError("Select a country configured for this event.")
-            player = self.runtime.join_player(join_code, name, device_id)
-            if matching and self.runtime.can_publish:
-                self.runtime.assign_participant_country_team(
-                    player.get("SessionToken", ""),
-                    matching[0].get("TeamName", ""),
-                    country,
-                )
-                player["Team"] = matching[0].get("TeamName", "")
-                player["Country"] = country
-            return player
-
-        event = self.get_event_by_join_code(join_code)
-        if event is None:
+        require_runtime(self.runtime, "Participant join")
+        event = self.runtime.get_event_by_join_code(join_code)
+        if not event:
             raise ValueError("Invalid Join Code")
-
-        player = self.join_player(event["EventID"], name, country=country)
-        player["EventName"] = event.get("EventName", "EXOS Event")
-        player["SessionToken"] = ""
-        return player
+        event_id = str(event.get("EventID", "")).strip()
+        teams = self.get_teams(event_id)
+        matching = [
+            team for team in teams
+            if str(team.get("Country", "")).strip().casefold()
+            == str(country or "").strip().casefold()
+        ]
+        if country and len(matching) != 1:
+            raise ValueError("Select one country configured for this event.")
+        requested_team_id = str((matching[0] if matching else {}).get("TeamID", ""))
+        return self.runtime.join_player(
+            join_code, name, device_id,
+            requested_team_id=requested_team_id,
+        )
 
     def get_player_by_session_token(self, session_token):
         if not self.runtime.is_configured:
@@ -1843,123 +1848,10 @@ class GoogleSheetsDB:
         return self.runtime.get_player_by_token(session_token)
 
     def join_player(self, event_id, name, country=""):
-        clean_name = str(name).strip()
-
-        # Existing participant rejoins
-        existing_player = self.get_player(event_id, clean_name)
-        if existing_player:
-            existing_team = str(existing_player.get("Team", ""))
-            existing_country = next(
-                (
-                    str(team.get("Country", ""))
-                    for team in self.get_teams(event_id)
-                    if str(team.get("TeamName", "")) == existing_team
-                ),
-                "",
-            )
-            return {
-                "EventID": existing_player.get("EventID", event_id),
-                "Name": existing_player.get("Name", clean_name),
-                "Team": existing_player.get("Team", ""),
-                "Points": existing_player.get("Points", 0),
-                "Status": existing_player.get("Status", "Waiting"),
-                "Country": existing_player.get("Country", existing_country),
-            }
-
-        teams = self.get_teams(event_id)
-
-        if not teams:
-            self.participants.append_row(
-                [event_id, clean_name, "", 0, "Waiting"]
-            )
-            self.clear_cache()
-
-            return {
-                "EventID": event_id,
-                "Name": clean_name,
-                "Team": "",
-                "Points": 0,
-                "Status": "Waiting",
-            }
-
-        # ---------- Read Event ----------
-        events = self.events.get_all_records()
-
-        event_row = None
-        next_team_index = 0
-
-        for idx, event in enumerate(events, start=2):
-            if str(event.get("EventID")) == str(event_id):
-                event_row = idx
-                try:
-                    next_team_index = int(event.get("NextTeamIndex", 0))
-                except Exception:
-                    next_team_index = 0
-                break
-
-        if event_row is None:
-            next_team_index = 0
-
-        matching = [
-            row for row in teams
-            if str(row.get("Country", "")).strip().casefold()
-            == str(country or "").strip().casefold()
-        ]
-        # ---------- Assign Team ----------
-        selected_team = (
-            min(
-                teams,
-                key=lambda candidate: sum(
-                    1 for row in self.get_players()
-                    if str(row.get("EventID", "")) == "EVT-0004"
-                    and str(row.get("Team", "")) == str(candidate["TeamName"])
-                ),
-            )
-            if str(event_id) == "EVT-0004"
-            else None
+        raise RuntimeAuthorityError(
+            "Direct Google Sheets participant joins are disabled. "
+            "Use join_player_by_code through the authoritative runtime."
         )
-        team = (
-            selected_team["TeamName"] if selected_team
-            else
-            matching[0]["TeamName"] if country and matching
-            else teams[next_team_index % len(teams)]["TeamName"]
-        )
-
-        # ---------- Update Pointer ----------
-        new_index = (next_team_index + 1) % len(teams)
-
-        if event_row:
-            event_headers = self.events.row_values(1)
-            if "NextTeamIndex" in event_headers:
-                self.events.update_cell(
-                    event_row,
-                    event_headers.index("NextTeamIndex") + 1,
-                    new_index,
-                )
-
-        # ---------- Save Participant ----------
-        self.participants.append_row(
-            [
-                event_id,
-                clean_name,
-                team,
-                0,
-                "Waiting",
-            ]
-        )
-
-        self.clear_cache()
-
-        return {
-            "EventID": event_id,
-            "Name": clean_name,
-            "Team": team,
-            "Points": 0,
-            "Status": "Waiting",
-            "Country": (
-                selected_team.get("Country", "") if selected_team else country
-            ),
-        }
 
     def get_country_team_summary(self, event_id):
         teams = self.get_teams(event_id)
@@ -2004,22 +1896,10 @@ class GoogleSheetsDB:
 
     def get_players(self):
         sheet_players = get_sheet_records("Participants")
-        if not self.runtime.can_publish:
+        if not self.runtime.is_configured:
             return sheet_players
-
-        try:
-            runtime_players = self.runtime.get_players()
-        except RuntimeDatabaseError:
-            return sheet_players
-
-        merged = {}
-        for player in sheet_players + runtime_players:
-            key = (
-                str(player.get("EventID", "")),
-                str(player.get("Name", "")).strip().lower(),
-            )
-            merged[key] = player
-        return list(merged.values())
+        require_runtime(self.runtime, "Live participant read", admin=True)
+        return self.runtime.get_players()
 
     def get_player(self, event_id, name):
         for player in self.get_players():
@@ -2036,14 +1916,14 @@ class GoogleSheetsDB:
             self._participant_count_warnings = {}
         self._participant_count_warnings[clean_event_id] = False
 
+        if self.runtime.is_configured:
+            require_runtime(self.runtime, "Live participant count", admin=True)
+            runtime_count = len(self.runtime.get_players(clean_event_id))
+            with _PARTICIPANT_COUNT_LOCK:
+                _LAST_SUCCESSFUL_PARTICIPANT_COUNTS[clean_event_id] = runtime_count
+            return runtime_count
+
         runtime_count = None
-        if self.runtime.can_publish:
-            try:
-                runtime_count = len(
-                    self.runtime.get_players(clean_event_id)
-                )
-            except RuntimeDatabaseError:
-                runtime_count = None
 
         try:
             sheet_count = get_sheet_participant_count(clean_event_id)
@@ -2066,7 +1946,7 @@ class GoogleSheetsDB:
             self._participant_count_warnings[clean_event_id] = True
             return last_known_count
 
-        participant_count = max(runtime_count or 0, sheet_count)
+        participant_count = sheet_count
         with _PARTICIPANT_COUNT_LOCK:
             _LAST_SUCCESSFUL_PARTICIPANT_COUNTS[
                 clean_event_id
@@ -2890,15 +2770,8 @@ class GoogleSheetsDB:
             "SessionToken": session_token,
         }
 
-        if self.runtime.is_configured:
-            return self.runtime.save_submission(record)
-
-        self.submissions.append_row([
-            record.get(header, "")
-            for header in self.submissions.row_values(1)
-        ])
-        self.clear_cache()
-        return record
+        require_runtime(self.runtime, "Submission mutation")
+        return self.runtime.save_submission(record)
 
     def get_team_submission(self, event_id, mission_id, team_name):
         if self.runtime.is_configured:
@@ -2950,19 +2823,10 @@ class GoogleSheetsDB:
             for row in get_sheet_records("Submissions")
             if str(row.get("EventID", "")) == str(event_id)
         ]
-        if not self.runtime.can_publish:
+        if not self.runtime.is_configured:
             return sheet_rows
-
-        try:
-            runtime_rows = self.runtime.get_submissions(event_id)
-        except RuntimeDatabaseError:
-            return sheet_rows
-
-        merged = {
-            str(row.get("SubmissionID", "")): row
-            for row in sheet_rows + runtime_rows
-        }
-        return list(merged.values())
+        require_runtime(self.runtime, "Live submission read", admin=True)
+        return self.runtime.get_submissions(event_id)
 
     def get_submissions(self, event_id):
         return self.get_event_submissions(event_id)
@@ -2988,32 +2852,15 @@ class GoogleSheetsDB:
         judged="Yes",
         status="APPROVED",
     ):
-        if self.runtime.can_publish:
-            runtime_result = self.runtime.update_submission(
-                submission_id=submission_id,
-                score=score,
-                remarks=remarks,
-                judged=judged,
-                status=status,
-            )
-            if runtime_result.get("Updated"):
-                return True
-
-        rows = get_sheet_records("Submissions")
-        for index, row in enumerate(rows, start=2):
-            if str(row.get("SubmissionID", "")) == str(submission_id):
-                self.submissions.update(
-                    values=[[
-                        score,
-                        status,
-                        judged,
-                        remarks,
-                    ]],
-                    range_name=f"L{index}:O{index}",
-                )
-                self.clear_cache()
-                return True
-        return False
+        require_runtime(self.runtime, "Submission review mutation", admin=True)
+        runtime_result = self.runtime.update_submission(
+            submission_id=submission_id,
+            score=score,
+            remarks=remarks,
+            judged=judged,
+            status=status,
+        )
+        return bool(runtime_result.get("Updated"))
 
     def approve_all_pending(
         self,
@@ -3312,13 +3159,9 @@ class GoogleSheetsDB:
         }
 
     def get_event_state(self, event_id):
-        if self.runtime.can_publish:
-            try:
-                runtime_state = self.runtime.get_event_stage(event_id)
-            except RuntimeDatabaseError:
-                runtime_state = None
-            if runtime_state:
-                return runtime_state
+        if self.runtime.is_configured:
+            require_runtime(self.runtime, "Live programme state read", admin=True)
+            return self.runtime.get_event_stage(event_id)
 
         states = [
             row
@@ -3337,6 +3180,7 @@ class GoogleSheetsDB:
         display_mode="Hybrid",
         stage_payload=None,
     ):
+        require_runtime(self.runtime, "Live programme state mutation", admin=True)
         runtime_result = None
         runtime_stage = dict(stage_payload or {})
         runtime_stage.update({
@@ -3346,8 +3190,7 @@ class GoogleSheetsDB:
             "MissionID": mission_id,
             "DisplayMode": display_mode,
         })
-        if self.runtime.can_publish:
-            if (
+        if (
                 str(mission_id).strip()
                 and not self.runtime.has_event_mission(
                     event_id,
@@ -3366,10 +3209,10 @@ class GoogleSheetsDB:
                     event_id,
                     event_missions,
                 )
-            runtime_result = self.runtime.set_event_stage(
-                event_id,
-                runtime_stage,
-            )
+        runtime_result = self.runtime.set_event_stage(
+            event_id,
+            runtime_stage,
+        )
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         payload = [

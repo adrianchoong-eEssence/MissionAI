@@ -19,6 +19,7 @@ class FakeSheetError(Exception):
 class FakeRuntime:
     def __init__(self, players=None, error=None, can_publish=True):
         self.can_publish = can_publish
+        self.is_configured = can_publish
         self.players = list(players or [])
         self.error = error
         self.calls = []
@@ -126,7 +127,7 @@ class GoogleSheetsResilienceTests(unittest.TestCase):
         ):
             count = database.get_participant_count("EVT-0001")
 
-        self.assertEqual(count, 41)
+        self.assertEqual(count, 2)
         self.assertEqual(runtime.calls, ["EVT-0001"])
         self.assertEqual(
             database.get_participant_count_warning("EVT-0001"),

@@ -20,7 +20,7 @@ from screens.live_event_console import (
     render_review_scoring_widget,
 )
 from screens.projector_broadcast import (
-    projector_broadcast_state,
+    DEFAULT_BROADCAST,
     render_broadcast_controller,
 )
 
@@ -137,8 +137,8 @@ def _render_timer(db, event_id, stage):
 
 def _render_registration(db, event_id):
     event = db.get_event(event_id)
-    metadata = db.event_metadata(event)
-    is_open = bool(metadata.get("RegistrationOpen", False))
+    runtime_control = db.get_runtime_control_state(event_id)
+    is_open = bool(runtime_control.get("RegistrationOpen", False))
     st.subheader("Registration")
     status, participants, allocation = st.columns(3)
     status.metric("Registration", "Open" if is_open else "Closed")
@@ -440,9 +440,10 @@ def show_control_centre():
         if activity.get("ActivityID", "") == selected_activity_id
     )
     selected_event = db.get_event(event_id)
-    metadata = db.event_metadata(selected_event)
-    broadcast_state = projector_broadcast_state(selected_event)
-    stage_status = str(metadata.get("CurrentStageStatus", "READY"))
+    runtime_control = db.get_runtime_control_state(event_id)
+    broadcast_state = dict(DEFAULT_BROADCAST)
+    broadcast_state.update(db.get_broadcast_state(event_id))
+    stage_status = str(runtime_control.get("CurrentStageStatus", "READY"))
     content_config = activity_content_config(current_activity, current_module)
     linked_content_name = (
         content_config["LinkedContentName"] or "Event-specific activity content"

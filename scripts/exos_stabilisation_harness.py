@@ -175,7 +175,7 @@ def main():
         run_scenario(100, 100, transient_failures=2),
     ]
     report = {
-        "suite": "Sprint 009 EXOS deterministic stabilisation harness",
+        "suite": "EXOS deterministic identity stabilisation harness",
         "environment": "local in-memory transactional model; not production",
         "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "passed": all(item["passed"] for item in scenarios),

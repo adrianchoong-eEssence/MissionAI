@@ -14,6 +14,7 @@
    - `supabase/009_road_hunt_team_missions.sql`
    - `supabase/010_idempotent_concurrent_join.sql`
    - `supabase/011_participant_identity_engine.sql`
+   - `supabase/012_foundation_identity_runtime_authority.sql`
 5. Copy the project URL, publishable key, and secret key from Supabase project settings.
 6. Add these keys to the Streamlit secrets for Admin, Facilitator, and Participant:
 

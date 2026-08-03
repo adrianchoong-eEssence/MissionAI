@@ -77,7 +77,11 @@ def _choice_index(choices, reference):
 
 def render_broadcast_controller(db, event_id):
     event = db.get_event(event_id) or {}
-    state = projector_broadcast_state(event)
+    state = dict(DEFAULT_BROADCAST)
+    state.update({
+        key: value for key, value in db.get_broadcast_state(event_id).items()
+        if key in state
+    })
     db.ensure_existing_assets_catalogue()
     assets = db.get_assets()
     backgrounds = _asset_choices(
@@ -480,4 +484,3 @@ def render_projector_broadcast(
         return True
 
     return False
-

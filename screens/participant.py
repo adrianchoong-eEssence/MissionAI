@@ -2246,6 +2246,12 @@ def show_participant():
             if not player:
                 st.info("No completed registration was found for this device.")
                 st.stop()
+            if player.get("Ambiguous"):
+                st.error(player.get("Message", "Multiple expedition records match this name."))
+                st.stop()
+            if player.get("RecoveryRequired"):
+                st.session_state["participant_recovery_candidate"] = player
+                st.rerun()
             db = GoogleSheetsDB()
             ai = db.assign_ai_facilitator(player["Team"]) or {}
             restore_participant_identity(player)
