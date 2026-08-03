@@ -2,7 +2,12 @@
 """SELECT-only canonical hierarchy audit for production ProgrammeStages."""
 
 import json
+import sys
 from collections import defaultdict
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from data.google_sheets import get_sheet_records
 from engines.programme_adapter import CanonicalProgrammeAdapter
