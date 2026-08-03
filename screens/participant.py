@@ -172,7 +172,7 @@ def render_recovery_candidate(candidate):
     if reject.button("This Is Not Me", width="stretch"):
         st.session_state.pop("participant_recovery_candidate", None)
         st.session_state.pop("participant_join_request", None)
-        st.warning("Use a distinct full name or ask the facilitator to resolve duplicate identities.")
+        st.rerun()
         st.stop()
     st.stop()
 

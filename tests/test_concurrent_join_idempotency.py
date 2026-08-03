@@ -90,6 +90,8 @@ def test_join_ui_disables_resubmission_and_supports_recovery():
     assert "Check Existing Registration" in source
     assert 'recovery_requested = st.form_submit_button(' in source
     assert "if recovery_requested:" in source
+    reject_block = source.split('if reject.button("This Is Not Me"', 1)[1]
+    assert "st.rerun()" in reject_block.split("def ", 1)[0]
     assert "participant_device_id()" in source
     assert "restore_participant_identity(player" in source
     assert '"participant_team_id"' in source
