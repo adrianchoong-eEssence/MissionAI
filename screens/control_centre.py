@@ -9,10 +9,10 @@ from engines.stage_timer import remaining_seconds
 from engines.programme_hierarchy import (
     activity_content_config,
     activity_details,
-    canonical_event_programme,
     friendly_type,
     linked_content_stage,
 )
+from engines.programme_adapter import CanonicalProgrammeAdapter, ProgrammeIntegrityError
 from screens.app_state import select_active_event
 from screens.live_event_console import (
     calculate_leaderboard,
@@ -64,7 +64,14 @@ def _set_stage(control, event_id, stage, status="READY"):
 
 def _start_programme_activity(control, event_id, stage, module):
     """Publish the activity's linked content before broadcasting its stage."""
-    config = activity_content_config(stage, module)
+    if not stage.get("RuntimeEligible", True):
+        raise ProgrammeIntegrityError(["Inactive or superseded activities cannot be launched."])
+    config = {
+        "ContentType": stage.get("ContentType", "Standard Activity"),
+        "LinkedContent": stage.get("LinkedContentID", ""),
+        "LinkedContentID": stage.get("LinkedContentID", ""),
+        "LinkedContentName": stage.get("LinkedContentName", ""),
+    }
     live_stage = linked_content_stage(stage, module)
     if (
         config["ContentType"] == "Experience Board"
@@ -154,13 +161,6 @@ def _render_registration(db, control, event_id):
         control.control_state(event_id, "RegistrationOpen", not is_open)
         st.rerun()
     formation.info("Launch Group Formation with the Next Stage control.")
-    if str(event_id) == "EVT-0004":
-        st.markdown("#### Country Assignment")
-        st.dataframe(
-            db.get_country_team_summary(event_id),
-            hide_index=True,
-            width="stretch",
-        )
 
 
 def _render_team_management(db, control, event_id):
@@ -395,7 +395,14 @@ def show_control_centre():
         st.warning("Build and save the programme before launch.")
         return
     state = db.get_event_state(event_id)
-    programme_modules = canonical_event_programme(stages, event_id)
+    programme = CanonicalProgrammeAdapter(event_id, stages).snapshot()
+    programme_modules = programme.modules
+    if programme.warnings:
+        st.caption(" · ".join(programme.warnings))
+    if programme.errors:
+        st.error("Programme validation failed. Live launch is disabled.")
+        for error in programme.errors:
+            st.warning(error)
     flattened = [
         (module, activity)
         for module in programme_modules
@@ -404,10 +411,14 @@ def show_control_centre():
     if not flattened:
         st.warning("No active activities are available for this event.")
         return
-    state_stage_no = str((state or {}).get("CurrentStageNo", ""))
+    try:
+        _, runtime_activity = programme.resolve_runtime(state or {})
+        runtime_activity_id = runtime_activity.get("ActivityID", "")
+    except ProgrammeIntegrityError:
+        runtime_activity_id = ""
     default_activity_index = next((
         position for position, (_, activity) in enumerate(flattened)
-        if str(activity.get("StageNo", "")) == state_stage_no
+        if activity.get("ActivityID", "") == runtime_activity_id
     ), 0)
     default_module_id = flattened[default_activity_index][0].get("ModuleID", "")
     module_ids = [module.get("ModuleID", "") for module in programme_modules]
@@ -510,7 +521,9 @@ def show_control_centre():
         "Start Selected Activity",
         type="primary",
         width="stretch",
+        disabled=bool(programme.errors) or not bool(stage.get("RuntimeEligible", True)),
     ):
+        programme.require_valid()
         _start_programme_activity(control, event_id, stage, current_module)
         control.timer(
             event_id,

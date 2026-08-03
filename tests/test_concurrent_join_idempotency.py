@@ -96,7 +96,7 @@ def test_join_ui_disables_resubmission_and_supports_recovery():
 
 def test_linked_content_reruns_do_not_clear_participant_identity():
     source = Path("screens/participant.py").read_text()
-    linked_route = source.split("linked_config = activity_content_config", 1)[1]
+    linked_route = source.split("linked_config = {", 1)[1]
     leave_action = linked_route.rsplit('if st.button("🚪 Leave Event"', 1)[1]
 
     assert "reset_session()" not in linked_route.split(

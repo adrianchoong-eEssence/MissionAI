@@ -27,11 +27,10 @@ from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 from data.upload_safety import upload_error_message
 from engines.programme_hierarchy import (
-    activity_content_config,
     activity_details,
-    current_module_activity,
     friendly_type,
 )
+from engines.programme_adapter import CanonicalProgrammeAdapter, ProgrammeIntegrityError
 from screens.mission_setup import cropped_reference_image, mission_module_name
 
 
@@ -2289,80 +2288,40 @@ def show_participant():
         "participant_runtime_state",
         {},
     )
-    hierarchy_module = {}
-    hierarchy_activity = {}
+    hierarchy_module, hierarchy_activity = {}, {}
     try:
-        hierarchy_module, hierarchy_activity = current_module_activity(
-            db.get_programme_stages(st.session_state["participant_event_id"]),
-            live_runtime_state.get("CurrentStageNo", ""),
+        hierarchy = CanonicalProgrammeAdapter.load(
+            db, st.session_state["participant_event_id"],
         )
-    except Exception:
+        hierarchy_module, hierarchy_activity = hierarchy.resolve_runtime(live_runtime_state)
+        participant_activity = hierarchy.participant_view(live_runtime_state)
+    except (Exception, ProgrammeIntegrityError):
         hierarchy_module, hierarchy_activity = {}, {}
-    current_stage_name = str(
-        live_runtime_state.get("StageName", "")
-        or (live_runtime_state.get("Stage", {}) or {}).get("StageName", "")
-        or hierarchy_activity.get("StageName", "")
-    ).strip()
+        participant_activity = {}
+    current_stage_name = str(participant_activity.get("Activity", "")).strip()
     if current_stage_name:
         st.info(f"Current live stage: {current_stage_name}")
 
-    stage_payload = live_runtime_state.get("Stage", {}) or {}
-    linked_config = activity_content_config(
-        stage_payload or hierarchy_activity,
-        hierarchy_module,
-    )
-    if stage_payload.get("LinkedExperienceSet"):
-        linked_config = {
-            "ContentType": "Experience Board",
-            "LinkedContent": stage_payload.get("LinkedExperienceSet", ""),
-        }
+    linked_config = {
+        "ContentType": participant_activity.get("ContentType", "Standard Activity"),
+        "LinkedContent": participant_activity.get("LinkedContentID", ""),
+    }
     linked_experience_set = str(
         linked_config.get("LinkedContent", "") or ""
     ).strip()
 
-    if _is_bayu_event():
-        stage_key = current_stage_name.casefold()
-        if linked_config["ContentType"] == "Sync AI":
-            st.session_state.pop("bayu_board_open", None)
-            render_sync_ai_participant(
-                db,
-                st.session_state["participant_event_id"],
-                st.session_state.get("participant_session_token", ""),
-            )
-            footer()
-            return
-        if "bridge of trust" in stage_key:
-            st.session_state.pop("bayu_board_open", None)
-            render_programme_activity(
-                stage_payload or hierarchy_activity,
-            )
-            footer()
-            return
-        if linked_experience_set:
-            if (
-                "labyrinth" in linked_experience_set.casefold()
-                and not st.session_state.get("bayu_board_open")
-            ):
-                render_mission_ai_briefing(db)
-            else:
-                render_experience_set_board(
-                    db,
-                    st.session_state["participant_event_id"],
-                    linked_experience_set,
-                )
-            footer()
-            return
-        if (
-            "mission ai" in stage_key
-            or "mission board" in stage_key
-            or "labyrinth" in stage_key
-        ):
-            if "brief" in stage_key and not st.session_state.get("bayu_board_open"):
-                render_mission_ai_briefing(db)
-            else:
-                render_bayu_experience_board(db)
-            footer()
-            return
+    if linked_config["ContentType"] == "Sync AI":
+        render_sync_ai_participant(
+            db,
+            st.session_state["participant_event_id"],
+            st.session_state.get("participant_session_token", ""),
+        )
+        footer()
+        return
+    if linked_config["ContentType"] in {"Standard Activity", "Briefing", "Break", "Debrief"}:
+        render_programme_activity(hierarchy_activity)
+        footer()
+        return
 
     if linked_experience_set:
         event_id = st.session_state["participant_event_id"]

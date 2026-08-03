@@ -12,35 +12,19 @@ from engines.programme_hierarchy import (
 )
 
 
-def test_aia_stages_are_grouped_into_event_modules():
+def test_legacy_stages_map_without_name_based_module_inference():
     modules = build_programme_hierarchy(AIA_CUSTOMER_CONTACT_STAGES)
     names = [module["ModuleName"] for module in modules]
-    assert "Mission AI" in names
-    assert "Sync AI" in names
-    assert "Catalyst Challenge" in names
-    mission_ai = next(row for row in modules if row["ModuleName"] == "Mission AI")
-    assert [row["StageName"] for row in mission_ai["Activities"]] == [
-        "Mission AI Briefing",
-        "Mission Board Opens",
-        "Signal in the Noise",
-        "Human × AI Decision Lab",
-        "Friction Safari",
-        "Elevate the Moment",
-        "Submission Review",
-        "Credit Release",
-        "Mission AI Debrief",
-    ]
+    assert names[0] == "Arrival & Registration"
+    assert "Team Planning" in names
+    assert len(modules) == len(AIA_CUSTOMER_CONTACT_STAGES)
 
 
 def test_internal_order_is_event_specific_and_master_is_unchanged():
     master = deepcopy(AIA_CUSTOMER_CONTACT_STAGES)
     event_a = build_programme_hierarchy(master)
     event_b = build_programme_hierarchy(master)
-    mission_a = next(row for row in event_a if row["ModuleName"] == "Mission AI")
-    mission_a["Activities"][1], mission_a["Activities"][2] = (
-        mission_a["Activities"][2],
-        mission_a["Activities"][1],
-    )
+    event_a[0], event_a[1] = event_a[1], event_a[0]
     flattened_a = flatten_programme_hierarchy(event_a)
     flattened_b = flatten_programme_hierarchy(event_b)
     assert flattened_a != flattened_b
@@ -49,7 +33,7 @@ def test_internal_order_is_event_specific_and_master_is_unchanged():
 
 def test_current_module_and_activity_are_resolved_for_runtime():
     module, activity = current_module_activity(AIA_CUSTOMER_CONTACT_STAGES, 17)
-    assert module["ModuleName"] == "Sync AI"
+    assert module["ModuleName"] == "Team Planning"
     assert activity["MissionID"] == "S01"
 
 

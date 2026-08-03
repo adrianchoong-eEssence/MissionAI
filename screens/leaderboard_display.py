@@ -4,7 +4,8 @@ from streamlit_autorefresh import st_autorefresh
 from branding import experience_title
 from data.google_sheets import GoogleSheetsDB
 from data.runtime_database import RuntimeDatabaseError
-from engines.programme_hierarchy import current_module_activity, friendly_type
+from engines.programme_hierarchy import friendly_type
+from engines.programme_adapter import CanonicalProgrammeAdapter, ProgrammeIntegrityError
 from engines.stage_timer import remaining_seconds
 from screens.app_state import select_active_event
 from screens.projector_broadcast import (
@@ -725,18 +726,13 @@ def show_leaderboard_display():
 
     event_id = event.get("EventID")
     state = db.get_event_state(event_id) or {}
-    stages = db.get_programme_stages(event_id)
-    current_stage = next(
-        (
-            stage for stage in stages
-            if str(stage.get("StageNo", ""))
-            == str(state.get("CurrentStageNo", ""))
-        ),
-        stages[0] if stages else {},
-    )
-    current_module, current_activity = current_module_activity(
-        stages, current_stage.get("StageNo", "")
-    )
+    programme = CanonicalProgrammeAdapter.load(db, event_id)
+    try:
+        current_module, current_activity = programme.resolve_runtime(state)
+    except ProgrammeIntegrityError as error:
+        st.error(f"Projector cannot resolve the live activity: {error}")
+        return
+    current_stage = current_activity
     requested_mode = str(
         current_stage.get("DisplayMode", "")
         or state.get("DisplayMode", "")
@@ -750,20 +746,16 @@ def show_leaderboard_display():
         "Collaboration",
         "Winner",
     }
-    combined = (
-        str(current_stage.get("StageName", ""))
-        + " "
-        + str(current_stage.get("StageType", ""))
-    ).upper()
+    content_type = str(current_activity.get("ContentType", "Standard Activity"))
     if requested_mode in allowed_modes:
         mode = requested_mode
-    elif any(word in combined for word in ("CLOSING", "WINNER", "CHAMPION")):
+    elif content_type in {"Judging", "Debrief"}:
         mode = "Winner"
-    elif any(word in combined for word in ("MARKETPLACE", "SYNC", "WALLET")):
+    elif content_type in {"Marketplace", "Sync AI"}:
         mode = "Credit Leaderboard"
-    elif any(word in combined for word in ("MISSION", "ACTIVE")):
+    elif content_type in {"Experience Board", "Catalyst"}:
         mode = "Hybrid"
-    elif "REGISTRATION" in combined:
+    elif current_activity.get("ActivityType") == "Registration":
         mode = "Registration"
     else:
         mode = "Leaderboard"

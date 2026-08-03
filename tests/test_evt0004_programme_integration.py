@@ -66,7 +66,7 @@ def test_programme_and_control_surfaces_expose_linked_content_contract():
     assert "ENTER THE LABYRINTH" in participant
 
 
-def test_evt0004_canonical_projection_has_eight_stable_visible_items():
+def test_event_ids_do_not_trigger_event_specific_canonical_projection():
     stages = [
         {"EventID": "EVT-0004", "StageNo": index, "StageName": name,
          "DurationMinutes": 15, "IsActive": "Yes"}
@@ -81,10 +81,10 @@ def test_evt0004_canonical_projection_has_eight_stable_visible_items():
 
     assert [module["ModuleName"] for module in modules] == [
         "Registration", "Energiser", "Launch EXOS", "Bridge of Trust",
-        "Operation: The Labyrinth", "Lunch", "Sync AI", "Catalyst Challenge",
+        "Mission AI Briefing", "Lunch", "SYNC AI Innovation Market",
+        "Catalyst Challenge", "Mission AI", "SYNC AI Performance & Judging",
     ]
-    assert len({module["ModuleID"] for module in modules}) == 8
+    assert len({module["ModuleID"] for module in modules}) == 10
     activities = [module["Activities"][0] for module in modules]
-    assert len({activity["ActivityID"] for activity in activities}) == 8
-    assert activities[4]["LinkedContentName"] == "EVT-0004 Bayu Beach Labyrinth"
-    assert activities[5]["ContentType"] == "Break"
+    assert len({activity["ActivityID"] for activity in activities}) == 10
+    assert all(activity["EventID"] == "EVT-0004" for activity in activities)

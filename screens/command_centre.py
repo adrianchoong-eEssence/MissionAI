@@ -155,6 +155,8 @@ def show_results_reports():
         key="results_reports_event",
     )
     event_id = str(event.get("EventID", ""))
+    from engines.programme_adapter import CanonicalProgrammeAdapter
+    programme = CanonicalProgrammeAdapter.load(db, event_id)
     programme_name = experience_title(event)
     experience_header(programme_name, subtitle="Programme Name")
     participants = _safe_number(
@@ -186,6 +188,10 @@ def show_results_reports():
 
     if submissions:
         fields = [
+            "ProgrammeID",
+            "ModuleID",
+            "ActivityID",
+            "ExperienceID",
             "MissionID",
             "TeamName",
             "ParticipantName",
@@ -195,11 +201,19 @@ def show_results_reports():
             "Remarks",
             "SubmittedAt",
         ]
+        report_rows = []
+        for row in submissions:
+            identity = next((
+                programme.report_identity(activity["ActivityID"])
+                for activity in programme.activities
+                if activity.get("LinkedContentID") == str(row.get("MissionID", ""))
+            ), {}) or {}
+            enriched = dict(row)
+            enriched.update(identity)
+            enriched.setdefault("ExperienceID", row.get("MissionID", ""))
+            report_rows.append({field: enriched.get(field, "") for field in fields})
         st.dataframe(
-            [
-                {field: row.get(field, "") for field in fields}
-                for row in submissions
-            ],
+            report_rows,
             width="stretch",
             hide_index=True,
         )

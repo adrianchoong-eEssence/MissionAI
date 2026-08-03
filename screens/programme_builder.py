@@ -531,12 +531,12 @@ def render_programme_first_builder(db):
             db.get_programme_stages(event_id), event_id,
         )
     st.caption("Arrange the programme like slides. Open a module to edit everything inside it.")
-    if str(event_id).upper() == "EVT-0004":
-        st.info(
-            "Pre-migration Control UAT: these eight canonical items are a safe "
-            "event-specific preview. Save actions update this preview only and do "
-            "not rewrite or deactivate ProgrammeStages records."
-        )
+    from engines.programme_adapter import CanonicalProgrammeAdapter
+    validation = CanonicalProgrammeAdapter(event_id, db.get_programme_stages(event_id)).snapshot()
+    if validation.errors:
+        st.error("Programme hierarchy validation failed.")
+        for error in validation.errors:
+            st.warning(error)
 
     selected_module_labels = [
         f"{position}. {module['ModuleName']}"

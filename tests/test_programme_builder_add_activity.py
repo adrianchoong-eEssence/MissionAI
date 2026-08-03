@@ -1,4 +1,4 @@
-from engines.programme_hierarchy import build_programme_hierarchy
+from engines.programme_hierarchy import build_programme_hierarchy, encode_module_stage_type
 from screens.programme_builder import _add_activity
 
 
@@ -30,7 +30,7 @@ def test_add_activity_persists_after_fresh_reload():
                 "StartTime": "09:00",
                 "DurationMinutes": 15,
                 "StageName": "Energiser",
-                "StageType": "MODULE::1::Energiser::Energiser",
+                    "StageType": encode_module_stage_type("Energiser", 1, "Energiser"),
                 "MissionID": "",
                 "DisplayMode": "Collaboration",
                 "ParticipantMessage": "",
