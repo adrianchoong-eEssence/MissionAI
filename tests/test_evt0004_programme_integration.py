@@ -34,7 +34,7 @@ def test_activity_content_link_round_trips_without_schema_change():
 
 def test_sync_ai_link_publishes_one_resolved_live_payload():
     class DB:
-        def set_event_stage(self, event_id, stage):
+        def set_stage(self, event_id, stage):
             self.event_id = event_id
             self.stage = dict(stage)
 

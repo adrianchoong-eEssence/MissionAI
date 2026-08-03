@@ -68,7 +68,7 @@ def test_control_centre_activates_set_before_publishing_live_stage():
             self.activated = (event_id, experience_set)
             return {"ExperiencesPublished": 17}
 
-        def set_event_stage(self, event_id, stage):
+        def set_stage(self, event_id, stage):
             self.live_stage = dict(stage)
 
     db = DB()

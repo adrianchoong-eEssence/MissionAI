@@ -95,12 +95,14 @@ def test_migration_is_audit_only_and_flags_all_required_anomalies():
 
 
 def test_runtime_admin_calls_use_protected_service_role():
+    from data.runtime_authority import control_centre_mutation
     runtime = SupabaseRuntimeDB.__new__(SupabaseRuntimeDB)
     calls = []
     runtime._request = lambda *args, **kwargs: calls.append((args, kwargs)) or {"ok": True}
-    runtime.transfer_team_leader("EVT-1", "T1", "P1", "Facilitator")
-    runtime.set_submission_override("EVT-1", "T1", True, "Facilitator")
-    runtime.move_participant("P1", "T2", "Correction", "Facilitator")
+    with control_centre_mutation():
+        runtime.transfer_team_leader("EVT-1", "T1", "P1", "Facilitator")
+        runtime.set_submission_override("EVT-1", "T1", True, "Facilitator")
+        runtime.move_participant("P1", "T2", "Correction", "Facilitator")
     assert all(call[1]["admin"] is True for call in calls)
 
 

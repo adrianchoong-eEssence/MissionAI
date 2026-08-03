@@ -84,11 +84,13 @@ class RuntimeProgrammeTests(unittest.TestCase):
         return runtime
 
     def test_publish_programme_uses_admin_rpc(self):
+        from data.runtime_authority import control_centre_mutation
         runtime = self.make_runtime()
-        result = runtime.publish_programme(
-            "EVT-TEST",
-            [{"MissionID": "M01", "Title": "Mission One"}],
-        )
+        with control_centre_mutation():
+            result = runtime.publish_programme(
+                "EVT-TEST",
+                [{"MissionID": "M01", "Title": "Mission One"}],
+            )
 
         self.assertEqual(result["MissionsPublished"], 1)
         call = runtime.calls[0]
@@ -287,18 +289,20 @@ class RuntimeProgrammeTests(unittest.TestCase):
         self.assertIn("token=x", signed_url)
 
     def test_credit_wallet_and_marketplace_use_expected_rpcs(self):
+        from data.runtime_authority import control_centre_mutation
         runtime = self.make_runtime()
-        runtime.configure_credit_wallet("EVT-TEST", enabled=True)
-        runtime.publish_marketplace(
-            "EVT-TEST",
-            [{
-                "ItemID": "UPGRADE-01",
-                "ItemName": "Wheel Upgrade",
-                "CreditCost": 100,
-                "StockQuantity": 10,
-                "Active": True,
-            }],
-        )
+        with control_centre_mutation():
+            runtime.configure_credit_wallet("EVT-TEST", enabled=True)
+            runtime.publish_marketplace(
+                "EVT-TEST",
+                [{
+                    "ItemID": "UPGRADE-01",
+                    "ItemName": "Wheel Upgrade",
+                    "CreditCost": 100,
+                    "StockQuantity": 10,
+                    "Active": True,
+                }],
+            )
         runtime.purchase_marketplace_item(
             "session-token",
             "UPGRADE-01",
@@ -321,23 +325,25 @@ class RuntimeProgrammeTests(unittest.TestCase):
         self.assertFalse(runtime.calls[2]["admin"])
 
     def test_road_hunt_route_and_location_use_expected_rpcs(self):
+        from data.runtime_authority import control_centre_mutation
         runtime = self.make_runtime()
-        runtime.configure_road_hunt(
-            "EVT-TEST",
-            enabled=True,
-            location_interval_seconds=15,
-        )
-        runtime.publish_road_hunt_route(
-            "EVT-TEST",
-            [{
-                "StopID": "ipoh-01",
-                "StopName": "Mirror Lake",
-                "Latitude": 4.5593,
-                "Longitude": 101.1197,
-                "RadiusMeters": 120,
-                "MissionIDs": "IPOH-01, IPOH-02",
-            }],
-        )
+        with control_centre_mutation():
+            runtime.configure_road_hunt(
+                "EVT-TEST",
+                enabled=True,
+                location_interval_seconds=15,
+            )
+            runtime.publish_road_hunt_route(
+                "EVT-TEST",
+                [{
+                    "StopID": "ipoh-01",
+                    "StopName": "Mirror Lake",
+                    "Latitude": 4.5593,
+                    "Longitude": 101.1197,
+                    "RadiusMeters": 120,
+                    "MissionIDs": "IPOH-01, IPOH-02",
+                }],
+            )
         runtime.get_road_hunt_participant_state("session-token")
         runtime.claim_team_tracker("session-token")
         runtime.submit_team_location(

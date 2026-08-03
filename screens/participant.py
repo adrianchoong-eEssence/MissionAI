@@ -392,16 +392,8 @@ def render_team_assignment_card(db):
             st.write(f"{icon} {member.get('Name', '')}")
     if leader:
         st.success(f"Team Leader: {leader.get('Name', '')}")
-    elif st.session_state.get("participant_session_token"):
-        if st.button("Become Team Leader", width="stretch"):
-            result = db.claim_team_leader(
-                st.session_state["participant_session_token"]
-            )
-            if result.get("Claimed"):
-                st.success("You are now the Team Leader.")
-            else:
-                st.info(f"{result.get('LeaderName', 'A teammate')} is already Team Leader.")
-            st.rerun()
+    else:
+        st.info("A facilitator assigns or restores the Team Leader in Control Centre.")
 
 
 def find_existing_submission(db, mission, submission_type):

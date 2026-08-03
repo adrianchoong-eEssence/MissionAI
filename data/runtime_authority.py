@@ -6,11 +6,35 @@ state are caches only and may never originate a live mutation.
 """
 
 from dataclasses import dataclass
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import Enum
 
 
 class RuntimeAuthorityError(RuntimeError):
     """Raised when a live operation would bypass its authoritative store."""
+
+
+_CONTROL_MUTATION = ContextVar("exos_control_mutation", default=False)
+
+
+@contextmanager
+def control_centre_mutation():
+    """Grant a narrowly scoped capability to the Control Centre service."""
+    token = _CONTROL_MUTATION.set(True)
+    try:
+        yield
+    finally:
+        _CONTROL_MUTATION.reset(token)
+
+
+def require_control_centre(operation):
+    """Reject facilitator/live mutations which bypass Control Centre."""
+    if not _CONTROL_MUTATION.get():
+        raise RuntimeAuthorityError(
+            f"{operation} must originate from Control Centre. Direct runtime "
+            "mutation from screens, utilities, and legacy consoles is forbidden."
+        )
 
 
 class RuntimeEntity(str, Enum):
@@ -33,6 +57,7 @@ class AuthorityRule:
     authority: str
     sheets_role: str
     memory_role: str = "cache_only"
+    mutation_owner: str = "Control Centre"
 
 
 RUNTIME_AUTHORITY = {
@@ -68,6 +93,7 @@ def authority_manifest():
             "Authority": rule.authority,
             "SheetsRole": rule.sheets_role,
             "MemoryRole": rule.memory_role,
+            "MutationOwner": rule.mutation_owner,
         }
         for entity, rule in RUNTIME_AUTHORITY.items()
     }

@@ -75,7 +75,7 @@ def _choice_index(choices, reference):
         return 0
 
 
-def render_broadcast_controller(db, event_id):
+def render_broadcast_controller(db, event_id, control=None):
     event = db.get_event(event_id) or {}
     state = dict(DEFAULT_BROADCAST)
     state.update({
@@ -180,6 +180,9 @@ def render_broadcast_controller(db, event_id):
     elif mode == "Custom Video":
         st.info("Custom Video is reserved. Playback is not enabled yet.")
 
+    if control is None:
+        st.info("Broadcast controls are read-only outside Control Centre.")
+        return
     if st.button(
         "Apply Broadcast",
         type="primary",
@@ -202,7 +205,7 @@ def render_broadcast_controller(db, event_id):
             "CharacterReference": character_reference,
             "CustomImageReference": custom_image_reference,
         }
-        db.update_event_metadata(event_id, {"ProjectorBroadcast": payload})
+        control.broadcast(event_id, payload)
         st.success(f"{mode} is now live on the projector.")
         st.rerun()
 

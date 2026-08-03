@@ -118,5 +118,5 @@ def test_experience_mode_uses_existing_experience_without_mutating_it():
 def test_control_centre_no_longer_writes_projector_copy_to_participants():
     source = (ROOT / "screens" / "control_centre.py").read_text()
 
-    assert "render_broadcast_controller(db, event_id)" in source
+    assert "render_broadcast_controller(db, event_id, control=control)" in source
     assert "Broadcast sent to participant and projector views." not in source

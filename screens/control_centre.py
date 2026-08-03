@@ -4,6 +4,7 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from data.google_sheets import GoogleSheetsDB
+from data.control_runtime import ControlRuntime
 from engines.stage_timer import remaining_seconds
 from engines.programme_hierarchy import (
     activity_content_config,
@@ -17,6 +18,7 @@ from screens.live_event_console import (
     calculate_leaderboard,
     format_score,
     render_credit_wallet_control,
+    render_road_hunt_operations,
     render_review_scoring_widget,
 )
 from screens.projector_broadcast import (
@@ -51,18 +53,16 @@ def _format_timer(seconds):
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
 
-def _set_stage(db, event_id, stage, status="READY"):
-    result = db.set_event_stage(event_id, stage)
-    db.update_event_metadata(event_id, {
-        "CurrentStageStatus": status,
-    })
+def _set_stage(control, event_id, stage, status="READY"):
+    result = control.set_stage(event_id, stage)
+    control.control_state(event_id, "CurrentStageStatus", status)
     warning = str((result or {}).get("Warning", "")).strip()
     if warning:
         st.warning(warning)
     st.rerun()
 
 
-def _start_programme_activity(db, event_id, stage, module):
+def _start_programme_activity(control, event_id, stage, module):
     """Publish the activity's linked content before broadcasting its stage."""
     config = activity_content_config(stage, module)
     live_stage = linked_content_stage(stage, module)
@@ -70,17 +70,17 @@ def _start_programme_activity(db, event_id, stage, module):
         config["ContentType"] == "Experience Board"
         and config["LinkedContent"]
     ):
-        result = db.activate_experience_set(
+        result = control.activate_experience_set(
             event_id, config["LinkedContent"],
         )
         live_stage = linked_content_stage(
             stage, module, result["ExperiencesPublished"],
         )
-    db.set_event_stage(event_id, live_stage)
+    control.set_stage(event_id, live_stage)
     return live_stage
 
 
-def _render_timer(db, event_id, stage):
+def _render_timer(db, control, event_id, stage):
     stage_no = stage.get("StageNo", "")
     duration = stage.get("DurationMinutes", 0)
     timer = db.get_stage_timer(event_id, stage_no, duration)
@@ -100,13 +100,13 @@ def _render_timer(db, event_id, stage):
         disabled=status == "RUNNING",
         key=f"timer_start_{event_id}_{stage_no}",
     ):
-        db.update_stage_timer(
+        control.timer(
             event_id,
             stage_no,
             "RESUME" if status == "PAUSED" else "START",
             duration,
         )
-        db.update_event_metadata(event_id, {"CurrentStageStatus": "RUNNING"})
+        control.control_state(event_id, "CurrentStageStatus", "RUNNING")
         st.rerun()
     if pause.button(
         "Pause",
@@ -114,28 +114,28 @@ def _render_timer(db, event_id, stage):
         disabled=status != "RUNNING",
         key=f"timer_pause_{event_id}_{stage_no}",
     ):
-        db.update_stage_timer(event_id, stage_no, "PAUSE", duration)
-        db.update_event_metadata(event_id, {"CurrentStageStatus": "PAUSED"})
+        control.timer(event_id, stage_no, "PAUSE", duration)
+        control.control_state(event_id, "CurrentStageStatus", "PAUSED")
         st.rerun()
     if reset.button(
         "Reset",
         width="stretch",
         key=f"timer_reset_{event_id}_{stage_no}",
     ):
-        db.update_stage_timer(event_id, stage_no, "RESET", duration)
-        db.update_event_metadata(event_id, {"CurrentStageStatus": "READY"})
+        control.timer(event_id, stage_no, "RESET", duration)
+        control.control_state(event_id, "CurrentStageStatus", "READY")
         st.rerun()
     if end.button(
         "End Stage",
         width="stretch",
         key=f"timer_end_{event_id}_{stage_no}",
     ):
-        db.update_stage_timer(event_id, stage_no, "END", duration)
-        db.update_event_metadata(event_id, {"CurrentStageStatus": "ENDED"})
+        control.timer(event_id, stage_no, "END", duration)
+        control.control_state(event_id, "CurrentStageStatus", "ENDED")
         st.rerun()
 
 
-def _render_registration(db, event_id):
+def _render_registration(db, control, event_id):
     event = db.get_event(event_id)
     runtime_control = db.get_runtime_control_state(event_id)
     is_open = bool(runtime_control.get("RegistrationOpen", False))
@@ -151,7 +151,7 @@ def _render_registration(db, event_id):
         type="primary",
         width="stretch",
     ):
-        db.update_event_metadata(event_id, {"RegistrationOpen": not is_open})
+        control.control_state(event_id, "RegistrationOpen", not is_open)
         st.rerun()
     formation.info("Launch Group Formation with the Next Stage control.")
     if str(event_id) == "EVT-0004":
@@ -163,7 +163,7 @@ def _render_registration(db, event_id):
         )
 
 
-def _render_team_management(db, event_id):
+def _render_team_management(db, control, event_id):
     """Facilitator-only recovery controls backed by audited runtime RPCs."""
     runtime = db.runtime
     st.subheader("Team Management")
@@ -185,7 +185,7 @@ def _render_team_management(db, event_id):
     if event_override:
         st.warning("Emergency event-wide submission override is enabled in this control session.")
     if st.button("Apply event submission policy", key=f"apply_event_override_{event_id}"):
-        runtime.set_submission_override(event_id, "*", event_override, actor)
+        control.set_submission_override(event_id, "*", event_override, actor)
         st.success("Event submission policy updated and audited.")
 
     for team in teams:
@@ -212,8 +212,16 @@ def _render_team_management(db, event_id):
                     format_func=lambda value: choices[value].get("Name", value),
                     key=f"identity_member_{event_id}_{team_id}",
                 )
+                if st.button("Recover Participant", key=f"recover_participant_{event_id}_{team_id}"):
+                    recovery = control.recover_participant(event_id, selected)
+                    st.session_state[f"recovery_{event_id}_{selected}"] = recovery
+                    st.success(
+                        "Authoritative identity, team, country, leader rights, credits and "
+                        "session token recovered without reallocation."
+                    )
+                    st.json(recovery)
                 if st.button("Transfer Team Leader", key=f"transfer_leader_{event_id}_{team_id}"):
-                    runtime.transfer_team_leader(event_id, team_id, selected, actor)
+                    control.transfer_leader(event_id, team_id, selected, actor)
                     st.success("Leadership transferred immediately and audited.")
                     st.rerun()
                 destination_ids = [
@@ -242,7 +250,7 @@ def _render_team_management(db, event_id):
                         disabled=not move_confirmed or not move_reason.strip(),
                         key=f"identity_move_{event_id}_{team_id}",
                     ):
-                        runtime.move_participant(selected, destination, move_reason, actor)
+                        control.move_participant(selected, destination, move_reason, actor)
                         st.success("Participant identity restored to the selected team and audited.")
                         st.rerun()
             team_override = st.toggle(
@@ -252,7 +260,7 @@ def _render_team_management(db, event_id):
             if team_override:
                 st.warning("Leader-only submission is temporarily disabled for this team.")
             if st.button("Apply team submission policy", key=f"apply_team_override_{event_id}_{team_id}"):
-                runtime.set_submission_override(event_id, team_id, team_override, actor)
+                control.set_submission_override(event_id, team_id, team_override, actor)
                 st.success("Team submission policy updated and audited.")
 
     with st.expander("Duplicate and migration audit"):
@@ -286,16 +294,16 @@ def _render_team_management(db, event_id):
             )
             keep, confirm, merge = st.columns(3)
             if keep.button("Keep Separate", key=f"keep_duplicate_{event_id}_{position}"):
-                runtime.decide_duplicate(event_id, canonical, duplicate, "KEEP_SEPARATE", reason, actor)
+                control.decide_duplicate(event_id, canonical, duplicate, "KEEP_SEPARATE", reason, actor)
                 st.success("Decision recorded; neither record changed.")
             if confirm.button("Confirm Same Participant", key=f"confirm_duplicate_{event_id}_{position}"):
-                runtime.decide_duplicate(event_id, canonical, duplicate, "CONFIRM_SAME", reason, actor)
+                control.decide_duplicate(event_id, canonical, duplicate, "CONFIRM_SAME", reason, actor)
                 st.success("Identity relationship recorded; records remain unchanged.")
             if merge.button(
                 "Merge Records", disabled=not confirmed,
                 key=f"merge_duplicate_{event_id}_{position}",
             ):
-                runtime.decide_duplicate(event_id, canonical, duplicate, "MERGE", reason, actor)
+                control.decide_duplicate(event_id, canonical, duplicate, "MERGE", reason, actor)
                 st.success("Records merged into the selected canonical ParticipantID and audited.")
                 st.rerun()
 
@@ -334,24 +342,25 @@ def _render_rankings(db, event_id, final=False):
         st.metric(f"{position}. {team}", f"{format_score(score)} pts")
 
 
-def _render_stage_widgets(db, event_id, family):
+def _render_stage_widgets(db, control, event_id, family):
     if family == "registration":
-        _render_registration(db, event_id)
+        _render_registration(db, control, event_id)
     elif family == "scored":
-        render_review_scoring_widget(db, event_id)
+        render_review_scoring_widget(db, event_id, control=control)
         _render_rankings(db, event_id)
     elif family == "mission":
         _render_mission_board(db, event_id)
-        render_review_scoring_widget(db, event_id)
-        render_credit_wallet_control(db, event_id)
+        render_road_hunt_operations(db, event_id, control=control)
+        render_review_scoring_widget(db, event_id, control=control)
+        render_credit_wallet_control(db, event_id, control=control)
     elif family == "review":
-        render_review_scoring_widget(db, event_id, show_all=True)
-        render_credit_wallet_control(db, event_id)
+        render_review_scoring_widget(db, event_id, show_all=True, control=control)
+        render_credit_wallet_control(db, event_id, control=control)
         _render_rankings(db, event_id)
     elif family == "purchasing":
-        render_credit_wallet_control(db, event_id)
+        render_credit_wallet_control(db, event_id, control=control)
     elif family == "performance":
-        render_review_scoring_widget(db, event_id, show_all=True)
+        render_review_scoring_widget(db, event_id, show_all=True, control=control)
         _render_rankings(db, event_id)
     else:
         _render_rankings(db, event_id, final=True)
@@ -374,6 +383,7 @@ def show_control_centre():
         unsafe_allow_html=True,
     )
     db = GoogleSheetsDB()
+    control = ControlRuntime(db)
     events = db.get_events()
     if not events:
         st.warning("Create an event before opening Control Centre.")
@@ -495,47 +505,63 @@ def show_control_centre():
         width="stretch",
         disabled=index == 0,
     ):
-        _set_stage(db, event_id, flattened[index - 1][1])
+        _set_stage(control, event_id, flattened[index - 1][1])
     if launch.button(
         "Start Selected Activity",
         type="primary",
         width="stretch",
     ):
-        _start_programme_activity(db, event_id, stage, current_module)
-        db.update_stage_timer(
+        _start_programme_activity(control, event_id, stage, current_module)
+        control.timer(
             event_id,
             stage.get("StageNo", ""),
             "START",
             stage.get("DurationMinutes", 0),
         )
-        db.update_event_metadata(event_id, {"CurrentStageStatus": "RUNNING"})
+        control.control_state(event_id, "CurrentStageStatus", "RUNNING")
         st.rerun()
     if end_activity.button(
         "End Selected Activity",
         width="stretch",
     ):
-        db.update_stage_timer(
+        control.timer(
             event_id,
             stage.get("StageNo", ""),
             "END",
             stage.get("DurationMinutes", 0),
         )
-        db.update_event_metadata(event_id, {"CurrentStageStatus": "ENDED"})
+        control.control_state(event_id, "CurrentStageStatus", "ENDED")
         st.rerun()
     if next_col.button(
         "Next Activity",
         width="stretch",
         disabled=index >= len(flattened) - 1,
     ):
-        _set_stage(db, event_id, flattened[index + 1][1])
+        _set_stage(control, event_id, flattened[index + 1][1])
 
     timer_col, broadcast_col = st.columns([1, 2])
     with timer_col:
-        _render_timer(db, event_id, stage)
+        _render_timer(db, control, event_id, stage)
     with broadcast_col:
-        render_broadcast_controller(db, event_id)
+        render_broadcast_controller(db, event_id, control=control)
 
     st.divider()
-    _render_stage_widgets(db, event_id, stage_family(stage))
+    _render_stage_widgets(db, control, event_id, stage_family(stage))
     st.divider()
-    _render_team_management(db, event_id)
+    _render_team_management(db, control, event_id)
+
+    st.divider()
+    st.subheader("Emergency Recovery")
+    st.caption("Runtime restart republishes configuration without resetting participant identity.")
+    pause, resume, restart = st.columns(3)
+    if pause.button("Pause Event", width="stretch"):
+        control.pause_event(event_id)
+        st.rerun()
+    if resume.button("Resume Event", width="stretch"):
+        control.resume_event(event_id)
+        st.rerun()
+    restart_confirmed = st.checkbox("Confirm non-destructive runtime restart")
+    if restart.button("Restart Runtime", width="stretch", disabled=not restart_confirmed):
+        control.restart_runtime(event_id)
+        st.success("Runtime configuration restored; participant records were not reset.")
+        st.rerun()

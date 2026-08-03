@@ -19,6 +19,14 @@ FORMULA_RACE_TEAMS = [
 ]
 
 
+def _runtime_publish_read_only(*_args, **_kwargs):
+    """Event Centre configures events; Control Centre publishes live state."""
+    return {
+        "ReadOnly": True,
+        "Message": "Runtime publication is available only in Control Centre.",
+    }
+
+
 def road_hunt_editor_rows(stops):
     rows = []
     for stop in stops or []:
@@ -109,7 +117,7 @@ def show_event_manager():
             runtime_message = ""
             if db.runtime_status()["PublishReady"]:
                 try:
-                    db.publish_event_to_runtime(
+                    _runtime_publish_read_only(
                         event_id,
                         reset_registration=True,
                     )
@@ -261,7 +269,7 @@ def show_event_manager():
                     selected_race_event_id,
                     edited_race_teams.to_dict("records"),
                 )
-                runtime_result = db.publish_event_to_runtime(
+                runtime_result = _runtime_publish_read_only(
                     selected_race_event_id,
                     reset_registration=True,
                 )
@@ -374,7 +382,7 @@ def show_event_manager():
             key=f"publish_road_hunt_{selected_road_event_id}",
         ):
             try:
-                db.publish_event_to_runtime(
+                _runtime_publish_read_only(
                     selected_road_event_id,
                     reset_registration=False,
                 )
@@ -432,7 +440,7 @@ def show_event_manager():
 
             if runtime_submitted:
                 try:
-                    result = db.publish_event_to_runtime(
+                    result = _runtime_publish_read_only(
                         selected_runtime_event.get("EventID", ""),
                         reset_registration=reset_registration,
                     )

@@ -78,20 +78,8 @@ def _render_stage_card(stage, is_current=False):
 
 
 def _activate_stage(db, event_id, stage):
-    try:
-        result = db.set_event_stage(event_id, stage)
-    except Exception as error:
-        st.error(f"Stage change failed: {error}")
-        return
-
-    warning = str((result or {}).get("Warning", "")).strip()
-    st.session_state["show_control_flash"] = {
-        "Level": "warning" if warning else "success",
-        "Message": warning or (
-            f"Live stage changed to {stage.get('StageName', 'selected stage')}."
-        ),
-    }
-    st.rerun()
+    del db, event_id, stage
+    st.info("Stage mutation is available only in Control Centre.")
 
 
 def show_show_control():
@@ -166,19 +154,9 @@ def show_show_control():
 
     st.divider()
 
-    prev_col, current_col, next_col = st.columns([1, 1, 1])
-
-    with prev_col:
-        if st.button("◀ Previous Stage", width="stretch", disabled=current_index == 0):
-            _activate_stage(db, event_id, stages[current_index - 1])
-
-    with current_col:
-        if st.button("🔄 Re-sync Current Stage", width="stretch"):
-            _activate_stage(db, event_id, current_stage)
-
-    with next_col:
-        if st.button("Next Stage ▶", width="stretch", disabled=current_index >= len(stages) - 1):
-            _activate_stage(db, event_id, stages[current_index + 1])
+    st.info(
+        "Show Control is a read-only legacy view. Stage controls have moved to Control Centre."
+    )
 
     st.divider()
 

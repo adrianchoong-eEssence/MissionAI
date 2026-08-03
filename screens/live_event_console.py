@@ -327,7 +327,7 @@ def render_enterprise_pipeline_form(db, event_id, mission):
         st.rerun()
 
 
-def render_review_scoring_widget(db, event_id, show_all=False):
+def render_review_scoring_widget(db, event_id, show_all=False, control=None):
     mission = db.get_current_mission(event_id)
     submissions = db.get_submissions(event_id)
     mission_id = mission.get("MissionID") if mission else ""
@@ -340,14 +340,16 @@ def render_review_scoring_widget(db, event_id, show_all=False):
         row for row in rows
         if str(row.get("Status", "")).upper() == "PENDING"
     ]
-    if pending and st.button(
+    if control is None:
+        st.info("Submission review is read-only outside Control Centre.")
+    if control is not None and pending and st.button(
         f"Approve All Pending ({len(pending)})",
         width="stretch",
         key=f"control_approve_all_{event_id}_{mission_id}_{show_all}",
     ):
         for submission in pending:
             score = approval_score(db, event_id, submission)
-            db.update_submission_score(
+            control.review_submission(
                 submission_id=submission.get("SubmissionID"),
                 score=round(score, 1),
                 remarks=submission.get("Remarks", ""),
@@ -401,12 +403,12 @@ def render_review_scoring_widget(db, event_id, show_all=False):
                 key=f"control_remarks_{submission_id}",
             )
             approve, reject, revision = st.columns(3)
-            if approve.button(
+            if control is not None and approve.button(
                 "Approve",
                 width="stretch",
                 key=f"control_approve_{submission_id}",
             ):
-                db.update_submission_score(
+                control.review_submission(
                     submission_id,
                     round(score, 1),
                     remarks,
@@ -414,12 +416,12 @@ def render_review_scoring_widget(db, event_id, show_all=False):
                     "APPROVED",
                 )
                 st.rerun()
-            if reject.button(
+            if control is not None and reject.button(
                 "Reject",
                 width="stretch",
                 key=f"control_reject_{submission_id}",
             ):
-                db.update_submission_score(
+                control.review_submission(
                     submission_id,
                     0,
                     remarks,
@@ -427,12 +429,12 @@ def render_review_scoring_widget(db, event_id, show_all=False):
                     "REJECTED",
                 )
                 st.rerun()
-            if revision.button(
+            if control is not None and revision.button(
                 "Request Revision",
                 width="stretch",
                 key=f"control_revision_{submission_id}",
             ):
-                db.update_submission_score(
+                control.review_submission(
                     submission_id,
                     round(score, 1),
                     remarks or "Please revise and resubmit.",
@@ -442,7 +444,7 @@ def render_review_scoring_widget(db, event_id, show_all=False):
                 st.rerun()
 
 
-def render_credit_wallet_control(db, event_id):
+def render_credit_wallet_control(db, event_id, control=None):
     st.divider()
     st.subheader("💳 Credits & Marketplace")
     if not db.runtime.can_publish:
@@ -467,8 +469,10 @@ def render_credit_wallet_control(db, event_id):
             "Enable Credits for programmes where teams earn credits and spend "
             "them in a marketplace. The normal competition leaderboard remains separate."
         )
-        if st.button("Enable Credit Wallet", width="stretch"):
-            db.runtime.configure_credit_wallet(event_id, enabled=True, reset=False)
+        if control is None:
+            st.info("Credit controls are read-only outside Control Centre.")
+        elif st.button("Enable Credit Wallet", width="stretch"):
+            control.configure_credit_wallet(event_id, enabled=True, reset=False)
             st.success("Credit Wallet enabled for this event.")
             st.rerun()
         return
@@ -493,16 +497,16 @@ def render_credit_wallet_control(db, event_id):
         st.success(
             "Day 1 Credit Leaderboard is frozen. New approvals will not change earned credits."
         )
-        if st.button("Unfreeze Credit Earnings", width="stretch"):
-            db.runtime.set_credit_freeze(event_id, False)
+        if control is not None and st.button("Unfreeze Credit Earnings", width="stretch"):
+            control.set_credit_freeze(event_id, False)
             st.rerun()
     else:
         st.warning(
             "Credit earnings are live. Approving or updating a scored submission "
             "will update that team's earned credits."
         )
-        if st.button("Freeze Day 1 Credit Leaderboard", width="stretch"):
-            db.runtime.set_credit_freeze(event_id, True)
+        if control is not None and st.button("Freeze Day 1 Credit Leaderboard", width="stretch"):
+            control.set_credit_freeze(event_id, True)
             st.rerun()
 
     st.markdown("#### Marketplace Catalogue")
@@ -535,8 +539,8 @@ def render_credit_wallet_control(db, event_id):
             "Position": st.column_config.NumberColumn(min_value=0, step=1),
         },
     )
-    if st.button("Publish Marketplace Catalogue", width="stretch"):
-        result = db.runtime.publish_marketplace(
+    if control is not None and st.button("Publish Marketplace Catalogue", width="stretch"):
+        result = control.publish_marketplace(
             event_id,
             catalogue.fillna("").to_dict("records"),
         )
@@ -562,11 +566,11 @@ def render_credit_wallet_control(db, event_id):
                 value="Facilitator adjustment",
                 key=f"credit_adjustment_reason_{event_id}",
             )
-            if st.button("Apply Credit Adjustment", width="stretch"):
+            if control is not None and st.button("Apply Credit Adjustment", width="stretch"):
                 if amount == 0:
                     st.error("Enter a non-zero adjustment.")
                 else:
-                    result = db.runtime.adjust_team_credits(
+                    result = control.adjust_credits(
                         event_id,
                         team_name,
                         amount,
@@ -588,17 +592,17 @@ def render_credit_wallet_control(db, event_id):
             "I understand this deletes all credit transactions and purchases for this event",
             key=f"confirm_credit_reset_{event_id}",
         )
-        if st.button(
+        if control is not None and st.button(
             "Reset Credits and Purchases",
             disabled=not confirmed,
             width="stretch",
         ):
-            db.runtime.configure_credit_wallet(event_id, enabled=True, reset=True)
+            control.configure_credit_wallet(event_id, enabled=True, reset=True)
             st.success("Credit balances and purchases reset to zero.")
             st.rerun()
 
 
-def render_road_hunt_operations(db, event_id):
+def render_road_hunt_operations(db, event_id, control=None):
     """Show the live navigator and geofence status for Road Hunt events."""
     if not db.runtime.can_publish:
         return
@@ -891,12 +895,12 @@ def render_road_hunt_operations(db, event_id):
                     format_func=lambda value: stop_names.get(value, value),
                     key=f"road_hunt_manual_stop_{event_id}",
                 )
-            if st.button(
+            if control is not None and st.button(
                 "Record Manual Arrival",
                 width="stretch",
                 key=f"road_hunt_manual_arrival_{event_id}",
             ):
-                db.runtime.record_manual_arrival(
+                control.record_manual_arrival(
                     event_id,
                     fallback_team,
                     fallback_stop,
@@ -919,12 +923,12 @@ def render_road_hunt_operations(db, event_id):
             st.caption(
                 "Release only when the nominated phone is lost, flat, or being replaced."
             )
-            if st.button(
+            if control is not None and st.button(
                 "Release Navigator Device",
                 width="stretch",
                 key=f"road_hunt_release_{event_id}",
             ):
-                db.runtime.release_team_tracker(event_id, release_team)
+                control.release_team_tracker(event_id, release_team)
                 st.success(f"{release_team} may nominate a new navigator phone.")
                 st.rerun()
 
@@ -990,6 +994,12 @@ def show_live_event_console():
         st.success(
             f"🤝 Enterprise Pipeline Score: {format_score(latest_enterprise.get('Score', 0))}%"
         )
+
+    st.info(
+        "Live Event Console is a read-only legacy view. All live operations, "
+        "approvals, credits, broadcasts and recovery actions are in Control Centre."
+    )
+    return
 
     render_credit_wallet_control(db, event_id)
     render_road_hunt_operations(db, event_id)

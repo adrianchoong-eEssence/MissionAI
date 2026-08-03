@@ -14,6 +14,8 @@ from urllib.request import Request, urlopen
 import streamlit as st
 from PIL import Image
 
+from data.runtime_authority import require_control_centre
+
 
 class RuntimeDatabaseError(RuntimeError):
     """Raised when the live EXOS runtime cannot complete a request."""
@@ -217,6 +219,7 @@ class SupabaseRuntimeDB:
         }
 
     def publish_event(self, event, teams, reset_registration=False):
+        require_control_centre("Runtime event publication")
         if not self.can_publish:
             raise RuntimeDatabaseError(
                 "Publishing requires SUPABASE_SECRET_KEY."
@@ -269,6 +272,7 @@ class SupabaseRuntimeDB:
         return self.publish_event(event, teams, reset_registration=False)
 
     def publish_programme(self, event_id, missions):
+        require_control_centre("Runtime programme publication")
         if not self.can_publish:
             raise RuntimeDatabaseError(
                 "Publishing requires SUPABASE_SECRET_KEY."
@@ -296,6 +300,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def set_event_stage(self, event_id, stage):
+        require_control_centre("Live stage mutation")
         if not self.can_publish:
             raise RuntimeDatabaseError(
                 "Stage publishing requires SUPABASE_SECRET_KEY."
@@ -590,6 +595,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def set_runtime_control_state(self, event_id, key, value):
+        require_control_centre("Runtime control state mutation")
         if not self.can_publish:
             raise RuntimeDatabaseError("Runtime control mutation requires SUPABASE_SECRET_KEY.")
         result = self._request(
@@ -756,6 +762,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def set_submission_override(self, event_id, team_id="", enabled=False, actor="Facilitator"):
+        require_control_centre("Submission override")
         result = self._request(
             "POST", "rpc/exos_admin_set_submission_override",
             payload={
@@ -768,6 +775,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def transfer_team_leader(self, event_id, team_id, participant_id, actor="Facilitator"):
+        require_control_centre("Leader transfer")
         result = self._request(
             "POST", "rpc/exos_admin_transfer_leader",
             payload={
@@ -780,6 +788,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def move_participant(self, participant_id, team_id, reason, actor="Facilitator"):
+        require_control_centre("Participant team correction")
         result = self._request(
             "POST", "rpc/exos_admin_move_participant",
             payload={
@@ -799,6 +808,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {"Allowed": False, "Reason": "NO_SESSION"}
 
     def decide_duplicate(self, event_id, canonical_id, duplicate_id, decision, reason, actor="Facilitator"):
+        require_control_centre("Duplicate identity decision")
         result = self._request(
             "POST", "rpc/exos_admin_duplicate_decision",
             payload={
@@ -1048,6 +1058,7 @@ class SupabaseRuntimeDB:
         judged="Yes",
         status="APPROVED",
     ):
+        require_control_centre("Submission approval mutation")
         result = self._request(
             "POST",
             "rpc/exos_update_submission",
@@ -1063,6 +1074,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {"Updated": False}
 
     def configure_credit_wallet(self, event_id, enabled=True, reset=False):
+        require_control_centre("Credit wallet configuration")
         result = self._request(
             "POST",
             "rpc/exos_configure_credit_wallet",
@@ -1085,6 +1097,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def publish_marketplace(self, event_id, items):
+        require_control_centre("Runtime marketplace publication")
         payload = []
         for position, item in enumerate(items):
             item_id = str(item.get("ItemID", "")).strip().upper()
@@ -1118,6 +1131,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def set_credit_freeze(self, event_id, frozen=True):
+        require_control_centre("Credit freeze mutation")
         result = self._request(
             "POST",
             "rpc/exos_set_credit_freeze",
@@ -1150,6 +1164,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def adjust_team_credits(self, event_id, team_name, amount, description):
+        require_control_centre("Manual credit adjustment")
         result = self._request(
             "POST",
             "rpc/exos_adjust_team_credits",
@@ -1170,6 +1185,7 @@ class SupabaseRuntimeDB:
         location_interval_seconds=20,
         reset=False,
     ):
+        require_control_centre("Road Hunt runtime configuration")
         result = self._request(
             "POST",
             "rpc/exos_configure_road_hunt",
@@ -1187,6 +1203,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def publish_road_hunt_route(self, event_id, stops):
+        require_control_centre("Road Hunt route publication")
         route_payload = []
         for position, stop in enumerate(stops or [], start=1):
             stop_id = str(stop.get("StopID", "")).strip().upper()
@@ -1323,6 +1340,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def release_team_tracker(self, event_id, team_name):
+        require_control_centre("Road Hunt tracker recovery")
         result = self._request(
             "POST",
             "rpc/exos_release_team_tracker",
@@ -1335,6 +1353,7 @@ class SupabaseRuntimeDB:
         return self._normalise_result(result) or {}
 
     def record_manual_arrival(self, event_id, team_name, stop_id):
+        require_control_centre("Manual road-hunt arrival")
         result = self._request(
             "POST",
             "rpc/exos_record_manual_arrival",

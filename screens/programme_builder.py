@@ -1311,9 +1311,8 @@ def render_sync_ai_editor(db, event_id):
             items = marketplace.to_dict("records")
             settings["MarketplaceItems"] = items
             _save_container_settings(db, creation, settings)
-            if db.runtime.can_publish:
-                db.runtime.publish_marketplace(event_id, items)
             st.success("Marketplace saved for this event.")
+            st.info("Publish live marketplace changes from Control Centre.")
     with performance_tab:
         p1, p2 = st.columns(2)
         performance_minutes = p1.number_input(
