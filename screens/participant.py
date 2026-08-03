@@ -25,12 +25,15 @@ from data.google_drive import (
 from data.google_sheets import GoogleSheetsDB
 from data.mission_media import get_mission_media_url
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+from data.experience_repository import SupabaseExperienceRepository
 from data.upload_safety import upload_error_message
 from engines.programme_hierarchy import (
     activity_details,
     friendly_type,
 )
 from engines.programme_adapter import CanonicalProgrammeAdapter, ProgrammeIntegrityError
+from engines.experience_library import ExperienceLibraryService, ExperienceResolutionError
+from components.experience_preview import render_experience_participant
 from screens.mission_setup import cropped_reference_image, mission_module_name
 
 
@@ -2309,6 +2312,26 @@ def show_participant():
     linked_experience_set = str(
         linked_config.get("LinkedContent", "") or ""
     ).strip()
+
+    assignment_id = str(
+        (live_runtime_state.get("Stage", {}) or {}).get("ExperienceAssignmentID", "")
+        or live_runtime_state.get("ExperienceAssignmentID", "")
+    ).strip()
+    if assignment_id:
+        try:
+            repository = SupabaseExperienceRepository(db.runtime)
+            assets = {
+                str(row.get("AssetID", "")): row for row in db.get_assets()
+                if row.get("AssetID")
+            }
+            resolved = ExperienceLibraryService(repository).resolve(
+                assignment_id, assets=assets,
+            )
+            render_experience_participant(resolved)
+        except (RuntimeDatabaseError, ExperienceResolutionError, ValueError) as error:
+            st.error(f"Experience is temporarily unavailable: {error}")
+        footer()
+        return
 
     if linked_config["ContentType"] == "Sync AI":
         render_sync_ai_participant(

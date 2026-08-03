@@ -216,6 +216,10 @@ class SupabaseRuntimeDB:
             "Judged": row.get("judged", "No"),
             "Remarks": row.get("remarks", ""),
             "SubmittedAt": row.get("submitted_at", ""),
+            "ExperienceAssignmentID": row.get("experience_assignment_id", ""),
+            "ExperienceDefinitionID": row.get("experience_definition_id", ""),
+            "ExperienceDefinitionVersion": row.get("experience_definition_version", ""),
+            "ExperienceAssignmentVersion": row.get("experience_assignment_version", ""),
         }
 
     def publish_event(self, event, teams, reset_registration=False):

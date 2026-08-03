@@ -1864,21 +1864,13 @@ def render_event_missions(db):
 
 def show_mission_setup():
     st.title("🧭 Experience Studio")
-    st.caption("Create once, reuse across projects, and launch from the Live Event Console.")
+    st.caption("Author permanent reusable Experience Definitions.")
     db = GoogleSheetsDB()
     show_flash_message()
-
-    event_tab, library_tab, import_tab, assign_tab = st.tabs([
-        "Event Experiences",
-        "Master Experience Templates",
-        "Bulk Import",
-        "Add to Event",
-    ])
-    with event_tab:
-        render_event_mission_editor(db)
-    with library_tab:
-        render_template_editor(db)
-    with import_tab:
-        render_bulk_import(db)
-    with assign_tab:
-        render_event_assignment(db)
+    from screens.experience_foundation import render_definition_library
+    render_definition_library(db)
+    with st.expander("Legacy Experience compatibility", expanded=False):
+        st.info(
+            "MissionTemplates and event-owned Missions remain read-only migration "
+            "sources. Authoring and assignment now use canonical Definitions and Assignments."
+        )

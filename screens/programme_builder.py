@@ -39,6 +39,7 @@ from engines.programme_hierarchy import (
 from engines.recommendation_engine import RecommendationEngine
 from engines.transformation_engine import TransformationEngine
 from screens.app_state import request_navigation, select_active_event
+from screens.app_state import ACTIVE_EVENT_KEY
 
 
 def get_activity_name(activity):
@@ -1957,3 +1958,10 @@ def show_programme_builder():
     st.caption("Build the event in running order. Open any module to edit it.")
     db = GoogleSheetsDB()
     render_programme_first_builder(db)
+    event_id = str(st.session_state.get(ACTIVE_EVENT_KEY, ""))
+    if event_id:
+        from engines.programme_adapter import CanonicalProgrammeAdapter
+        from screens.experience_foundation import render_event_assignment_manager
+        programme = CanonicalProgrammeAdapter.load(db, event_id)
+        st.divider()
+        render_event_assignment_manager(db, event_id, programme)
