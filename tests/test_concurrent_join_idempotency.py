@@ -88,6 +88,8 @@ def test_join_ui_disables_resubmission_and_supports_recovery():
     assert "Please do not refresh or tap again." in source
     assert "Your join request is still being processed." in source
     assert "Check Existing Registration" in source
+    assert 'recovery_requested = st.form_submit_button(' in source
+    assert "if recovery_requested:" in source
     assert "participant_device_id()" in source
     assert "restore_participant_identity(player" in source
     assert '"participant_team_id"' in source

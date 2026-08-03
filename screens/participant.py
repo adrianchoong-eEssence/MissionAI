@@ -2117,6 +2117,11 @@ def show_participant():
                 disabled=bool(pending),
                 width="stretch",
             )
+            recovery_requested = st.form_submit_button(
+                "Check Existing Registration",
+                disabled=bool(pending),
+                width="stretch",
+            )
 
         join_event = (
             participant_event_by_code(join_code) if join_code else None
@@ -2221,11 +2226,7 @@ def show_participant():
             persist_session_in_query_params()
             st.rerun()
 
-        if st.button(
-            "Check Existing Registration",
-            disabled=bool(pending),
-            width="stretch",
-        ):
+        if recovery_requested:
             if not join_code or not first_name.strip() or not last_name.strip():
                 st.warning("Enter your Join Code, first name and last name first.")
                 st.stop()
