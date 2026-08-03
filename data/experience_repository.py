@@ -30,6 +30,7 @@ ASSIGNMENT_COLUMN_MAP = {
     "AvailabilityRule": "availability_rule", "StartRule": "start_rule", "EndRule": "end_rule",
     "UnlockRule": "unlock_rule", "RuntimeEligible": "runtime_eligible",
     "AssignmentVersion": "assignment_version",
+    "SubmissionRule": "submission_rule", "AllowsMultipleSubmissions": "allows_multiple_submissions",
 }
 
 

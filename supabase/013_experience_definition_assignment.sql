@@ -52,6 +52,9 @@ create table if not exists public.event_experience_assignments (
     unlock_rule text not null default 'NONE',
     runtime_eligible boolean not null default true,
     assignment_version integer not null default 1 check (assignment_version > 0),
+    submission_rule text not null default 'LEADER_ONLY'
+      check (submission_rule in ('LEADER_ONLY','ANY_MEMBER','MULTIPLE')),
+    allows_multiple_submissions boolean not null default false,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     foreign key (experience_definition_id, definition_version)

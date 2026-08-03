@@ -767,7 +767,16 @@ def show_leaderboard_display():
     auto_refresh(refresh_seconds)
 
     submissions = db.get_submissions(event_id)
-    leaderboard = calculate_leaderboard(submissions)
+    canonical_leaderboard = []
+    if db.runtime.can_publish:
+        try:
+            canonical_leaderboard = db.runtime.get_canonical_leaderboard(event_id)
+        except RuntimeDatabaseError:
+            canonical_leaderboard = []
+    leaderboard = (
+        [(row["TeamID"], float(row["Score"])) for row in canonical_leaderboard]
+        if canonical_leaderboard else calculate_leaderboard(submissions)
+    )
     mission = db.get_current_mission(event_id)
     teams_count = db.get_team_count(event_id)
     broadcast_state = dict(DEFAULT_BROADCAST)

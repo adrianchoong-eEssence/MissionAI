@@ -19,6 +19,7 @@ ASSIGNMENT_FIELDS = (
     "EvidenceTypeOverride", "EvidenceInstructionsOverride", "CharacterIDOverride",
     "AssetIDsOverride", "HintOverride", "AIResponseOverride", "AvailabilityRule",
     "StartRule", "EndRule", "UnlockRule", "RuntimeEligible", "AssignmentVersion",
+    "SubmissionRule", "AllowsMultipleSubmissions",
 )
 
 
@@ -97,6 +98,8 @@ def new_assignment(values, assignment_id=""):
         "UnlockRule": str(source.get("UnlockRule", "NONE")),
         "RuntimeEligible": bool(source.get("RuntimeEligible", True)),
         "AssignmentVersion": _version(source.get("AssignmentVersion", 1)),
+        "SubmissionRule": str(source.get("SubmissionRule", "LEADER_ONLY")).upper(),
+        "AllowsMultipleSubmissions": bool(source.get("AllowsMultipleSubmissions", False)),
     }
 
 

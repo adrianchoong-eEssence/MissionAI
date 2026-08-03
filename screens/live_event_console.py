@@ -329,7 +329,14 @@ def render_enterprise_pipeline_form(db, event_id, mission):
 
 def render_review_scoring_widget(db, event_id, show_all=False, control=None):
     mission = db.get_current_mission(event_id)
-    submissions = db.get_submissions(event_id)
+    canonical_rows = []
+    if db.runtime.can_publish:
+        try:
+            canonical_rows = db.runtime.get_canonical_submissions(event_id)
+        except RuntimeDatabaseError:
+            canonical_rows = []
+    submissions = canonical_rows or db.get_submissions(event_id)
+    canonical_mode = bool(canonical_rows)
     mission_id = mission.get("MissionID") if mission else ""
     rows = [
         row for row in submissions
@@ -338,24 +345,29 @@ def render_review_scoring_widget(db, event_id, show_all=False, control=None):
     ]
     pending = [
         row for row in rows
-        if str(row.get("Status", "")).upper() == "PENDING"
+        if str(row.get("Status", "")).upper() in {"PENDING", "PENDING_REVIEW", "SUBMITTED"}
     ]
     if control is None:
         st.info("Submission review is read-only outside Control Centre.")
-    if control is not None and pending and st.button(
+    if control is not None and pending and not canonical_mode and st.button(
         f"Approve All Pending ({len(pending)})",
         width="stretch",
         key=f"control_approve_all_{event_id}_{mission_id}_{show_all}",
     ):
         for submission in pending:
             score = approval_score(db, event_id, submission)
-            control.review_submission(
-                submission_id=submission.get("SubmissionID"),
-                score=round(score, 1),
-                remarks=submission.get("Remarks", ""),
-                judged="Yes",
-                status="APPROVED",
-            )
+            if canonical_mode:
+                control.decide_canonical_submission(
+                    submission.get("SubmissionID"), "APPROVE", "Facilitator",
+                    score=round(score, 1), credits=round(score, 1),
+                    notes=submission.get("ReviewerNotes", ""),
+                    idempotency_key=f"BULK:{submission.get('SubmissionID')}:APPROVE",
+                )
+            else:
+                control.review_submission(
+                    submission_id=submission.get("SubmissionID"), score=round(score, 1),
+                    remarks=submission.get("Remarks", ""), judged="Yes", status="APPROVED",
+                )
         st.success("Pending submissions approved.")
         st.rerun()
 
@@ -364,9 +376,9 @@ def render_review_scoring_widget(db, event_id, show_all=False, control=None):
         return
 
     team_names = sorted({
-        str(row.get("TeamName", ""))
+        str(row.get("TeamName") or row.get("TeamID", ""))
         for row in rows
-        if row.get("TeamName")
+        if row.get("TeamName") or row.get("TeamID")
     })
     selected_team = st.selectbox(
         "Filter by team",
@@ -376,15 +388,18 @@ def render_review_scoring_widget(db, event_id, show_all=False, control=None):
     if selected_team != "All teams":
         rows = [
             row for row in rows
-            if str(row.get("TeamName", "")) == selected_team
+            if str(row.get("TeamName") or row.get("TeamID", "")) == selected_team
         ]
 
     for submission in rows:
         submission_id = str(submission.get("SubmissionID", ""))
-        suggested, formula = calculate_score(submission)
+        suggested, formula = (
+            (0.0, "Use the configured scoring rule or an authorised manual value.")
+            if canonical_mode else calculate_score(submission)
+        )
         with st.expander(
-            f"{submission.get('TeamName', 'Team')} · "
-            f"{submission.get('MissionID', '')} · "
+            f"{submission.get('TeamName') or submission.get('TeamID', 'Team')} · "
+            f"{submission.get('MissionID') or submission.get('ExperienceAssignmentID', '')} · "
             f"{submission.get('Status', 'PENDING')}",
         ):
             render_submission_details(submission)
@@ -408,39 +423,44 @@ def render_review_scoring_widget(db, event_id, show_all=False, control=None):
                 width="stretch",
                 key=f"control_approve_{submission_id}",
             ):
-                control.review_submission(
-                    submission_id,
-                    round(score, 1),
-                    remarks,
-                    "Yes",
-                    "APPROVED",
-                )
+                if canonical_mode:
+                    control.decide_canonical_submission(
+                        submission_id, "APPROVE", "Facilitator", score=round(score, 1),
+                        credits=round(score, 1), notes=remarks,
+                        idempotency_key=f"{submission_id}:APPROVE:{round(score, 1)}",
+                    )
+                else:
+                    control.review_submission(submission_id, round(score, 1), remarks, "Yes", "APPROVED")
                 st.rerun()
             if control is not None and reject.button(
                 "Reject",
                 width="stretch",
                 key=f"control_reject_{submission_id}",
             ):
-                control.review_submission(
-                    submission_id,
-                    0,
-                    remarks,
-                    "No",
-                    "REJECTED",
-                )
+                if canonical_mode:
+                    control.decide_canonical_submission(
+                        submission_id, "REJECT", "Facilitator", notes=remarks,
+                        reason=remarks, idempotency_key=f"{submission_id}:REJECT",
+                    )
+                else:
+                    control.review_submission(submission_id, 0, remarks, "No", "REJECTED")
                 st.rerun()
             if control is not None and revision.button(
                 "Request Revision",
                 width="stretch",
                 key=f"control_revision_{submission_id}",
             ):
-                control.review_submission(
-                    submission_id,
-                    round(score, 1),
-                    remarks or "Please revise and resubmit.",
-                    "No",
-                    "PENDING",
-                )
+                if canonical_mode:
+                    control.decide_canonical_submission(
+                        submission_id, "RETURN_FOR_REVISION", "Facilitator",
+                        notes=remarks or "Please revise and resubmit.",
+                        idempotency_key=f"{submission_id}:REVISION",
+                    )
+                else:
+                    control.review_submission(
+                        submission_id, round(score, 1), remarks or "Please revise and resubmit.",
+                        "No", "PENDING",
+                    )
                 st.rerun()
 
 
@@ -549,6 +569,10 @@ def render_credit_wallet_control(db, event_id, control=None):
 
     if wallets:
         with st.expander("Facilitator Credit Adjustment"):
+            team_ids = {
+                str(row.get("TeamName", "")): str(row.get("TeamID", ""))
+                for row in db.get_teams(event_id)
+            }
             team_name = st.selectbox(
                 "Team",
                 [row.get("TeamName", "") for row in wallets],
@@ -572,13 +596,12 @@ def render_credit_wallet_control(db, event_id, control=None):
                 else:
                     result = control.adjust_credits(
                         event_id,
-                        team_name,
+                        team_ids.get(team_name, team_name),
                         amount,
                         description,
                     )
                     st.success(
-                        f"{team_name} balance is now "
-                        f"{format_score(result.get('Balance', 0))} credits."
+                        f"Canonical manual Award Transaction recorded for {team_name}."
                     )
                     st.rerun()
 

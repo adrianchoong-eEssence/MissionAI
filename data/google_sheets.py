@@ -2749,6 +2749,7 @@ class GoogleSheetsDB:
         metric3="",
         status="PENDING",
         session_token="",
+        canonical_context=None,
     ):
         record = {
             "SubmissionID": submission_id,
@@ -2768,6 +2769,8 @@ class GoogleSheetsDB:
             "Remarks": remarks,
             "SubmittedAt": submitted_at,
             "SessionToken": session_token,
+            "CanonicalContext": dict(canonical_context or {}),
+            "IdempotencyKey": submission_id,
         }
 
         require_runtime(self.runtime, "Submission mutation")

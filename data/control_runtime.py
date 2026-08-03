@@ -39,6 +39,20 @@ class ControlRuntime:
             self.db.update_submission_score, submission_id, score, remarks, judged, status,
         )
 
+    def decide_canonical_submission(self, submission_id, decision, reviewer_id,
+                                    score=0, credits=0, notes="", reason="",
+                                    idempotency_key="", supersedes_id=""):
+        return self._run(
+            self.runtime.decide_canonical_submission, submission_id, decision, reviewer_id,
+            score, credits, notes, reason, idempotency_key, supersedes_id,
+        )
+
+    def set_scoring_lock(self, event_id, scope_type, scope_id, locked, actor, reason):
+        return self._run(
+            self.runtime.set_scoring_lock, event_id, scope_type, scope_id,
+            locked, actor, reason,
+        )
+
     def configure_credit_wallet(self, event_id, enabled=True, reset=False):
         return self._run(self.runtime.configure_credit_wallet, event_id, enabled, reset)
 
@@ -50,7 +64,8 @@ class ControlRuntime:
 
     def adjust_credits(self, event_id, team_name, amount, description):
         return self._run(
-            self.runtime.adjust_team_credits, event_id, team_name, amount, description,
+            self.runtime.create_manual_award, event_id, team_name, amount,
+            "MANUAL_ADJUSTMENT", description, "Facilitator",
         )
 
     def record_manual_arrival(self, event_id, team_name, stop_id):

@@ -993,6 +993,25 @@ class SupabaseRuntimeDB:
             raw = submission.get(name, default)
             return str(default if raw is None else raw)
 
+        canonical = dict(submission.get("CanonicalContext", {}) or {})
+        if canonical.get("ExperienceAssignmentID"):
+            result = self._request(
+                "POST", "rpc/exos_create_canonical_submission",
+                payload={
+                    "p_session_token": value("SessionToken"),
+                    "p_experience_assignment_id": str(canonical["ExperienceAssignmentID"]),
+                    "p_submission_id": value("SubmissionID"),
+                    "p_idempotency_key": value("IdempotencyKey", value("SubmissionID")),
+                    "p_submission_type": value("SubmissionType"),
+                    "p_evidence_type": str(canonical.get("EvidenceType", "NONE")),
+                    "p_text_response": value("Remarks"),
+                    "p_media_asset_id": value("DriveFileID"),
+                    "p_storage_reference": value("ImageURL"),
+                    "p_qr_result": canonical.get("QRResult"),
+                    "p_gps_result": canonical.get("GPSResult"),
+                },
+            )
+            return self._normalise_result(result) or {}
         result = self._request(
             "POST",
             "rpc/exos_save_submission_v2",
@@ -1054,6 +1073,78 @@ class SupabaseRuntimeDB:
         ) or []
         return [self._submission_record(row) for row in rows]
 
+    def get_canonical_submissions(self, event_id):
+        if not self.can_publish:
+            return []
+        rows = self._request("GET", "canonical_submissions", query={
+            "event_id": f"eq.{event_id}", "select": "*", "order": "submitted_at.asc",
+        }, admin=True) or []
+        return [{
+            "SubmissionID": row.get("submission_id", ""), "EventID": row.get("event_id", ""),
+            "TeamID": row.get("team_id", ""), "ParticipantID": row.get("participant_id", ""),
+            "ProgrammeID": row.get("programme_id", ""), "ModuleID": row.get("module_id", ""),
+            "ActivityID": row.get("activity_id", ""),
+            "ExperienceDefinitionID": row.get("experience_definition_id", ""),
+            "ExperienceAssignmentID": row.get("experience_assignment_id", ""),
+            "DefinitionVersion": row.get("definition_version", ""),
+            "AssignmentVersion": row.get("assignment_version", ""),
+            "SubmissionType": row.get("submission_type", ""), "EvidenceType": row.get("evidence_type", ""),
+            "TextResponse": row.get("text_response", ""), "MediaAssetID": row.get("media_asset_id", ""),
+            "StorageReference": row.get("storage_reference", ""), "QRResult": row.get("qr_result"),
+            "GPSResult": row.get("gps_result"), "SubmittedAt": row.get("submitted_at", ""),
+            "Status": row.get("status", "PENDING_REVIEW"), "CreatedBy": row.get("created_by", ""),
+        } for row in rows]
+
+    def get_canonical_leaderboard(self, event_id):
+        if not self.can_publish:
+            return []
+        rows = self._request("GET", "leaderboard_projection", query={
+            "event_id": f"eq.{event_id}", "select": "*", "order": "rank.asc,team_id.asc",
+        }, admin=True) or []
+        return [{
+            "EventID": row.get("event_id", ""), "TeamID": row.get("team_id", ""),
+            "Score": row.get("score", 0), "IntelligenceCredits": row.get("intelligence_credits", 0),
+            "AvailableBalance": row.get("available_balance", 0), "Rank": row.get("rank", 0),
+        } for row in rows]
+
+    def get_canonical_reviews(self, event_id, submission_id=""):
+        query = {"event_id": f"eq.{event_id}", "select": "*", "order": "decided_at.asc"}
+        if submission_id:
+            query["submission_id"] = f"eq.{submission_id}"
+        return self._request("GET", "review_decisions", query=query, admin=True) or []
+
+    def get_canonical_transaction_report(self, event_id):
+        if not self.can_publish:
+            return {}
+        def rows(table, order):
+            return self._request("GET", table, query={
+                "event_id": f"eq.{event_id}", "select": "*", "order": order,
+            }, admin=True) or []
+        return {
+            "Submissions": self.get_canonical_submissions(event_id),
+            "ReviewDecisions": rows("review_decisions", "decided_at.asc"),
+            "AwardTransactions": rows("award_transactions", "created_at.asc"),
+            "JudgeScores": rows("judge_scores", "submitted_at.asc"),
+            "TeamBalances": self._request("GET", "team_balance_projection", query={
+                "event_id": f"eq.{event_id}", "select": "*", "order": "team_id.asc",
+            }, admin=True) or [],
+            "Leaderboard": self.get_canonical_leaderboard(event_id),
+        }
+
+    def set_scoring_lock(self, event_id, scope_type, scope_id, locked, actor, reason):
+        require_control_centre("Canonical scoring final lock")
+        lock_id = f"LOCK-{event_id}-{str(scope_type).upper()}-{scope_id}"
+        if not locked:
+            return self._request("DELETE", "scoring_locks", query={
+                "scoring_lock_id": f"eq.{lock_id}",
+            }, admin=True, retries=1) or {"Locked": False}
+        return self._request("POST", "scoring_locks", payload={
+            "scoring_lock_id": lock_id, "event_id": str(event_id),
+            "scope_type": str(scope_type).upper(), "scope_id": str(scope_id),
+            "locked": True, "locked_by": str(actor), "reason": str(reason),
+            "audit_metadata": {"Actor": str(actor)},
+        }, query={"on_conflict": "event_id,scope_type,scope_id"}, admin=True, retries=1) or {"Locked": True}
+
     def update_submission(
         self,
         submission_id,
@@ -1076,6 +1167,22 @@ class SupabaseRuntimeDB:
             admin=True,
         )
         return self._normalise_result(result) or {"Updated": False}
+
+    def decide_canonical_submission(self, submission_id, decision, reviewer_id,
+                                    score=0, credits=0, notes="", reason="",
+                                    idempotency_key="", supersedes_id=""):
+        require_control_centre("Canonical review decision")
+        result = self._request(
+            "POST", "rpc/exos_decide_canonical_submission", payload={
+                "p_submission_id": str(submission_id), "p_decision": str(decision).upper(),
+                "p_reviewer_id": str(reviewer_id), "p_score": float(score or 0),
+                "p_credits": float(credits or 0), "p_notes": str(notes),
+                "p_rejection_reason": str(reason),
+                "p_idempotency_key": str(idempotency_key or f"{submission_id}:{decision}"),
+                "p_supersedes_decision_id": str(supersedes_id),
+            }, admin=True,
+        )
+        return self._normalise_result(result) or {}
 
     def configure_credit_wallet(self, event_id, enabled=True, reset=False):
         require_control_centre("Credit wallet configuration")
@@ -1181,6 +1288,22 @@ class SupabaseRuntimeDB:
             admin=True,
         )
         return self._normalise_result(result) or {}
+
+    def create_manual_award(self, event_id, team_id, amount, award_type, reason,
+                            facilitator, activity_id="", idempotency_key=""):
+        require_control_centre("Canonical manual Award Transaction")
+        transaction_id = str(uuid.uuid4())
+        key = str(idempotency_key or f"MANUAL:{transaction_id}")
+        result = self._request(
+            "POST", "award_transactions", payload={
+                "award_transaction_id": transaction_id, "event_id": str(event_id),
+                "team_id": str(team_id), "activity_id": str(activity_id) or None,
+                "award_type": str(award_type).upper(), "amount": float(amount),
+                "source": "MANUAL", "reason": str(reason), "idempotency_key": key,
+                "created_by": str(facilitator), "audit_metadata": {"Actor": str(facilitator)},
+            }, query={"on_conflict": "event_id,idempotency_key"}, admin=True, retries=1,
+        )
+        return self._normalise_result(result) or {"AwardTransactionID": transaction_id}
 
     def configure_road_hunt(
         self,

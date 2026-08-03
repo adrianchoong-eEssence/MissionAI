@@ -555,6 +555,7 @@ def save_structured_submission(
             metric3=metric3,
             status="PENDING",
             session_token=st.session_state.get("participant_session_token", ""),
+            canonical_context=mission.get("_CanonicalContext", {}),
         )
     except Exception as error:
         if drive_file_id:
@@ -2328,6 +2329,18 @@ def show_participant():
                 assignment_id, assets=assets,
             )
             render_experience_participant(resolved)
+            canonical_mission = {
+                "MissionID": assignment_id,
+                "Title": resolved["ParticipantTitle"],
+                "ParticipantInstructions": resolved["ParticipantTask"],
+                "SubmissionType": resolved["EvidenceType"],
+                "CreditValue": resolved["IntelligenceCredits"],
+                "_CanonicalContext": resolved,
+            }
+            if render_team_leader_submission_gate(db):
+                render_submission_form(
+                    db, canonical_mission, normalise_submission_type(canonical_mission),
+                )
         except (RuntimeDatabaseError, ExperienceResolutionError, ValueError) as error:
             st.error(f"Experience is temporarily unavailable: {error}")
         footer()

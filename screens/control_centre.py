@@ -334,7 +334,16 @@ def _render_mission_board(db, event_id):
 
 
 def _render_rankings(db, event_id, final=False):
-    leaderboard = calculate_leaderboard(db.get_submissions(event_id))
+    canonical = []
+    if db.runtime.can_publish:
+        try:
+            canonical = db.runtime.get_canonical_leaderboard(event_id)
+        except Exception:
+            canonical = []
+    leaderboard = (
+        [(row["TeamID"], float(row["Score"])) for row in canonical]
+        if canonical else calculate_leaderboard(db.get_submissions(event_id))
+    )
     st.subheader("Final Rankings" if final else "Current Ranking")
     if not leaderboard:
         st.info("No approved scores yet.")
@@ -600,3 +609,25 @@ def show_control_centre():
         control.restart_runtime(event_id)
         st.success("Runtime configuration restored; participant records were not reset.")
         st.rerun()
+    with st.expander("Scoring Finalisation and Recovery"):
+        lock_actor = st.text_input("Authorised facilitator", key=f"scoring_lock_actor_{event_id}")
+        lock_reason = st.text_input("Lock or reopen reason", key=f"scoring_lock_reason_{event_id}")
+        activity_lock, module_lock, event_lock, reopen = st.columns(4)
+        if activity_lock.button("Lock Activity Scoring", disabled=not lock_actor or not lock_reason):
+            control.set_scoring_lock(
+                event_id, "ACTIVITY", stage["ActivityID"], True, lock_actor, lock_reason,
+            )
+            st.success("Activity scoring final-locked and audited.")
+        if module_lock.button("Lock Module Scoring", disabled=not lock_actor or not lock_reason):
+            control.set_scoring_lock(
+                event_id, "MODULE", current_module["ModuleID"], True, lock_actor, lock_reason,
+            )
+            st.success("Module scoring final-locked and audited.")
+        if event_lock.button("Lock Event Scoring", disabled=not lock_actor or not lock_reason):
+            control.set_scoring_lock(event_id, "EVENT", event_id, True, lock_actor, lock_reason)
+            st.success("Event scoring and leaderboard final-locked.")
+        if reopen.button("Reopen Activity Judging", disabled=not lock_actor or not lock_reason):
+            control.set_scoring_lock(
+                event_id, "ACTIVITY", stage["ActivityID"], False, lock_actor, lock_reason,
+            )
+            st.warning("Activity judging reopened by an audited recovery action.")

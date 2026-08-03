@@ -168,6 +168,14 @@ def show_results_reports():
         submissions = []
         st.warning("Results are temporarily reconnecting.")
         st.caption(str(error))
+    canonical_report = {}
+    if db.runtime.can_publish:
+        try:
+            canonical_report = db.runtime.get_canonical_transaction_report(event_id)
+            if canonical_report.get("Submissions"):
+                submissions = canonical_report["Submissions"]
+        except Exception:
+            canonical_report = {}
 
     metric1, metric2, metric3 = st.columns(3)
     metric1.metric("Participants", participants)
@@ -223,5 +231,16 @@ def show_results_reports():
         )
     else:
         st.info("No submissions have been received for this event.")
+
+    if canonical_report:
+        with st.expander("Review Decision History"):
+            st.dataframe(canonical_report.get("ReviewDecisions", []), width="stretch", hide_index=True)
+        with st.expander("Award Transaction Ledger"):
+            st.dataframe(canonical_report.get("AwardTransactions", []), width="stretch", hide_index=True)
+        with st.expander("Judge Scores"):
+            st.dataframe(canonical_report.get("JudgeScores", []), width="stretch", hide_index=True)
+        with st.expander("Team Balance and Leaderboard Projections"):
+            st.dataframe(canonical_report.get("TeamBalances", []), width="stretch", hide_index=True)
+            st.dataframe(canonical_report.get("Leaderboard", []), width="stretch", hide_index=True)
 
     st.info("Report exports use the selected programme name and EXOS identity.")
