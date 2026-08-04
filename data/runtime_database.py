@@ -589,6 +589,23 @@ class SupabaseRuntimeDB:
             raise RuntimeDatabaseError("Registration returned no participant record.")
         return self._participant_record(row)
 
+    def join_preassigned_player(self, join_code, first_name, last_name, device_id):
+        """Restore an existing participant/team; never create or allocate identity."""
+        result = self._request(
+            "POST",
+            "rpc/exos_join_preassigned_event",
+            payload={
+                "p_join_code": str(join_code).strip().upper(),
+                "p_first_name": str(first_name).strip(),
+                "p_last_name": str(last_name).strip(),
+                "p_device_id": str(device_id).strip(),
+            },
+        )
+        row = self._normalise_result(result)
+        if not row:
+            raise RuntimeDatabaseError("Pre-assigned identity lookup returned no result.")
+        return self._participant_record(row)
+
     def get_runtime_control_state(self, event_id):
         if not self.can_publish:
             raise RuntimeDatabaseError("Runtime control state requires SUPABASE_SECRET_KEY.")

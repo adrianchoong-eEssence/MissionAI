@@ -154,6 +154,18 @@ def restore_participant_identity(player, fallback_token="", fallback_country="")
     )
 
 
+def is_formula_race_event(event):
+    """Identify the Formula R.A.C.E. participant policy from canonical metadata."""
+    if not event:
+        return False
+    policy = str(
+        event.get("IdentityPolicy", "")
+        or (event.get("RuntimeControlState", {}) or {}).get("IdentityPolicy", "")
+    ).strip().upper()
+    name = str(event.get("EventName", "")).upper().replace(".", "")
+    return policy == "PREASSIGNED_ONLY" or "FORMULA RACE" in name
+
+
 def render_recovery_candidate(candidate):
     """Require an explicit human choice before resuming a found identity."""
     st.info("Existing expedition record found.")
@@ -2127,12 +2139,13 @@ def show_participant():
             participant_event_by_code(join_code) if join_code else None
         )
         country_options = []
+        is_formula_race_join = is_formula_race_event(join_event)
         is_bayu_join = bool(
             join_event
             and str(join_event.get("EventID", "")) == "EVT-0004"
         )
         db = None
-        if join_event and not is_bayu_join:
+        if join_event and not is_bayu_join and not is_formula_race_join:
             db = GoogleSheetsDB()
             country_options = list(dict.fromkeys(
                 str(team.get("Country", "")).strip()
@@ -2140,13 +2153,15 @@ def show_participant():
                 if str(team.get("Country", "")).strip()
             ))
         country = ""
-        if join_event and not is_bayu_join:
+        if join_event and not is_bayu_join and not is_formula_race_join:
             country = st.selectbox(
                 "Country",
                 country_options,
             )
-        elif join_event:
+        elif is_bayu_join:
             st.info("Your country will be assigned automatically when you join.")
+        elif is_formula_race_join:
+            st.info("Your pre-assigned Formula R.A.C.E. team will open automatically.")
 
         if submitted and not pending:
             if not join_code:
@@ -2158,7 +2173,7 @@ def show_participant():
             if not last_name.strip():
                 st.warning("Enter your last / family name")
                 st.stop()
-            if not is_bayu_join and not country_options:
+            if not is_bayu_join and not is_formula_race_join and not country_options:
                 st.warning("Enter a valid Join Code and select your country.")
                 st.stop()
 
@@ -2171,6 +2186,9 @@ def show_participant():
                 "country": country,
                 "device_id": device_id,
                 "is_bayu": is_bayu_join,
+                "is_formula_race": is_formula_race_join,
+                "first_name": first_name.strip(),
+                "last_name": last_name.strip(),
             }
             st.rerun()
 
@@ -2179,7 +2197,14 @@ def show_participant():
             st.info("Joining your expedition…")
             st.caption("Please do not refresh or tap again.")
             try:
-                if pending.get("is_bayu"):
+                if pending.get("is_formula_race"):
+                    player = runtime.join_preassigned_player(
+                        pending["join_code"],
+                        pending["first_name"],
+                        pending["last_name"],
+                        pending["device_id"],
+                    )
+                elif pending.get("is_bayu"):
                     player = runtime.join_player(
                         pending["join_code"],
                         pending["participant_name"],
@@ -2208,6 +2233,11 @@ def show_participant():
                 st.error(str(error))
                 st.stop()
 
+            if player.get("PreassignedIdentityRequired") and not player.get("Found"):
+                st.session_state.pop("participant_join_request", None)
+                st.error(player.get("Message", "Your pre-assigned team could not be restored."))
+                st.caption("A facilitator must correct the canonical Identity Engine record. No new team or participant was created.")
+                st.stop()
             if player.get("Ambiguous"):
                 st.session_state.pop("participant_join_request", None)
                 st.error(player.get("Message", "Multiple expedition records match this name."))
