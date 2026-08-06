@@ -92,20 +92,89 @@ class DemoFormulaRaceProvider:
         )
         return RaceSnapshot(
             event_id=event_id or "FORMULA-RACE-UAT",
-            event_name="Formula R.A.C.E. · Day One",
-            source="DEMO",
-            race_status="RUNNING",
-            active_checkpoint="CP4 · Chassis Construction",
-            elapsed="02:18:42",
-            teams=teams,
-            transactions=transactions,
-            submissions=submissions,
+            event_name="Formula R.A.C.E. · Day One", source="DEMO", race_status="RUNNING",
+            active_checkpoint="CP4 · Chassis Construction", elapsed="02:18:42", teams=teams,
+            transactions=transactions, submissions=submissions,
             stock={"Cardboard sheet": 48, "Wheel set": 19, "Axle kit": 24, "Glue sticks": 63},
-            activity=(
-                "11:44 · Ignition submitted CP4 evidence",
-                "11:42 · Velocity awarded 200 credits",
-                "11:38 · Apex purchased 2 axle kits",
-                "11:31 · Safety bonus issued to Velocity",
+            activity=("11:44 · Ignition submitted CP4 evidence", "11:42 · Velocity awarded 200 credits",
+                      "11:38 · Apex purchased 2 axle kits", "11:31 · Safety bonus issued to Velocity"),
+        )
+
+
+class LiveFormulaRaceProvider:
+    """Event-scoped projection over existing EXOS repositories and canonical views."""
+
+    def __init__(self, db):
+        self.db = db
+
+    @staticmethod
+    def _number(value, default=0):
+        try:
+            return int(float(value or default))
+        except (TypeError, ValueError):
+            return default
+
+    def snapshot(self, event_id: str = "") -> RaceSnapshot:
+        event = self.db.get_event(event_id) or {}
+        if not event:
+            raise ValueError("Select a valid Formula R.A.C.E. event.")
+        raw_teams = self.db.get_teams(event_id)
+        submissions_raw = self.db.get_event_submissions(event_id)
+        missions = self.db.get_event_missions(event_id)
+        state = self.db.get_event_state(event_id) or {}
+        control = self.db.get_runtime_control_state(event_id) or {}
+        report = {}
+        if self.db.runtime.can_publish:
+            try:
+                report = self.db.runtime.get_canonical_transaction_report(event_id) or {}
+            except Exception:
+                report = {}
+        leaderboard = {str(row.get("TeamID", "")): row for row in report.get("Leaderboard", [])}
+        balances = {
+            str(row.get("team_id", row.get("TeamID", ""))): row
+            for row in report.get("TeamBalances", [])
+        }
+        teams = []
+        for position, row in enumerate(raw_teams, start=1):
+            team_id = str(row.get("TeamID", ""))
+            standing = leaderboard.get(team_id, {})
+            balance = balances.get(team_id, {})
+            completed = sum(
+                1 for item in submissions_raw
+                if str(item.get("TeamID", "")) == team_id
+                and str(item.get("Status", "")).upper() in {"APPROVED", "AWARDED"}
+            )
+            build = round(100 * completed / max(len(missions), 1))
+            teams.append(Team(
+                team_id, str(row.get("TeamName", team_id)), str(row.get("Country", "")),
+                "#e31b23", self._number(standing.get("Score", row.get("Score", 0))),
+                self._number(standing.get("AvailableBalance", balance.get("available_balance", 0))),
+                build, self._number(standing.get("Rank", position), position),
+            ))
+        transactions = tuple(Transaction(
+            str(row.get("award_transaction_id", "")), str(row.get("team_id", "")),
+            str(row.get("award_type", "")), self._number(row.get("amount", 0)),
+            str(row.get("reason", row.get("source", ""))), str(row.get("created_at", "")),
+        ) for row in report.get("AwardTransactions", []))
+        submissions = tuple(Submission(
+            str(row.get("SubmissionID", "")), str(row.get("TeamID", "")),
+            str(row.get("MissionName", row.get("ActivityID", row.get("MissionID", "Checkpoint")))),
+            str(row.get("Status", "PENDING")), str(row.get("SubmittedAt", row.get("Timestamp", ""))),
+            str(row.get("StorageReference", row.get("PhotoURL", row.get("EvidenceType", "Evidence")))),
+        ) for row in submissions_raw)
+        active = str(
+            state.get("CurrentStageName", "") or state.get("StageName", "")
+            or state.get("CurrentMissionName", "") or "Programme ready"
+        )
+        return RaceSnapshot(
+            event_id=event_id, event_name=str(event.get("EventName", event_id)), source="LIVE",
+            race_status=str(control.get("CurrentStageStatus", event.get("Status", "READY"))),
+            active_checkpoint=active, elapsed=str(control.get("Elapsed", "—")),
+            teams=tuple(sorted(teams, key=lambda row: (row.rank, row.name))),
+            transactions=transactions, submissions=submissions, stock={},
+            activity=tuple(
+                f"{item.submitted_at} · {item.team_id} · {item.checkpoint} · {item.status}"
+                for item in submissions[-6:][::-1]
             ),
         )
 

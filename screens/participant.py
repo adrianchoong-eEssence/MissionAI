@@ -2145,19 +2145,21 @@ def show_participant():
             and str(join_event.get("EventID", "")) == "EVT-0004"
         )
         db = None
-        if join_event and not is_bayu_join and not is_formula_race_join:
-            db = GoogleSheetsDB()
-            country_options = list(dict.fromkeys(
-                str(team.get("Country", "")).strip()
-                for team in db.get_teams(join_event.get("EventID", ""))
-                if str(team.get("Country", "")).strip()
-            ))
+        if join_event and not is_bayu_join:
+            if not is_formula_race_join:
+                db = GoogleSheetsDB()
+                country_options = list(dict.fromkeys(
+                    str(team.get("Country", "")).strip()
+                    for team in db.get_teams(join_event.get("EventID", ""))
+                    if str(team.get("Country", "")).strip()
+                ))
         country = ""
-        if join_event and not is_bayu_join and not is_formula_race_join:
-            country = st.selectbox(
-                "Country",
-                country_options,
-            )
+        if join_event and not is_bayu_join:
+            if not is_formula_race_join:
+                country = st.selectbox(
+                    "Country",
+                    country_options,
+                )
         elif is_bayu_join:
             st.info("Your country will be assigned automatically when you join.")
         elif is_formula_race_join:

@@ -1,9 +1,39 @@
 import streamlit as st
 from branding import apply_branding, configure_page, footer
+from data.google_sheets import GoogleSheetsDB
+from screens.app_state import ACTIVE_EVENT_KEY
+from screens.control_centre import show_control_centre
+from screens.formula_race import show_formula_race
 from screens.live_event_console import show_live_event_console
 
 configure_page(layout="wide")
 apply_branding()
 
-show_live_event_console()
+db = GoogleSheetsDB()
+workspace = st.sidebar.radio(
+    "Formula R.A.C.E.",
+    ["Dashboard", "Race Control", "Legacy Operations"],
+    key="formula_race_facilitator_workspace",
+)
+
+if workspace == "Dashboard":
+    events = db.get_events()
+    race_events = [
+        event for event in events
+        if "FORMULA RACE" in str(event.get("EventName", "")).upper().replace(".", "")
+        or str(event.get("IdentityPolicy", "")).upper() == "PREASSIGNED_ONLY"
+    ]
+    if not race_events:
+        st.warning("No Formula R.A.C.E. event is configured. Create or label the event before launch.")
+    else:
+        labels = {f"{event.get('EventID')} · {event.get('EventName')}": event for event in race_events}
+        selected = st.selectbox("Select Formula R.A.C.E. event", list(labels))
+        event = labels[selected]
+        event_id = str(event.get("EventID", ""))
+        st.session_state[ACTIVE_EVENT_KEY] = event_id
+        show_formula_race(db=db, event_id=event_id)
+elif workspace == "Race Control":
+    show_control_centre()
+else:
+    show_live_event_console()
 footer()

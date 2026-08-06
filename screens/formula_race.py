@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from data.formula_race_contracts import DemoFormulaRaceProvider, RaceSnapshot
+from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRaceProvider, RaceSnapshot
 
 
 NAV = ["Overview", "Live Programme", "Championship", "Teams", "Checkpoints", "Reviews", "Marketplace", "Race Map", "Control Centre"]
@@ -217,8 +217,12 @@ def control_centre(s):
     st.warning("DEMO DATA · Live controls will call data.control_runtime.ControlRuntime only after canonical event, identity and authority checks pass.")
 
 
-def show_formula_race():
-    _css(); snapshot=DemoFormulaRaceProvider().snapshot(str(st.session_state.get("active_event_id","")))
+def show_formula_race(db=None, event_id=""):
+    _css()
+    if db is None:
+        snapshot=DemoFormulaRaceProvider().snapshot(event_id or str(st.session_state.get("active_event_id","")))
+    else:
+        snapshot=LiveFormulaRaceProvider(db).snapshot(event_id)
     page=_top(snapshot); sub=st.session_state.get("race_subscreen","")
     if sub=="wallet": wallet(snapshot)
     elif sub=="gallery": gallery(snapshot)
@@ -234,6 +238,13 @@ def show_formula_race():
     elif page=="Reviews":
         view=st.radio("Review view",["Review Queue","Photo Gallery","Judging"],horizontal=True,label_visibility="collapsed")
         reviews(snapshot) if view=="Review Queue" else (gallery(snapshot) if view=="Photo Gallery" else judging(snapshot))
-    elif page=="Marketplace": marketplace(snapshot)
+    elif page=="Marketplace":
+        if snapshot.is_demo: marketplace(snapshot)
+        else:
+            _title("Canonical marketplace", "Build Materials Depot", "Live purchases, stock deduction and overspend prevention are operated in Control Centre.")
+            st.info("Open Race Control to manage the live marketplace and audited team wallets.")
+            st.dataframe([x.__dict__ for x in snapshot.transactions if x.kind in {"SPEND", "REFUND"}], width="stretch", hide_index=True)
     elif page=="Race Map": race_map(snapshot)
-    else: control_centre(snapshot)
+    else:
+        if snapshot.is_demo: control_centre(snapshot)
+        else: st.info("Use the Race Control workspace above for canonical live mutations.")

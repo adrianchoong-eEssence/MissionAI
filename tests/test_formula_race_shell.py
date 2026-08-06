@@ -1,4 +1,4 @@
-from data.formula_race_contracts import DemoFormulaRaceProvider, snapshot_as_contract
+from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRaceProvider, snapshot_as_contract
 from screens import formula_race
 
 
@@ -28,3 +28,21 @@ def test_all_fifteen_screen_renderers_are_present():
 def test_marketplace_catalog_has_stock_contract_keys():
     snapshot = DemoFormulaRaceProvider().snapshot()
     assert {name for name, _ in formula_race.MATERIALS} == set(snapshot.stock)
+
+
+def test_live_provider_scopes_every_read_to_selected_event():
+    class Runtime:
+        is_configured = True
+        can_publish = True
+        def get_players(self, event_id): assert event_id == "RACE-1"; return []
+        def get_canonical_transaction_report(self, event_id): assert event_id == "RACE-1"; return {}
+    class DB:
+        runtime = Runtime()
+        def get_event(self, event_id): assert event_id == "RACE-1"; return {"EventID": event_id, "EventName": "Formula R.A.C.E."}
+        def get_teams(self, event_id): assert event_id == "RACE-1"; return [{"TeamID":"F1-01","TeamName":"Ferrari"}]
+        def get_event_submissions(self, event_id): assert event_id == "RACE-1"; return []
+        def get_event_missions(self, event_id): assert event_id == "RACE-1"; return []
+        def get_event_state(self, event_id): assert event_id == "RACE-1"; return {}
+        def get_runtime_control_state(self, event_id): assert event_id == "RACE-1"; return {}
+    snapshot = LiveFormulaRaceProvider(DB()).snapshot("RACE-1")
+    assert snapshot.event_id == "RACE-1" and snapshot.source == "LIVE"
