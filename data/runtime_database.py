@@ -606,6 +606,33 @@ class SupabaseRuntimeDB:
             raise RuntimeDatabaseError("Pre-assigned identity lookup returned no result.")
         return self._participant_record(row)
 
+    def formula_race_captain_login(self, join_code, team_id, pin, device_id):
+        result = self._request("POST", "rpc/exos_formula_race_captain_login", payload={
+            "p_join_code": str(join_code).strip().upper(), "p_team_id": str(team_id).strip(),
+            "p_pin": str(pin).strip(), "p_device_id": str(device_id).strip(),
+        })
+        row = self._normalise_result(result)
+        if not row:
+            raise RuntimeDatabaseError("Captain login returned no team session.")
+        return row
+
+    def restore_formula_race_captain(self, session_token, device_id):
+        result = self._request("POST", "rpc/exos_formula_race_restore_captain", payload={
+            "p_session_token": str(session_token).strip(), "p_device_id": str(device_id).strip(),
+        })
+        return self._normalise_result(result)
+
+    def formula_race_team_status(self, event_id):
+        rows = self._request("POST", "rpc/exos_formula_race_team_status", payload={
+            "p_event_id": str(event_id).strip(),
+        }, admin=True) or []
+        if isinstance(rows, dict):
+            rows = [rows]
+        return [{
+            "TeamID": row.get("team_id", ""), "Connected": bool(row.get("connected", False)),
+            "ConnectedAt": row.get("connected_at"), "LastSeenAt": row.get("last_seen_at"),
+        } for row in rows]
+
     def get_runtime_control_state(self, event_id):
         if not self.can_publish:
             raise RuntimeDatabaseError("Runtime control state requires SUPABASE_SECRET_KEY.")

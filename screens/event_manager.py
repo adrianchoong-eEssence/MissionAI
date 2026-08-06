@@ -6,16 +6,8 @@ from screens.app_state import active_event_index
 
 
 FORMULA_RACE_TEAMS = [
-    "Scuderia Ferrari",
-    "McLaren Racing",
-    "Mercedes-AMG",
-    "Red Bull Racing",
-    "Aston Martin",
-    "Alpine",
-    "Williams Racing",
-    "Audi F1 Team",
-    "Haas F1 Team",
-    "Cadillac F1 Team",
+    "Sandstorm", "Bolt", "Zenith", "Scuderia Best", "Apex Velocity",
+    "Velocity", "Fast & Curious", "Lakas", "Drift Club", "Papaya Crew",
 ]
 
 

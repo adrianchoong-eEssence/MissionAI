@@ -20,6 +20,7 @@ class Team:
     balance: int
     build: int
     rank: int
+    connected: bool = False
 
 
 @dataclass(frozen=True)
@@ -124,11 +125,19 @@ class LiveFormulaRaceProvider:
         state = self.db.get_event_state(event_id) or {}
         control = self.db.get_runtime_control_state(event_id) or {}
         report = {}
+        captain_status = {}
         if self.db.runtime.can_publish:
             try:
                 report = self.db.runtime.get_canonical_transaction_report(event_id) or {}
             except Exception:
                 report = {}
+            try:
+                captain_status = {
+                    str(row.get("TeamID", "")): bool(row.get("Connected", False))
+                    for row in self.db.runtime.formula_race_team_status(event_id)
+                }
+            except Exception:
+                captain_status = {}
         leaderboard = {str(row.get("TeamID", "")): row for row in report.get("Leaderboard", [])}
         balances = {
             str(row.get("team_id", row.get("TeamID", ""))): row
@@ -150,6 +159,7 @@ class LiveFormulaRaceProvider:
                 "#e31b23", self._number(standing.get("Score", row.get("Score", 0))),
                 self._number(standing.get("AvailableBalance", balance.get("available_balance", 0))),
                 build, self._number(standing.get("Rank", position), position),
+                captain_status.get(team_id, False),
             ))
         transactions = tuple(Transaction(
             str(row.get("award_transaction_id", "")), str(row.get("team_id", "")),

@@ -57,7 +57,8 @@ def _team_rows(snapshot, limit=None):
     for t in snapshot.teams[:limit]:
         c1,c2,c3,c4 = st.columns([.6,4,1.2,1.2])
         c1.markdown(f"<span class='rank'>{t.rank:02}</span>", unsafe_allow_html=True)
-        c2.markdown(f"<div><b>{t.name.upper()}</b> <span class='muted'>· {t.country}</span><div class='bar'><i style='width:{t.build}%'></i></div></div>", unsafe_allow_html=True)
+        connection = "🟢 CONNECTED" if t.connected else "⚪ NOT CONNECTED"
+        c2.markdown(f"<div><b>{t.name.upper()}</b> <span class='muted'>· {t.country}</span><br><small>{connection}</small><div class='bar'><i style='width:{t.build}%'></i></div></div>", unsafe_allow_html=True)
         c3.metric("Score", t.score)
         c4.metric("Credits", t.balance)
 
