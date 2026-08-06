@@ -30,7 +30,8 @@ def _css():
     .rank{font:800 2.1rem 'Barlow Condensed';color:var(--yellow);margin-right:1rem}.bar{height:7px;background:#17394d}.bar>i{display:block;height:7px;background:linear-gradient(90deg,var(--red),var(--yellow))}
     .ticker{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:.55rem;color:#c5d4de;white-space:nowrap;overflow:hidden}
     div.stButton>button{border-radius:2px;text-transform:uppercase;font-family:'Barlow Condensed';font-weight:800;letter-spacing:.04em;min-height:42px}
-    div[data-testid="stHorizontalBlock"]{gap:.75rem} [data-testid="stSidebar"]{display:none}
+    div[data-testid="stHorizontalBlock"]{gap:.75rem}
+    [data-testid="stSidebar"]{min-width:17rem;max-width:19rem}
     @media(max-width:900px){.block-container{padding:.7rem 1rem 2rem}h1{font-size:2.3rem!important}.race-card{min-height:auto}}
     </style>""", unsafe_allow_html=True)
 
