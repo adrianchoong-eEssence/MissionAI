@@ -4,6 +4,8 @@ from __future__ import annotations
 import streamlit as st
 
 from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRaceProvider, RaceSnapshot
+from data.control_runtime import ControlRuntime
+from engines.formula_race import BUILD_STATUSES,JUDGING_CATEGORIES,final_standings
 
 
 NAV = ["Overview", "Live Programme", "Championship", "Teams", "Checkpoints", "Reviews", "Marketplace", "Race Map", "Control Centre"]
@@ -98,7 +100,11 @@ def live_programme(s):
 
 def championship(s, final=False):
     _title("Official standings" if final else "Live timing", "Final Championship" if final else "Live Championship", "Canonical award-ledger projection when connected; demonstration standings shown now.")
-    _team_rows(s)
+    if final and not s.is_demo:
+        rows=final_standings([{"TeamID":t.id,"TeamName":t.name} for t in s.teams],
+            [{"TeamID":x.team_id,"Amount":x.amount} for x in s.transactions],s.operations.get("Judging",[]),s.operations.get("RaceResults",[]),s.operations.get("Config",{}))
+        st.dataframe(rows,width="stretch",hide_index=True)
+    else: _team_rows(s)
     st.subheader("Score Breakdown")
     st.dataframe([{"Team":t.name,"Checkpoints":round(t.score*.52),"Judging":round(t.score*.31),"Drag Race":round(t.score*.17),"Total":t.score} for t in s.teams],width="stretch",hide_index=True)
     if final: st.success("Championship lock is available from Control Centre after canonical scoring reconciliation.")
@@ -175,31 +181,53 @@ def race_map(s):
     a,b,c=st.columns(3); a.metric("Track status","CLEAR"); b.metric("Marshal posts","4 / 4"); c.metric("Next heat","12:15")
 
 
-def judging(s):
+def judging(s, control=None):
     _title("Official Scoring", "Judging", "Weighted scoring contract prepared for canonical Judge Score and scoring configuration.")
     names=[t.name for t in s.teams]; idx=names.index(st.session_state.get("judge_team",names[0])); team=st.selectbox("Select team",names,index=idx,key="judge_team")
     p,n=st.columns(2)
     if p.button("← Previous team",width="stretch"): st.session_state.judge_team=names[(names.index(team)-1)%len(names)]; st.rerun()
     if n.button("Next team →",width="stretch"): st.session_state.judge_team=names[(names.index(team)+1)%len(names)]; st.rerun()
     total=0.0
-    for criterion,weight in CRITERIA:
-        score=st.slider(f"{criterion} · {weight}%",0,10,7,key=f"score_{team}_{criterion}"); total+=score*weight/10
-    st.metric("Weighted total",f"{total:.1f} / 100"); st.progress((names.index(team)+1)/len(names),text=f"Judging progress · {names.index(team)+1} of {len(names)} teams")
-    if st.button("Submit score",type="primary",width="stretch"): st.session_state.judge_confirm=f"Demo score {total:.1f} prepared for {team}"
+    categories=JUDGING_CATEGORIES if control else tuple(name for name,_ in CRITERIA)
+    scores={}
+    for criterion in categories:
+        score=st.slider(criterion,0,10,7,key=f"score_{team}_{criterion}");scores[criterion]=score;total+=score
+    st.metric("Total score",f"{total:.1f}"); st.progress((names.index(team)+1)/len(names),text=f"Judging progress · {names.index(team)+1} of {len(names)} teams")
+    actor=st.text_input("Facilitator identity",key="race_judge_actor") if control else ""
+    reason=st.text_input("Submission or correction reason",key="race_judge_reason") if control else ""
+    if st.button("Submit score",type="primary",width="stretch",disabled=bool(control and (not actor or not reason))):
+        if control:
+            selected=next(t for t in s.teams if t.name==team);control.save_race_judging(s.event_id,selected.id,scores,reason,actor);st.success("Judging score saved with audit history.")
+        else: st.session_state.judge_confirm=f"Demo score {total:.1f} prepared for {team}"
     if st.session_state.get("judge_confirm"): st.success(st.session_state.judge_confirm+". No canonical Judge Score was written.")
 
 
-def drag_results(s):
+def drag_results(s, control=None):
     _title("Official Timing", "Drag Race Results", "Heat results and fastest-lap bonus projection.")
+    live_rows=s.operations.get("RaceResults",[]) if control else []
     rows=[]
-    for i,t in enumerate(s.teams): rows.append({"Pos":i+1,"Team":t.name,"Best time":f"{12+i}.{18+i*7:02}s","Speed":f"{31-i*1.4:.1f} km/h","Points":120-i*12})
-    st.dataframe(rows,width="stretch",hide_index=True); st.markdown("<div class='race-card'><h3>Fastest Lap</h3><p>Velocity · 12.18 seconds</p><span class='accent'>+25 BONUS POINTS</span></div>",unsafe_allow_html=True)
+    for i,t in enumerate(s.teams):
+        live=next((r for r in live_rows if str(r.get("team_id",""))==t.id),{})
+        rows.append({"Pos":i+1,"Team":t.name,"Time ms":live.get("finish_time_ms","—"),"Penalty ms":live.get("penalty_ms",0),"Bonus":live.get("bonus_credits",0),"Verified":live.get("verified",False)})
+    st.dataframe(rows,width="stretch",hide_index=True)
+    if not control: st.markdown("<div class='race-card'><h3>Fastest Lap</h3><p>Velocity · 12.18 seconds</p><span class='accent'>+25 BONUS POINTS</span></div>",unsafe_allow_html=True)
+    if control:
+        team=st.selectbox("Result team",[t.name for t in s.teams]);time_ms=st.number_input("Finish time (ms)",0,3600000,0);penalty=st.number_input("Penalty (ms)",0,3600000,0);bonus=st.number_input("Bonus credits",0,1000,0);verified=st.checkbox("Verified")
+        actor=st.text_input("Facilitator identity",key="race_result_actor");reason=st.text_input("Result or correction reason",key="race_result_reason")
+        if st.button("Save Race Result",disabled=not actor or not reason,width="stretch"):
+            selected=next(t for t in s.teams if t.name==team);control.save_race_result(s.event_id,selected.id,time_ms,penalty,bonus,verified,reason,actor);st.success("Race result saved with audit history.")
 
 
-def build_status(s):
+def build_status(s, control=None):
     _title("Engineering Readiness", "Build Status", "Materials, structural checkpoints and race-readiness by team.")
+    live={str(r.get("team_id","")):r for r in s.operations.get("BuildStatus",[])}
     for t in s.teams:
-        c1,c2,c3=st.columns([2,5,1]); c1.markdown(f"**{t.name.upper()}**\n\n{t.country}"); c2.progress(t.build/100,text=f"Build completion · {t.build}%"); c3.markdown("✅ READY" if t.build>85 else ("🟡 BUILDING" if t.build>60 else "🔧 ACTION"))
+        status=str(live.get(t.id,{}).get("status","Not Started"));pct=BUILD_STATUSES.index(status)*20 if status in BUILD_STATUSES else 0
+        c1,c2,c3=st.columns([2,5,1]); c1.markdown(f"**{t.name.upper()}**\n\n{t.country}"); c2.progress(pct/100,text=f"{status} · {pct}%"); c3.markdown("READY" if status in {"Ready to Race","Completed"} else "ACTIVE")
+    if control:
+        team=st.selectbox("Update team",[t.name for t in s.teams],key="build_team");status=st.selectbox("Build status",BUILD_STATUSES);actor=st.text_input("Facilitator identity",key="build_actor");reason=st.text_input("Required reason",key="build_reason")
+        if st.button("Update Build Status",disabled=not actor or not reason,width="stretch"):
+            selected=next(t for t in s.teams if t.name==team);control.set_race_build_status(s.event_id,selected.id,status,{},reason,actor);st.success("Build status saved and audited.")
 
 
 def control_centre(s):
@@ -232,6 +260,7 @@ def show_formula_race(db=None, event_id=""):
         snapshot=DemoFormulaRaceProvider().snapshot(event_id or str(st.session_state.get("active_event_id","")))
     else:
         snapshot=LiveFormulaRaceProvider(db).snapshot(event_id)
+    control=ControlRuntime(db) if db is not None else None
     page=_top(snapshot); sub=st.session_state.get("race_subscreen","")
     if sub=="wallet": wallet(snapshot)
     elif sub=="gallery": gallery(snapshot)
@@ -239,14 +268,14 @@ def show_formula_race(db=None, event_id=""):
     elif page=="Live Programme": live_programme(snapshot)
     elif page=="Championship":
         view=st.radio("Championship view",["Live Championship","Drag Race Results","Final Championship"],horizontal=True,label_visibility="collapsed")
-        drag_results(snapshot) if view=="Drag Race Results" else championship(snapshot,view=="Final Championship")
+        drag_results(snapshot,control) if view=="Drag Race Results" else championship(snapshot,view=="Final Championship")
     elif page=="Teams": teams(snapshot)
     elif page=="Checkpoints":
         view=st.radio("Checkpoint view",["Checkpoint Control","Build Status"],horizontal=True,label_visibility="collapsed")
-        checkpoints(snapshot) if view=="Checkpoint Control" else build_status(snapshot)
+        checkpoints(snapshot) if view=="Checkpoint Control" else build_status(snapshot,control)
     elif page=="Reviews":
         view=st.radio("Review view",["Review Queue","Photo Gallery","Judging"],horizontal=True,label_visibility="collapsed")
-        reviews(snapshot) if view=="Review Queue" else (gallery(snapshot) if view=="Photo Gallery" else judging(snapshot))
+        reviews(snapshot) if view=="Review Queue" else (gallery(snapshot) if view=="Photo Gallery" else judging(snapshot,control))
     elif page=="Marketplace":
         if snapshot.is_demo: marketplace(snapshot)
         else:

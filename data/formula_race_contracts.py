@@ -56,6 +56,7 @@ class RaceSnapshot:
     submissions: tuple[Submission, ...]
     stock: dict[str, int]
     activity: tuple[str, ...] = field(default_factory=tuple)
+    operations: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_demo(self) -> bool:
@@ -124,6 +125,10 @@ class LiveFormulaRaceProvider:
         missions = self.db.get_event_missions(event_id)
         state = self.db.get_event_state(event_id) or {}
         control = self.db.get_runtime_control_state(event_id) or {}
+        operations = {}
+        if self.db.runtime.can_publish:
+            try: operations = self.db.runtime.get_formula_race_state(event_id) or {}
+            except Exception: operations = {}
         report = {}
         captain_status = {}
         if self.db.runtime.can_publish:
@@ -181,7 +186,7 @@ class LiveFormulaRaceProvider:
             race_status=str(control.get("CurrentStageStatus", event.get("Status", "READY"))),
             active_checkpoint=active, elapsed=str(control.get("Elapsed", "—")),
             teams=tuple(sorted(teams, key=lambda row: (row.rank, row.name))),
-            transactions=transactions, submissions=submissions, stock={},
+            transactions=transactions, submissions=submissions, stock={}, operations=operations,
             activity=tuple(
                 f"{item.submitted_at} · {item.team_id} · {item.checkpoint} · {item.status}"
                 for item in submissions[-6:][::-1]

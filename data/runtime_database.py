@@ -633,6 +633,29 @@ class SupabaseRuntimeDB:
             "ConnectedAt": row.get("connected_at"), "LastSeenAt": row.get("last_seen_at"),
         } for row in rows]
 
+    def get_formula_race_state(self, event_id):
+        result=self._request("POST","rpc/exos_formula_race_state",payload={"p_event_id":str(event_id).strip()},admin=True)
+        return self._normalise_result(result) or {}
+
+    def set_formula_race_build_status(self,event_id,team_id,status,checklist,reason,actor):
+        require_control_centre("Formula R.A.C.E. build status")
+        return self._normalise_result(self._request("POST","rpc/exos_set_formula_race_build_status",payload={
+            "p_event_id":str(event_id),"p_team_id":str(team_id),"p_status":str(status),
+            "p_checklist":dict(checklist or {}),"p_reason":str(reason),"p_actor":str(actor)},admin=True)) or {}
+
+    def save_formula_race_judging(self,event_id,team_id,scores,reason,actor):
+        require_control_centre("Formula R.A.C.E. judging")
+        return self._normalise_result(self._request("POST","rpc/exos_save_formula_race_judging",payload={
+            "p_event_id":str(event_id),"p_team_id":str(team_id),"p_scores":dict(scores),
+            "p_reason":str(reason),"p_actor":str(actor)},admin=True)) or {}
+
+    def save_formula_race_result(self,event_id,team_id,time_ms,penalty_ms,bonus,verified,reason,actor):
+        require_control_centre("Formula R.A.C.E. race result")
+        return self._normalise_result(self._request("POST","rpc/exos_save_formula_race_result",payload={
+            "p_event_id":str(event_id),"p_team_id":str(team_id),"p_time_ms":int(time_ms),
+            "p_penalty_ms":int(penalty_ms),"p_bonus":float(bonus),"p_verified":bool(verified),
+            "p_reason":str(reason),"p_actor":str(actor)},admin=True)) or {}
+
     def get_runtime_control_state(self, event_id):
         if not self.can_publish:
             raise RuntimeDatabaseError("Runtime control state requires SUPABASE_SECRET_KEY.")

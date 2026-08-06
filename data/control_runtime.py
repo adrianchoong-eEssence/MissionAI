@@ -121,3 +121,12 @@ class ControlRuntime:
     def restart_runtime(self, event_id):
         """Republish configuration without resetting registrations or identities."""
         return self._run(self.db.publish_event_to_runtime, event_id, False)
+
+    def set_race_build_status(self,event_id,team_id,status,checklist,reason,actor):
+        return self._run(self.runtime.set_formula_race_build_status,event_id,team_id,status,checklist,reason,actor)
+
+    def save_race_judging(self,event_id,team_id,scores,reason,actor):
+        return self._run(self.runtime.save_formula_race_judging,event_id,team_id,scores,reason,actor)
+
+    def save_race_result(self,event_id,team_id,time_ms,penalty_ms,bonus,verified,reason,actor):
+        return self._run(self.runtime.save_formula_race_result,event_id,team_id,time_ms,penalty_ms,bonus,verified,reason,actor)
