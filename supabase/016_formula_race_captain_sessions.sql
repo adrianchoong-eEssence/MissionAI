@@ -2,10 +2,14 @@
 create table if not exists public.formula_race_team_access (
  event_id text not null, team_id text not null, pin_hash text not null,
  active_device_id text, active_session_token uuid, connected_at timestamptz,
- last_seen_at timestamptz, updated_at timestamptz not null default now(), updated_by text not null,
+ last_seen_at timestamptz, updated_at timestamptz not null default now(), updated_by text not null check(length(trim(updated_by))>0),
  primary key(event_id,team_id),
  foreign key(event_id,team_id) references public.runtime_teams(event_id,team_id) on delete cascade
 );
+create unique index if not exists formula_race_team_access_session_uidx
+ on public.formula_race_team_access(active_session_token) where active_session_token is not null;
+create index if not exists formula_race_team_access_event_connected_idx
+ on public.formula_race_team_access(event_id,last_seen_at desc) where active_session_token is not null;
 alter table public.formula_race_team_access enable row level security;
 revoke all on table public.formula_race_team_access from anon,authenticated;
 
