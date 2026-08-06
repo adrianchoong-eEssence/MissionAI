@@ -18,11 +18,16 @@ workspace = st.sidebar.radio(
 
 if workspace == "Dashboard":
     events = db.get_events()
-    race_events = [
-        event for event in events
-        if "FORMULA RACE" in str(event.get("EventName", "")).upper().replace(".", "")
-        or str(event.get("IdentityPolicy", "")).upper() == "PREASSIGNED_ONLY"
-    ]
+    race_events = []
+    for event in events:
+        event_name = str(event.get("EventName", "")).upper().replace(".", "").strip()
+        client = str(event.get("Client", "")).upper().replace("’", "'").strip()
+        if (
+            "FORMULA RACE" in event_name
+            or str(event.get("IdentityPolicy", "")).upper() == "PREASSIGNED_ONLY"
+            or (event_name == "RACE" and client in {"LOREAL", "L'OREAL"})
+        ):
+            race_events.append(event)
     if not race_events:
         st.warning("No Formula R.A.C.E. event is configured. Create or label the event before launch.")
     else:

@@ -163,7 +163,12 @@ def is_formula_race_event(event):
         or (event.get("RuntimeControlState", {}) or {}).get("IdentityPolicy", "")
     ).strip().upper()
     name = str(event.get("EventName", "")).upper().replace(".", "")
-    return policy == "PREASSIGNED_ONLY" or "FORMULA RACE" in name
+    client = str(event.get("Client", "")).upper().replace("’", "'")
+    return (
+        policy == "PREASSIGNED_ONLY"
+        or "FORMULA RACE" in name
+        or (name.strip() == "RACE" and client in {"LOREAL", "L'OREAL", "L’OREAL"})
+    )
 
 
 def render_recovery_candidate(candidate):

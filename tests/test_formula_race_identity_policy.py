@@ -10,6 +10,7 @@ SQL = Path("supabase/015_formula_race_preassigned_identity.sql").read_text()
 def test_formula_race_event_policy_detection():
     assert is_formula_race_event({"EventName": "Formula R.A.C.E. Day One"})
     assert is_formula_race_event({"IdentityPolicy": "PREASSIGNED_ONLY"})
+    assert is_formula_race_event({"EventName": "RACE", "Client": "Loreal"})
     assert not is_formula_race_event({"EventName": "Bayu Beach Labyrinth"})
 
 
