@@ -38,7 +38,8 @@ def _css():
 def _top(snapshot: RaceSnapshot):
     a,b,c = st.columns([5,2,2])
     with a: st.markdown("<div class='race-font' style='font-size:1.6rem;font-weight:800'>FORMULA <span class='red'>R.A.C.E.</span> <span class='muted'>/ RACE OPERATIONS</span></div>", unsafe_allow_html=True)
-    with b: st.markdown("<span class='demo'>DEMO DATA</span>", unsafe_allow_html=True)
+    badge = "DEMO DATA" if snapshot.is_demo else f"LIVE DATA · {snapshot.event_id}"
+    with b: st.markdown(f"<span class='demo'>{badge}</span>", unsafe_allow_html=True)
     with c: st.markdown(f"<span class='status'>● {snapshot.race_status}</span>", unsafe_allow_html=True)
     selected = st.radio("Primary navigation", NAV, horizontal=True, label_visibility="collapsed", key="race_nav")
     st.markdown(f"<div class='ticker'>LIVE TELEMETRY &nbsp; ◆ &nbsp; {snapshot.active_checkpoint} &nbsp; ◆ &nbsp; ELAPSED {snapshot.elapsed} &nbsp; ◆ &nbsp; {len(snapshot.submissions)} SUBMISSIONS IN FEED</div>", unsafe_allow_html=True)
@@ -62,8 +63,14 @@ def _team_rows(snapshot, limit=None):
 
 def overview(s):
     _title("Mission AI powered race experience", "Race Control Overview", "One operational picture across programme, championship, submissions and supply.")
+    pending=sum(1 for item in s.submissions if item.status.upper() in {"PENDING", "PENDING_REVIEW"})
     cols=st.columns(4)
-    for col,(label,value,delta) in zip(cols,[("Teams on track",len(s.teams),"All connected"),("Active checkpoint","04 / 07","Chassis"),("Pending reviews",2,"Needs action"),("Stock alerts",1,"Wheel sets")]): col.metric(label,value,delta)
+    for col,(label,value,delta) in zip(cols,[
+        ("Teams on track",len(s.teams),"Selected event"),
+        ("Active checkpoint",s.active_checkpoint,"Runtime state"),
+        ("Pending reviews",pending,"Canonical queue"),
+        ("Transactions",len(s.transactions),"Immutable ledger"),
+    ]): col.metric(label,value,delta)
     left,right=st.columns([1.45,1])
     with left:
         st.subheader("Live Championship"); _team_rows(s,4)
