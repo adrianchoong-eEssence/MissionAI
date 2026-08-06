@@ -18,5 +18,5 @@ def test_captain_login_is_pin_scoped_and_never_allocates_teams():
 
 def test_team_asset_slots_cover_roster():
     import json
-    manifest=json.loads(Path("assets/race_teams/manifest.json").read_text())
+    manifest=json.loads(Path("Assets/race_teams/manifest.json").read_text())
     assert list(manifest)==EXPECTED

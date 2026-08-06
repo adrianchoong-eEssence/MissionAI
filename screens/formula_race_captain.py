@@ -6,7 +6,7 @@ import streamlit as st
 from data.google_sheets import GoogleSheetsDB
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 
-ASSET_ROOT=Path(__file__).resolve().parents[1]/"assets"/"race_teams"
+ASSET_ROOT=Path(__file__).resolve().parents[1]/"Assets"/"race_teams"
 TEAM_ASSETS=json.loads((ASSET_ROOT/"manifest.json").read_text())
 
 def _device_id():
