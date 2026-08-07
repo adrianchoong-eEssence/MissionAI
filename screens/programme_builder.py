@@ -632,7 +632,7 @@ def render_programme_first_builder(db):
     else:
         st.caption("SAVED · loaded from persisted configuration")
 
-    with st.expander("Duplicate Existing Programme", expanded=not modules):
+    with st.expander("Duplicate Existing Programme", expanded=True):
         family = programme_family(event)
         candidates = []
         for candidate in events:
