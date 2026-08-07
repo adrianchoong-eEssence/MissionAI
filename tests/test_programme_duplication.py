@@ -72,3 +72,13 @@ def test_product_specific_template_filtering():
     assert any(row[1] == "Pipeline" for row in templates_for_event({"ProgrammeType": "AGILE"}, mission, race))
     assert any(row[1] == "RACE Checkpoints" for row in templates_for_event({"ProgrammeType": "Formula R.A.C.E."}, mission, race))
     assert not any(row[1] == "Mission AI" for row in templates_for_event({"ProgrammeType": "Corporate Training"}, mission, race))
+
+
+def test_legacy_rows_remain_in_one_programme_module():
+    legacy = [
+        {"EventID": "EVT-SOURCE", "StageNo": 1, "StageName": "Registration", "StageType": "Registration"},
+        {"EventID": "EVT-SOURCE", "StageNo": 2, "StageName": "Pipeline Challenge", "StageType": "MissionBriefing"},
+    ]
+    cloned, _ = clone_programme_stages(legacy, "EVT-SOURCE", "EVT-0016")
+    assert len({activity_details(row)["ModuleID"] for row in cloned}) == 1
+    assert all(decode_module_stage_type(row)["ModuleName"] == "Programme" for row in cloned)

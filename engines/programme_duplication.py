@@ -56,7 +56,10 @@ def clone_programme_stages(stages, source_event_id, destination_event_id):
     for position, row in enumerate(source, 1):
         details = activity_details(row)
         marker = decode_module_stage_type(row) or {}
-        source_module = str(details.get("ModuleID") or row.get("ModuleID") or marker.get("ModuleName") or f"MODULE-{position}")
+        source_module = str(
+            details.get("ModuleID") or row.get("ModuleID")
+            or marker.get("ModuleName") or "Programme"
+        )
         if source_module not in module_ids:
             module_ids[source_module] = f"{destination_event_id}-MOD-{len(module_ids)+1:02d}"
         source_activity = str(details.get("ActivityID") or row.get("ActivityID") or f"{source_event_id}-LEGACY-ACT-{row.get('StageNo',position)}")
