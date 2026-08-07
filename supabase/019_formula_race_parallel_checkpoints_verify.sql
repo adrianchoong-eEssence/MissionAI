@@ -11,4 +11,3 @@ begin
  if exists(select 1 from formula_race_checkpoints c join runtime_events e on e.event_id=c.event_id where c.event_id<>e.event_id) then raise exception 'Event isolation failed';end if;
 end $$;
 select exos_formula_race_checkpoint_state('EVT-0006') as checkpoint_state;
-
