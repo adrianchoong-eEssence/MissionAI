@@ -593,6 +593,28 @@ def render_programme_first_builder(db):
         modules = canonical_event_programme(
             db.get_programme_stages(event_id), event_id,
         )
+    if is_formula_race_event(event) and not any(
+        str(module.get("ModuleName", "")).casefold() == "race checkpoints"
+        for module in modules
+    ):
+        # EVT-0006 previously stored legacy Mission AI stage rows. The R.A.C.E.
+        # programme projection is product-owned; checkpoint content stays in the
+        # editable canonical checkpoint table rather than being hard-coded here.
+        modules = []
+        for module_order, (day, name, activity_names) in enumerate(available_modules, 1):
+            activities = [_new_activity(name, day, activity_name, activity_order)
+                          for activity_order, activity_name in enumerate(activity_names, 1)]
+            module_id = f"{event_id}-RACE-CHECKPOINTS" if name == "RACE Checkpoints" else f"{event_id}-RACE-MOD-{module_order:02d}"
+            for activity_order, activity in enumerate(activities, 1):
+                activity["ProgrammeID"] = f"{event_id}-PROGRAMME"
+                activity["ModuleID"] = module_id
+                activity["ActivityID"] = f"{module_id}-ACT-{activity_order:02d}"
+            modules.append({"EventID": event_id, "ProgrammeID": f"{event_id}-PROGRAMME",
+                "ModuleID": module_id, "ModuleName": name, "Day": day,
+                "ModuleOrder": module_order, "Activities": activities,
+                "ActivityCount": len(activities),
+                "DurationMinutes": sum(int(row.get("DurationMinutes", 0)) for row in activities),
+                "StartTime": activities[0].get("StartTime", "") if activities else ""})
     st.caption("Arrange the programme like slides. Open a module to edit everything inside it.")
     from engines.programme_adapter import CanonicalProgrammeAdapter
     validation = CanonicalProgrammeAdapter(event_id, db.get_programme_stages(event_id)).snapshot()
