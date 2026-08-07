@@ -18,6 +18,7 @@ from screens.app_state import select_active_event
 from screens.live_event_console import (
     calculate_leaderboard,
     format_score,
+    render_submission_details,
     render_credit_wallet_control,
     render_road_hunt_operations,
     render_review_scoring_widget,
@@ -399,13 +400,16 @@ def _render_nasi_operations(db, control, event_id, activity_id):
     submitted_metric.metric("NASI submitted", submitted)
     outstanding_metric.metric("NASI outstanding", outstanding)
     st.caption("NASI is an individual reflection. It always carries zero competitive credits.")
-    render_review_scoring_widget(
-        db,
-        event_id,
-        mission_id=activity_id,
-        control=control,
-        force_runtime_rows=True,
-    )
+    if not submissions:
+        st.info("No NASI submissions are waiting for review.")
+        return
+    for submission in submissions:
+        with st.expander(
+            f"{submission.get('ParticipantName', 'Participant')} · "
+            f"{submission.get('TeamName', '')} · {submission.get('Status', 'PENDING')}",
+            expanded=True,
+        ):
+            render_submission_details(submission)
 
 
 def show_control_centre():
