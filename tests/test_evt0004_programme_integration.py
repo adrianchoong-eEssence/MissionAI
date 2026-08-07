@@ -48,6 +48,30 @@ def test_sync_ai_link_publishes_one_resolved_live_payload():
     assert db.stage == live
 
 
+def test_new_programme_activity_uses_its_stable_id_for_runtime_compatibility():
+    stage = {
+        "EventID": "EVT-0016",
+        "StageNo": 4,
+        "StageName": "Evidence Activity",
+        "ActivityID": "EVT-0016-ACT-NEW",
+        "ModuleID": "EVT-0016-MOD-NEW",
+        "ProgrammeID": "EVT-0016-PROGRAMME",
+        "Legacy": False,
+        "FacilitatorInstruction": encode_activity_details({
+            "ActivityID": "EVT-0016-ACT-NEW",
+            "ModuleID": "EVT-0016-MOD-NEW",
+            "ProgrammeID": "EVT-0016-PROGRAMME",
+            "EvidenceRequired": True,
+        }),
+    }
+
+    payload = linked_content_stage(stage)
+
+    assert payload["ActivityID"] == "EVT-0016-ACT-NEW"
+    assert payload["MissionID"] == "EVT-0016-ACT-NEW"
+    assert payload["ProgrammeActivityID"] == "EVT-0016-ACT-NEW"
+
+
 def test_programme_and_control_surfaces_expose_linked_content_contract():
     root = Path(__file__).resolve().parents[1]
     builder = (root / "screens" / "programme_builder.py").read_text()

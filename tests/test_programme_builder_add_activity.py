@@ -1,4 +1,8 @@
-from engines.programme_hierarchy import build_programme_hierarchy, encode_module_stage_type
+from engines.programme_hierarchy import (
+    activity_details,
+    build_programme_hierarchy,
+    encode_module_stage_type,
+)
 from screens.programme_builder import _add_activity
 
 
@@ -53,6 +57,8 @@ def test_add_activity_persists_after_fresh_reload():
 
     assert activity["StageName"] == "Quick Energiser"
     assert activity["DurationMinutes"] == 10
+    assert activity["ActivityID"].startswith(f"{event_id}-ACT-")
+    assert activity["ModuleID"]
 
     reopened_modules = build_programme_hierarchy(
         db.get_programme_stages(event_id)
@@ -60,3 +66,6 @@ def test_add_activity_persists_after_fresh_reload():
     reopened_activity = reopened_modules[0]["Activities"][-1]
     assert reopened_activity["StageName"] == "Quick Energiser"
     assert reopened_activity["DurationMinutes"] == 10
+    assert reopened_activity["ActivityID"] == activity["ActivityID"]
+    assert reopened_activity["ModuleID"] == module["ModuleID"]
+    assert activity_details(reopened_activity)["ProgrammeID"] == f"{event_id}-PROGRAMME"

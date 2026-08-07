@@ -2394,6 +2394,25 @@ def show_participant():
         return
     if linked_config["ContentType"] in {"Standard Activity", "Briefing", "Break", "Debrief"}:
         render_programme_activity(hierarchy_activity)
+        details = activity_details(hierarchy_activity)
+        activity_id = str(hierarchy_activity.get("ActivityID", "") or "").strip()
+        if details["EvidenceRequired"] and activity_id:
+            programme_mission = {
+                "MissionID": activity_id,
+                "Title": hierarchy_activity.get("ParticipantDisplayName", "Activity"),
+                "Description": hierarchy_activity.get("ParticipantTask", ""),
+                "ParticipantInstructions": hierarchy_activity.get("ParticipantTask", ""),
+                "SubmissionType": hierarchy_activity.get("SubmissionType", "PHOTO"),
+                "Points": details["Credits"],
+            }
+            submission_type = normalise_submission_type(programme_mission)
+            existing_submission = find_existing_submission(
+                db, programme_mission, submission_type,
+            )
+            if existing_submission:
+                render_existing_submission(existing_submission)
+            elif render_team_leader_submission_gate(db):
+                render_submission_form(db, programme_mission, submission_type)
         footer()
         return
 

@@ -477,6 +477,8 @@ def _add_activity(db, event_id, modules, module, name, minutes):
         module["Day"],
         clean_name,
         len(module["Activities"]) + 1,
+        event_id=event_id,
+        module_id=module.get("ModuleID", ""),
     )
     activity["DurationMinutes"] = int(minutes)
     module["Activities"].append(activity)
@@ -499,7 +501,7 @@ DEFAULT_MODULES = [
 ]
 
 
-def _new_activity(module_name, day, name, order):
+def _new_activity(module_name, day, name, order, *, event_id="", module_id=""):
     activity_type = {
         "Briefing": "Briefing", "Mission Board": "Activity",
         "Missions": "Mission", "Marketplace": "Marketplace",
@@ -510,7 +512,9 @@ def _new_activity(module_name, day, name, order):
         "Closing": "Closing", "Programme Closing": "Closing",
         "Arrival & Registration": "Registration", "Energiser": "Energiser",
     }.get(name, "Activity")
-    return {
+    clean_event_id = str(event_id or "").strip()
+    clean_module_id = str(module_id or "").strip()
+    activity = {
         "StageNo": order,
         "StartTime": "09:00",
         "DurationMinutes": 15,
@@ -526,6 +530,24 @@ def _new_activity(module_name, day, name, order):
         }),
         "IsActive": "Yes",
     }
+    if clean_event_id:
+        programme_id = f"{clean_event_id}-PROGRAMME"
+        activity["ProgrammeID"] = programme_id
+        activity["ModuleID"] = clean_module_id
+        activity_id = (
+            f"{clean_event_id}-ACT-{uuid.uuid4().hex[:12].upper()}"
+        )
+        activity["ActivityID"] = activity_id
+        details = activity_details(activity)
+        details.update({
+            "ProgrammeID": programme_id,
+            "ModuleID": clean_module_id,
+            "ActivityID": activity_id,
+            "AdminDisplayName": name,
+            "ParticipantDisplayName": name,
+        })
+        activity["FacilitatorInstruction"] = encode_activity_details(details)
+    return activity
 
 
 def render_race_checkpoint_editor(db, event_id, module):
@@ -723,12 +745,17 @@ def render_programme_first_builder(db):
                 [f"DAY {day} — {name}" for day, name, _ in available_modules].index(module_choice)
             ]
             day, name, activities = selected
+        module_id = f"{event_id}-MOD-{uuid.uuid4().hex[:12].upper()}"
         module = {
-            "ModuleID": f"new-{len(modules)}-{name}",
+            "ModuleID": module_id,
             "ModuleName": name,
             "Day": day,
             "Activities": [
-                _new_activity(name, day, activity, len(modules) + position)
+                _new_activity(
+                    name, day, activity, len(modules) + position,
+                    event_id=event_id,
+                    module_id=module_id,
+                )
                 for position, activity in enumerate(activities, start=1)
             ],
         }
@@ -752,12 +779,16 @@ def render_programme_first_builder(db):
         for default_day, default_name, default_activities in available_modules:
             if default_name.casefold() in existing_names:
                 continue
+            module_id = f"{event_id}-MOD-{uuid.uuid4().hex[:12].upper()}"
             modules.append({
-                "ModuleID": f"default-{default_day}-{default_name}",
+                "ModuleID": module_id,
                 "ModuleName": default_name,
                 "Day": default_day,
                 "Activities": [
-                    _new_activity(default_name, default_day, activity, position)
+                    _new_activity(
+                        default_name, default_day, activity, position,
+                        event_id=event_id, module_id=module_id,
+                    )
                     for position, activity in enumerate(default_activities, start=1)
                 ],
             })
@@ -1047,7 +1078,8 @@ def render_programme_first_builder(db):
                         )
                         if not match:
                             match = _new_activity(
-                                module["ModuleName"], module["Day"], str(row["Name"]), 1
+                                module["ModuleName"], module["Day"], str(row["Name"]), 1,
+                                event_id=event_id, module_id=module.get("ModuleID", ""),
                             )
                         item = dict(match)
                         item.update({
@@ -1250,6 +1282,7 @@ def render_programme_first_builder(db):
                                 label for identifier, label in content_choices
                                 if identifier == linked_content
                             ),
+                            "ProgrammeID": f"{event_id}-PROGRAMME",
                             "ActivityID": selected_activity.get("ActivityID", ""),
                             "ModuleID": module.get("ModuleID", ""),
                             "AdminDisplayName": activity_name.strip() or "Untitled Activity",

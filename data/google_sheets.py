@@ -3257,6 +3257,7 @@ class GoogleSheetsDB:
         })
         if (
                 str(mission_id).strip()
+                and not str(runtime_stage.get("ProgrammeActivityID", "")).strip()
                 and not self.runtime.has_event_mission(
                     event_id,
                     mission_id,

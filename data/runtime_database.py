@@ -331,9 +331,9 @@ class SupabaseRuntimeDB:
             query={
                 "event_id": f"eq.{str(event_id).strip()}",
                 "select": (
-                    "event_id,current_stage_no,stage_state,stage_name,"
-                    "current_mission_id,display_mode,state_version,"
-                    "state_updated_at"
+                "event_id,current_stage_no,stage_state,stage_name,"
+                "current_mission_id,display_mode,state_version,"
+                "state_updated_at,stage_payload"
                 ),
                 "limit": "1",
             },
@@ -352,6 +352,7 @@ class SupabaseRuntimeDB:
             "DisplayMode": row.get("display_mode", "Hybrid"),
             "StateVersion": row.get("state_version", 0),
             "LastUpdated": row.get("state_updated_at", ""),
+            "Stage": dict(row.get("stage_payload", {}) or {}),
         }
 
     def has_event_mission(self, event_id, mission_id):

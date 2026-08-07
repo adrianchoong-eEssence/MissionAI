@@ -34,6 +34,7 @@ class RuntimeProgrammeTests(unittest.TestCase):
                     "display_mode": "Current Mission",
                     "state_version": 7,
                     "state_updated_at": "2026-07-15T01:00:00Z",
+                    "stage_payload": {"ActivityID": "ACT-001"},
                 }]
             if path == "runtime_missions":
                 return [{"mission_id": "M01"}]
@@ -159,9 +160,11 @@ class RuntimeProgrammeTests(unittest.TestCase):
         self.assertEqual(result["CurrentStageNo"], 4)
         self.assertEqual(result["MissionID"], "M01")
         self.assertEqual(result["StateVersion"], 7)
+        self.assertEqual(result["Stage"]["ActivityID"], "ACT-001")
         call = runtime.calls[0]
         self.assertEqual(call["path"], "runtime_events")
         self.assertEqual(call["query"]["event_id"], "eq.EVT-TEST")
+        self.assertIn("stage_payload", call["query"]["select"])
         self.assertTrue(call["admin"])
 
     def test_has_event_mission_checks_runtime_payload(self):

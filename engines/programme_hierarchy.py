@@ -76,6 +76,7 @@ def activity_details(stage):
             "LinkedContent": "",
             "LinkedContentID": "",
             "LinkedContentName": "",
+            "ProgrammeID": "",
             "ActivityID": "",
             "ModuleID": "",
             "AdminDisplayName": "",
@@ -104,6 +105,7 @@ def activity_details(stage):
         "LinkedContent": str(value.get("LinkedContent", "")),
         "LinkedContentID": str(value.get("LinkedContentID", "")),
         "LinkedContentName": str(value.get("LinkedContentName", "")),
+        "ProgrammeID": str(value.get("ProgrammeID", "")),
         "ActivityID": str(value.get("ActivityID", "")),
         "ModuleID": str(value.get("ModuleID", "")),
         "AdminDisplayName": str(value.get("AdminDisplayName", "")),
@@ -238,6 +240,16 @@ def linked_content_stage(stage, module=None, experience_count=0):
     payload = deepcopy(stage or {})
     config = activity_content_config(payload, module)
     payload.update(config)
+    # Programme Builder owns canonical activities in ProgrammeStages. The
+    # participant runtime still addresses a live submission by MissionID, so a
+    # modern activity without a separately linked mission is exposed under its
+    # durable ActivityID. The explicit marker prevents legacy mission publish
+    # logic from treating this activity as a missing Google Sheets Mission.
+    activity_id = str(payload.get("ActivityID", "") or "").strip()
+    mission_id = str(payload.get("MissionID", "") or "").strip()
+    if activity_id and not mission_id and not payload.get("Legacy"):
+        payload["MissionID"] = activity_id
+        payload["ProgrammeActivityID"] = activity_id
     if config["ContentType"] == "Experience Board":
         payload.update({
             "ModuleType": "Experience Set",
