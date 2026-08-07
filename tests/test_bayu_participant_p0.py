@@ -227,7 +227,8 @@ def test_required_bayu_participant_copy_and_history_fix_are_present():
     assert "render_media_evidence_form(db, mission, \"AUDIO\")" in source
     assert "render_multiple_evidence_form(db, mission)" in source
     assert "📤 Submit Evidence" in source
-    assert "if join_event and not is_bayu_join:" in source
+    assert "country_options" not in source
+    assert "select your country" not in source
     assert "Enter a valid Join Code first" not in source
     assert "Only your Team Leader can submit evidence for the team." in source
     assert "check #" not in source

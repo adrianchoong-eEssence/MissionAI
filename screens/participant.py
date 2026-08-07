@@ -112,6 +112,18 @@ def participant_event_by_code(join_code):
     return get_runtime_database().get_event_by_join_code(join_code)
 
 
+def normalise_join_code(value):
+    """Accept human-entered spacing without changing the join-code contract."""
+    return "".join(str(value or "").upper().split())
+
+
+def normalise_join_name(first_name, last_name):
+    """Preserve a participant's chosen casing while collapsing accidental spacing."""
+    return " ".join(
+        " ".join([str(first_name or ""), str(last_name or "")]).split()
+    )
+
+
 def reset_session():
     for key in SESSION_KEYS:
         st.session_state.pop(key, None)
@@ -2114,19 +2126,30 @@ def show_participant():
 
     candidate = st.session_state.get("participant_recovery_candidate")
     if candidate:
-        experience_header("Mission AI")
+        experience_header(experience_title({
+            "EventName": candidate.get("EventName", ""),
+            "ProgrammeType": candidate.get("ProgrammeType", ""),
+        }, fallback="EXOS Experience"))
         render_recovery_candidate(candidate)
 
     if "participant_event_id" in st.session_state:
         persist_session_in_query_params()
 
     if "participant_event_id" not in st.session_state:
-        experience_header("Mission AI")
+        known_join_code = normalise_join_code(
+            st.session_state.get("participant_join_code", "")
+        )
+        known_event = (
+            participant_event_by_code(known_join_code) if known_join_code else None
+        )
+        experience_header(experience_title(known_event, fallback="EXOS Experience"))
         device_id = participant_device_id()
         pending = st.session_state.get("participant_join_request") or {}
 
         with st.form("participant_join_form", clear_on_submit=False):
-            join_code = st.text_input("Join Code").upper().strip()
+            join_code = normalise_join_code(st.text_input(
+                "Join Code", key="participant_join_code",
+            ))
             first_name = st.text_input("First / Given Name")
             last_name = st.text_input("Last / Family Name")
             submitted = st.form_submit_button(
@@ -2143,32 +2166,15 @@ def show_participant():
         join_event = (
             participant_event_by_code(join_code) if join_code else None
         )
-        country_options = []
         is_formula_race_join = is_formula_race_event(join_event)
         is_bayu_join = bool(
             join_event
             and str(join_event.get("EventID", "")) == "EVT-0004"
         )
         db = None
-        if join_event and not is_bayu_join:
-            if not is_formula_race_join:
-                db = GoogleSheetsDB()
-                country_options = list(dict.fromkeys(
-                    str(team.get("Country", "")).strip()
-                    for team in db.get_teams(join_event.get("EventID", ""))
-                    if str(team.get("Country", "")).strip()
-                ))
-        country = ""
-        if join_event and not is_bayu_join:
-            if not is_formula_race_join:
-                country = st.selectbox(
-                    "Country",
-                    country_options,
-                )
-        elif is_bayu_join:
-            st.info("Your country will be assigned automatically when you join.")
-        elif is_formula_race_join:
+        if is_formula_race_join:
             st.info("Your pre-assigned Formula R.A.C.E. team will open automatically.")
+        st.caption("Already registered? Use Check Existing Registration to reconnect.")
 
         if submitted and not pending:
             if not join_code:
@@ -2180,22 +2186,15 @@ def show_participant():
             if not last_name.strip():
                 st.warning("Enter your last / family name")
                 st.stop()
-            if not is_bayu_join and not is_formula_race_join and not country_options:
-                st.warning("Enter a valid Join Code and select your country.")
-                st.stop()
-
-            participant_name = " ".join(
-                " ".join([first_name, last_name]).split()
-            )
+            participant_name = normalise_join_name(first_name, last_name)
             st.session_state["participant_join_request"] = {
                 "join_code": join_code,
                 "participant_name": participant_name,
-                "country": country,
                 "device_id": device_id,
                 "is_bayu": is_bayu_join,
                 "is_formula_race": is_formula_race_join,
-                "first_name": first_name.strip(),
-                "last_name": last_name.strip(),
+                "first_name": " ".join(first_name.split()),
+                "last_name": " ".join(last_name.split()),
             }
             st.rerun()
 
@@ -2225,7 +2224,6 @@ def show_participant():
                     player = db.join_player_by_code(
                         pending["join_code"],
                         pending["participant_name"],
-                        country=pending.get("country", ""),
                         device_id=pending["device_id"],
                     )
             except RuntimeDatabaseError as error:
@@ -2257,7 +2255,9 @@ def show_participant():
             db = db or GoogleSheetsDB()
             ai = db.assign_ai_facilitator(player["Team"]) or {}
 
-            restore_participant_identity(player, fallback_country=country)
+            if player.get("Rejoined"):
+                st.info("Existing registration found. Reconnecting you to your original team.")
+            restore_participant_identity(player)
             apply_participant_ai_identity(ai, player["EventID"])
             st.session_state.pop("participant_join_request", None)
             persist_session_in_query_params()
@@ -2267,9 +2267,7 @@ def show_participant():
             if not join_code or not first_name.strip() or not last_name.strip():
                 st.warning("Enter your Join Code, first name and last name first.")
                 st.stop()
-            participant_name = " ".join(
-                " ".join([first_name, last_name]).split()
-            )
+            participant_name = normalise_join_name(first_name, last_name)
             try:
                 player = runtime.restore_join(
                     join_code, participant_name, device_id,
