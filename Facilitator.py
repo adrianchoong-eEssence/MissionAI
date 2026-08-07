@@ -12,6 +12,22 @@ configure_page(layout="wide")
 apply_branding()
 
 db = GoogleSheetsDB()
+requested_event_id = str(st.query_params.get("event_id", "")).strip()
+requested_event = db.get_event(requested_event_id) if requested_event_id else {}
+requested_name = str((requested_event or {}).get("EventName", "")).upper().replace(".", "")
+requested_client = str((requested_event or {}).get("Client", "")).upper().replace("’", "'")
+requested_is_race = (
+    "FORMULA RACE" in requested_name
+    or str((requested_event or {}).get("IdentityPolicy", "")).upper() == "PREASSIGNED_ONLY"
+    or (requested_name.strip() == "RACE" and requested_client.strip() in {"LOREAL", "L'OREAL"})
+)
+
+if requested_is_race:
+    st.session_state[ACTIVE_EVENT_KEY] = requested_event_id
+    show_formula_race(db=db, event_id=requested_event_id)
+    footer()
+    st.stop()
+
 mode = st.sidebar.radio(
     "Facilitator mode",
     ["Event Control", "Formula R.A.C.E."],
@@ -21,7 +37,6 @@ mode = st.sidebar.radio(
 if mode == "Event Control":
     # The standard Control Centre is the authoritative operational surface for
     # every non-RACE event.  Keep Formula R.A.C.E. in its dedicated shell below.
-    requested_event_id = str(st.query_params.get("event_id", "")).strip()
     if requested_event_id:
         st.session_state[ACTIVE_EVENT_KEY] = requested_event_id
     show_control_centre()
