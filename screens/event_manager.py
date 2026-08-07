@@ -106,16 +106,10 @@ def show_event_manager():
 
             db.create_teams(event_id, int(number_of_teams))
 
-            runtime_message = ""
-            if db.runtime_status()["PublishReady"]:
-                try:
-                    _runtime_publish_read_only(
-                        event_id,
-                        reset_registration=True,
-                    )
-                    runtime_message = "Transactional registration published."
-                except Exception as error:
-                    runtime_message = f"Runtime publish needs attention: {error}"
+            runtime_message = (
+                "Event configuration is saved. Activate the non-destructive "
+                "registration runtime from Control Centre before participants join."
+            )
 
             st.success("Event Created Successfully!")
             col1, col2, col3 = st.columns(3)
