@@ -21,7 +21,7 @@ begin
  if not exists(select 1 from public.runtime_teams where event_id=trim(p_event_id) and team_id=trim(p_team_id))
  then raise exception 'Team does not exist in this event'; end if;
  insert into public.formula_race_team_access(event_id,team_id,pin_hash,updated_by)
- values(trim(p_event_id),trim(p_team_id),crypt(trim(p_pin),gen_salt('bf')),trim(p_actor))
+ values(trim(p_event_id),trim(p_team_id),extensions.crypt(trim(p_pin),extensions.gen_salt('bf')),trim(p_actor))
  on conflict(event_id,team_id) do update set pin_hash=excluded.pin_hash,
  active_device_id=null,active_session_token=null,connected_at=null,last_seen_at=null,
  updated_at=now(),updated_by=excluded.updated_by;
@@ -38,7 +38,7 @@ begin
  select * into t from public.runtime_teams where event_id=e.event_id and team_id=trim(p_team_id) for update;
  if not found then raise exception 'Selected team is not available for this event'; end if;
  select * into a from public.formula_race_team_access where event_id=e.event_id and team_id=t.team_id for update;
- if not found or crypt(trim(p_pin),a.pin_hash)<>a.pin_hash then raise exception 'Incorrect team PIN'; end if;
+ if not found or extensions.crypt(trim(p_pin),a.pin_hash)<>a.pin_hash then raise exception 'Incorrect team PIN'; end if;
  if nullif(a.active_device_id,'') is not null and a.active_device_id<>trim(p_device_id)
  then raise exception 'This team already has an active captain device. Ask a facilitator to reset it.'; end if;
  token:=coalesce(a.active_session_token,gen_random_uuid());

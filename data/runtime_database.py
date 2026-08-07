@@ -622,6 +622,31 @@ class SupabaseRuntimeDB:
         })
         return self._normalise_result(result)
 
+    def formula_race_captain_workspace(self, session_token, device_id):
+        result = self._request("POST", "rpc/exos_formula_race_captain_workspace", payload={
+            "p_session_token": str(session_token).strip(),
+            "p_device_id": str(device_id).strip(),
+        })
+        return self._normalise_result(result) or {}
+
+    def formula_race_captain_logout(self, session_token, device_id):
+        result = self._request("POST", "rpc/exos_formula_race_captain_logout", payload={
+            "p_session_token": str(session_token).strip(),
+            "p_device_id": str(device_id).strip(),
+        })
+        return self._normalise_result(result) or {}
+
+    def formula_race_purchase(self, session_token, device_id, item_id, quantity=1,
+                              idempotency_key=""):
+        result = self._request("POST", "rpc/exos_formula_race_purchase", payload={
+            "p_session_token": str(session_token).strip(),
+            "p_device_id": str(device_id).strip(),
+            "p_item_id": str(item_id).strip().upper(),
+            "p_quantity": max(int(quantity), 1),
+            "p_idempotency_key": str(idempotency_key or uuid.uuid4()),
+        })
+        return self._normalise_result(result) or {}
+
     def formula_race_team_status(self, event_id):
         rows = self._request("POST", "rpc/exos_formula_race_team_status", payload={
             "p_event_id": str(event_id).strip(),

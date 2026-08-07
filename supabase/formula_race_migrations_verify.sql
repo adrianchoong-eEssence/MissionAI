@@ -19,7 +19,7 @@ begin
   join information_schema.table_constraints c using(constraint_catalog,constraint_schema,constraint_name,table_name)
   where k.constraint_schema='public' and c.constraint_type='FOREIGN KEY'
   and k.table_name in('formula_race_team_access','formula_race_build_status','formula_race_judging','formula_race_results')
-  group by k.table_name,k.constraint_name having array_agg(k.column_name order by k.ordinal_position)=array['event_id','team_id']) scoped_fk)<>4
+  group by k.table_name,k.constraint_name having array_agg(k.column_name::text order by k.ordinal_position)=array['event_id','team_id']::text[]) scoped_fk)<>4
  then raise exception 'Expected four composite team foreign keys';end if;
 
  foreach item in array array['formula_race_team_access_session_uidx','formula_race_team_access_event_connected_idx',

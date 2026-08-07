@@ -43,16 +43,38 @@ def show_formula_race_captain():
         return
     db=GoogleSheetsDB()
     event_id=str(session.get("EventID",""));team_id=str(session.get("TeamID",""));name=str(session.get("TeamName",""))
+    try:workspace=runtime.formula_race_captain_workspace(session.get("SessionToken",""),device)
+    except RuntimeDatabaseError as error:
+        st.error(str(error));return
     asset=ASSET_ROOT/TEAM_ASSETS.get(name,"")
     if asset.is_file():st.image(str(asset),width=96)
     st.title(name);st.caption(f"{event_id} · {team_id}")
-    missions=db.get_event_missions(event_id)
+    missions=list(workspace.get("Missions",[])) or db.get_event_missions(event_id)
     submissions=[r for r in db.get_event_submissions(event_id) if str(r.get("TeamID",""))==team_id]
     approved=sum(str(r.get("Status","")).upper() in {"APPROVED","AWARDED"} for r in submissions)
-    a,b,c=st.columns(3);a.metric("Missions",f"{approved} / {len(missions)}");b.metric("Build status","Not Started" if not approved else "Building");c.metric("Wallet","Canonical ledger")
+    wallet=dict(workspace.get("Wallet",{}));build=dict(workspace.get("BuildStatus",{}))
+    a,b,c=st.columns(3);a.metric("Missions",f"{approved} / {len(missions)}");b.metric("Build status",build.get("status","Not Started"));c.metric("Wallet",wallet.get("Balance",0))
     one,two,three=st.tabs(["Missions","Wallet & Marketplace","Submissions"])
     with one:st.dataframe(missions,width="stretch",hide_index=True)
-    with two:st.info("Wallet and purchases are scoped to this EventID and TeamID.")
+    with two:
+        st.caption("All wallet and marketplace activity is scoped to this EventID and TeamID.")
+        items=list(workspace.get("Marketplace",[]))
+        if not items:st.info("Marketplace is not open yet.")
+        else:
+            labels={f"{item.get('ItemName')} · {item.get('CreditCost')} Credits · {item.get('StockQuantity')} available":item for item in items}
+            with st.form("race_marketplace_purchase"):
+                selected=st.selectbox("Material",list(labels));quantity=st.number_input("Quantity",1,20,1)
+                buy=st.form_submit_button("Confirm Purchase",type="primary",width="stretch")
+            if buy:
+                try:
+                    result=runtime.formula_race_purchase(session.get("SessionToken",""),device,
+                        labels[selected].get("ItemID",""),quantity,str(uuid.uuid4()))
+                    st.success(f"Purchase confirmed. Balance: {result.get('Balance',0)} Credits");st.rerun()
+                except RuntimeDatabaseError as error:st.error(str(error))
+        purchases=list(workspace.get("Purchases",[]))
+        if purchases:st.dataframe(purchases,width="stretch",hide_index=True)
     with three:st.dataframe(submissions,width="stretch",hide_index=True)
     if st.button("Log out",width="stretch"):
+        try:runtime.formula_race_captain_logout(session.get("SessionToken",""),device)
+        except RuntimeDatabaseError:pass
         st.session_state.pop("race_captain",None);st.query_params.clear();st.rerun()
