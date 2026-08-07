@@ -41,7 +41,7 @@ create or replace function public.exos_join_event_v2(
     p_device_id text,
     p_requested_team_id text default ''
 )
-returns jsonb language plpgsql security definer set search_path=public as $$
+returns jsonb language plpgsql security definer set search_path=public, extensions as $$
 declare
     v_event public.runtime_events%rowtype;
     v_participant public.runtime_participants%rowtype;
