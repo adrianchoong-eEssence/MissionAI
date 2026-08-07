@@ -660,9 +660,18 @@ def render_programme_first_builder(db):
             summary = duplication_summary(source_stages)
             st.write(f"{summary['ModuleCount']} modules · {summary['ActivityCount']} activities")
             st.caption("Modules: " + ", ".join(summary["Modules"]))
-            confirmed = st.checkbox(
-                "I confirm this replaces the destination programme configuration only. No participants, teams, submissions, scores, wallets, transactions, judging, results, sessions, or runtime state will be copied.",
+            confirmation = st.selectbox(
+                "Safety confirmation",
+                [
+                    "Not confirmed",
+                    "Confirmed — replace destination configuration only",
+                ],
                 key=f"duplicate_confirm_{event_id}",
+            )
+            confirmed = confirmation.startswith("Confirmed")
+            st.caption(
+                "No participants, teams, submissions, scores, wallets, transactions, "
+                "judging, results, sessions, or runtime state will be copied."
             )
             if st.button("Duplicate Programme", type="primary", disabled=not confirmed, key=f"duplicate_programme_{event_id}"):
                 result = db.duplicate_programme_configuration(source_id, event_id)
