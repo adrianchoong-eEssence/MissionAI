@@ -6,7 +6,12 @@ from engines.programme_duplication import (
     programme_family,
     templates_for_event,
 )
-from engines.programme_hierarchy import activity_details, encode_activity_details, encode_module_stage_type
+from engines.programme_hierarchy import (
+    activity_details,
+    decode_module_stage_type,
+    encode_activity_details,
+    encode_module_stage_type,
+)
 
 
 def _stage(number, module, activity, mission_id=""):
@@ -35,6 +40,7 @@ def test_clone_programme_is_destination_owned_and_preserves_configuration():
     assert cloned[0]["DisplayMode"] == "Projector"
     assert activity_details(cloned[0])["Credits"] == 100
     assert activity_details(cloned[0])["Scoring"] == "Fastest valid result"
+    assert decode_module_stage_type(cloned[0])["ModuleName"] == "Pipeline"
     assert identifiers["ActivityIDs"]["SRC-ACT-1"] == "EVT-0016-ACT-001"
     cloned[0]["StageName"] = "Destination edit"
     assert source[0]["StageName"] == "Pipeline Challenge"

@@ -3,7 +3,13 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import uuid
 
-from engines.programme_hierarchy import activity_details, decode_module_stage_type, encode_activity_details
+from engines.programme_hierarchy import (
+    activity_details,
+    decode_module_stage_type,
+    encode_activity_details,
+    encode_module_stage_type,
+    friendly_type,
+)
 
 
 GENERIC_MODULES = [
@@ -60,6 +66,11 @@ def clone_programme_stages(stages, source_event_id, destination_event_id):
         copied.update({"EventID": destination_event_id, "ProgrammeID": programme_id,
                        "ModuleID": module_ids[source_module], "ActivityID": destination_activity,
                        "StageNo": position, "IsActive": row.get("IsActive", "Yes")})
+        copied["StageType"] = encode_module_stage_type(
+            str(marker.get("ModuleName") or "Programme"),
+            int(marker.get("Day") or 1),
+            friendly_type(row),
+        )
         details.update({"ProgrammeID": programme_id, "ModuleID": module_ids[source_module],
                         "ActivityID": destination_activity})
         copied["FacilitatorInstruction"] = encode_activity_details(details)
