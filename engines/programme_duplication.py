@@ -25,6 +25,7 @@ AGILE_MODULES = [
     (1, "Key Punch", ["Key Punch", "Key Punch Results"]),
     (1, "Lunch", ["Lunch"]),
     (1, "Catalyst Challenge", ["Catalyst Challenge", "Enterprise Integration"]),
+    (1, "NASI", ["NASI"]),
     (1, "Debrief", ["Mission Reflection"]), (1, "Closing", ["Closing"]),
 ]
 

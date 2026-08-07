@@ -2394,13 +2394,23 @@ def show_participant():
         render_programme_activity(hierarchy_activity)
         details = activity_details(hierarchy_activity)
         activity_id = str(hierarchy_activity.get("ActivityID", "") or "").strip()
-        if details["EvidenceRequired"] and activity_id:
+        programme_submission_type = normalise_submission_type({
+            "Title": hierarchy_activity.get("ParticipantDisplayName", ""),
+            "Description": hierarchy_activity.get("ParticipantTask", ""),
+            "SubmissionType": hierarchy_activity.get("SubmissionType", ""),
+        })
+        if activity_id and (
+            details["EvidenceRequired"] or programme_submission_type == "NASI"
+        ):
             programme_mission = {
                 "MissionID": activity_id,
                 "Title": hierarchy_activity.get("ParticipantDisplayName", "Activity"),
                 "Description": hierarchy_activity.get("ParticipantTask", ""),
                 "ParticipantInstructions": hierarchy_activity.get("ParticipantTask", ""),
-                "SubmissionType": hierarchy_activity.get("SubmissionType", "PHOTO"),
+                "SubmissionType": (
+                    "NASI" if programme_submission_type == "NASI"
+                    else hierarchy_activity.get("SubmissionType", "PHOTO")
+                ),
                 "Points": details["Credits"],
             }
             submission_type = normalise_submission_type(programme_mission)
@@ -2409,6 +2419,8 @@ def show_participant():
             )
             if existing_submission:
                 render_existing_submission(existing_submission)
+            elif submission_type == "NASI":
+                render_submission_form(db, programme_mission, submission_type)
             elif render_team_leader_submission_gate(db):
                 render_submission_form(db, programme_mission, submission_type)
         footer()
