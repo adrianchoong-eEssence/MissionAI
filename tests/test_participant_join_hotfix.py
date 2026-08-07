@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from data.runtime_database import SupabaseRuntimeDB
 from screens.participant import normalise_join_code, normalise_join_name
 
 
@@ -33,3 +34,32 @@ def test_prejoin_title_uses_resolved_event_instead_of_fixed_mission_ai():
     prejoin = prejoin.split("db = GoogleSheetsDB()", 1)[0]
     assert 'experience_title(known_event, fallback="EXOS Experience")' in prejoin
     assert 'experience_header("Mission AI")' not in prejoin
+
+
+def test_join_and_reconnect_keep_the_runtime_assigned_country_and_team():
+    runtime = SupabaseRuntimeDB.__new__(SupabaseRuntimeDB)
+    calls = []
+    assigned = {
+        "ParticipantID": "P-1", "EventID": "EVT-AGILE", "Name": "Ada Tan",
+        "TeamID": "TEAM-MY", "Team": "Malaysia", "Country": "Malaysia",
+        "Flag": "🇲🇾", "SessionToken": "session-1",
+    }
+
+    def request(method, path, payload=None, **_):
+        calls.append((method, path, payload))
+        return [assigned]
+
+    runtime._request = request
+    first = runtime.join_player(" agile 01 ", "Ada Tan", "device-a")
+    reconnect = runtime.join_player("AGILE01", "  ADA   TAN ", "device-b")
+
+    assert first["TeamID"] == reconnect["TeamID"] == "TEAM-MY"
+    assert first["Country"] == reconnect["Country"] == "Malaysia"
+    assert all(call[2]["p_requested_team_id"] == "" for call in calls)
+    assert all(call[1] == "rpc/exos_join_event_v2" for call in calls)
+
+
+def test_participant_team_card_displays_assigned_country_after_join():
+    assert 'st.markdown("#### Team Members")' in SOURCE
+    assert "Your Team" in SOURCE
+    assert 'st.session_state["participant_country"]' in SOURCE
