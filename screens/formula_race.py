@@ -91,10 +91,13 @@ def overview(s):
 
 
 def live_programme(s):
-    _title("Day One / Programme Journey", "Build It. Race It. Win It.", "Seven gated checkpoints move every team from briefing to championship.")
-    stages=[("01","Design Brief",100),("02","Concept & Roles",100),("03","Skeleton Build",100),("04","Chassis Construction",63),("05","Finishing Touches",0),("06","Drag Race",0),("07","Debrief & Celebrate",0)]
+    _title("Formula R.A.C.E. / Programme Journey", "Build It. Race It. Win It.", "RACE Checkpoints is one module containing four concurrent activities.")
+    checkpoint_state=s.operations.get("Checkpoints",{})
+    checkpoint_pct=100*sum(x.status.upper()=="APPROVED" for x in s.submissions)/(max(len(s.teams)*4,1))
+    stages=[("01","Launch EXOS",100),("02","RACE Checkpoints",checkpoint_pct),("03","Marketplace / Spend Credits",0),("04","Build",0),("05","Team Photo",0),("06","Drag Race",0),("07","Judging",0),("08","Championship",0)]
     for no,name,p in stages:
-        c1,c2,c3=st.columns([.7,4,1.2]); c1.markdown(f"<span class='rank'>{no}</span>",unsafe_allow_html=True); c2.markdown(f"### {name}"); c2.progress(p/100); c3.markdown("<span class='status'>ACTIVE</span>" if p not in (0,100) else ("✓ COMPLETE" if p==100 else "LOCKED"),unsafe_allow_html=True)
+        live=name=="RACE Checkpoints" and str(checkpoint_state.get("Status","")).upper()=="LIVE"
+        c1,c2,c3=st.columns([.7,4,1.2]); c1.markdown(f"<span class='rank'>{no}</span>",unsafe_allow_html=True); c2.markdown(f"### {name}"); c2.progress(min(float(p)/100,1.0)); c3.markdown("<span class='status'>ACTIVE</span>" if live else ("✓ COMPLETE" if p==100 else "READY"),unsafe_allow_html=True)
     if st.button("Open active checkpoint",type="primary",width="stretch"): st.session_state.race_nav="Checkpoints"; st.rerun()
 
 
@@ -129,23 +132,38 @@ def wallet(s):
 
 
 def checkpoints(s):
-    _title("Checkpoint Control", "Live Programme Control", "Select a checkpoint to inspect status and telemetry. Runtime changes live only in Control Centre.")
-    cp=st.selectbox("Select checkpoint",["CP1 · Design","CP2 · Roles","CP3 · Skeleton","CP4 · Chassis","CP5 · Finish","CP6 · Race","CP7 · Debrief"],index=3)
-    a,b,c=st.columns(3); a.metric("Teams complete","3 / 6"); b.metric("Average duration","18:32"); c.metric("Evidence received","9 files")
-    st.subheader("Team Telemetry")
-    st.dataframe([{"Team":t.name,"Checkpoint":cp,"Progress":f"{min(100,t.build+8)}%","Last signal":f"{t.rank+1} min ago"} for t in s.teams],width="stretch",hide_index=True)
+    _title("Parallel Activity Set", "RACE Checkpoints", "All four remain available concurrently until the module is closed.")
+    definitions=s.operations.get("Checkpoints",{}).get("Checkpoints",[])
+    approved={(x.team_id,x.checkpoint) for x in s.submissions if x.status.upper()=="APPROVED"}
+    pending=sum(x.status.upper() in {"PENDING","PENDING_REVIEW"} for x in s.submissions)
+    rows=[]
+    for team in s.teams:
+        complete=sum(any(team.id==team_id and (str(cp.get("Name",""))==checkpoint or str(cp.get("ActivityID",""))==checkpoint) for team_id,checkpoint in approved) for cp in definitions)
+        rows.append({"Team":team.name,"Completed":f"{complete}/4","Pending Reviews":sum(x.team_id==team.id and x.status.upper() in {"PENDING","PENDING_REVIEW"} for x in s.submissions),"Credits":team.balance})
+    leader=max(rows,key=lambda row:row["Credits"])["Team"] if rows else "—"
+    a,b,c=st.columns(3);a.metric("Teams",len(s.teams));b.metric("Pending reviews",pending);c.metric("Current leader",leader)
+    st.dataframe(rows,width="stretch",hide_index=True)
     if st.button("Open Control Centre",type="primary",width="stretch"): st.session_state.race_nav="Control Centre"; st.rerun()
 
 
-def reviews(s):
-    _title("Submission and Award Pipeline", "Review Queue", "Decisions shown here are UAT-only until a canonical submission ID and reviewer identity are available.")
+def reviews(s, control=None):
+    _title("Submission and Award Pipeline", "RACE Review Queue", "Approve through the canonical review and CreditTransaction pipeline.")
     for x in s.submissions:
         with st.container(border=True):
             c1,c2=st.columns([4,1]); c1.markdown(f"### {x.checkpoint}\n{x.team_id} · {x.evidence} · submitted {x.submitted_at}"); c2.markdown(f"**{x.status}**")
+            actor=st.text_input("Facilitator identity",key=f"review_actor_{x.id}") if control else ""
+            notes=st.text_input("Notes / rejection reason",key=f"review_notes_{x.id}") if control else ""
+            pending=x.status.upper() in {"PENDING","PENDING_REVIEW","SUBMITTED"}
+            def decide(decision):
+                control.review_race_checkpoint(x.id,decision,actor,notes,notes,f"{x.id}:{decision}")
+                st.success("Review saved and projections updated.");st.rerun()
             a,b,c=st.columns(3)
-            if a.button("Award",key=f"award_{x.id}",disabled=x.status!="PENDING"): st.toast(f"Demo decision recorded locally for {x.id}")
-            if b.button("Request revision",key=f"revise_{x.id}",disabled=x.status!="PENDING"): st.toast(f"Demo revision requested for {x.id}")
-            if c.button("Reject",key=f"reject_{x.id}",disabled=x.status!="PENDING"): st.toast(f"Demo rejection recorded locally for {x.id}")
+            if a.button("APPROVE",key=f"award_{x.id}",disabled=not pending or bool(control and not actor)):
+                decide("APPROVE") if control else st.toast(f"Demo approval for {x.id}")
+            if b.button("REQUEST RESUBMISSION",key=f"revise_{x.id}",disabled=not pending or bool(control and not actor)):
+                decide("REQUEST_RESUBMISSION") if control else st.toast(f"Demo revision for {x.id}")
+            if c.button("REJECT",key=f"reject_{x.id}",disabled=not pending or bool(control and not actor)):
+                decide("REJECT") if control else st.toast(f"Demo rejection for {x.id}")
     if st.button("Open team photo gallery",width="stretch"): st.session_state.race_subscreen="gallery"; st.rerun()
 
 
@@ -230,16 +248,25 @@ def build_status(s, control=None):
             selected=next(t for t in s.teams if t.name==team);control.set_race_build_status(s.event_id,selected.id,status,{},reason,actor);st.success("Build status saved and audited.")
 
 
-def control_centre(s):
+def control_centre(s, control=None):
     _title("Canonical Runtime Facade", "Race Control Centre", "Operational controls are arranged for tablet use. Demo mode never mutates EXOS runtime.")
-    checkpoint=st.selectbox("Select checkpoint",["CP3 · Skeleton","CP4 · Chassis","CP5 · Finish"],index=1)
-    st.caption(f"Selected: {checkpoint} · source {s.source}")
+    checkpoint_state=s.operations.get("Checkpoints",{})
+    module_id=str(checkpoint_state.get("ModuleID",f"{s.event_id}-RACE-CHECKPOINTS"))
+    checkpoint=st.selectbox("RACE checkpoint module",["RACE Checkpoints"])
+    st.caption(f"Selected: {checkpoint} · {checkpoint_state.get('Status','READY')} · four parallel activities")
     def action(label,key,kind="secondary"):
         if st.button(label,key=key,type=kind,width="stretch"): st.toast(f"DEMO ONLY · {label} acknowledged locally")
-    a,b,c=st.columns(3); 
-    with a: action("Launch checkpoint","launch","primary")
-    with b: action("Close checkpoint","close")
-    with c: action("Pause race","pause")
+    actor=st.text_input("Facilitator identity",key="race_control_actor") if control else ""
+    def runtime_action(label,action_name,key,kind="secondary"):
+        if st.button(label,key=key,type=kind,width="stretch",disabled=bool(control and not actor)):
+            if control:
+                control.set_race_checkpoint_runtime(s.event_id,module_id,action_name,actor)
+                st.success(f"{label} complete.");st.rerun()
+            else: st.toast(f"DEMO ONLY · {label}")
+    a,b,c=st.columns(3)
+    with a: runtime_action("LAUNCH CHECKPOINTS","LAUNCH","launch","primary")
+    with b: runtime_action("PAUSE CHECKPOINTS","PAUSE","pause")
+    with c: runtime_action("CLOSE CHECKPOINTS","CLOSE","close")
     a,b,c=st.columns(3)
     with a: action("Resume race","resume")
     with b: action("Review submissions","review")
@@ -251,7 +278,7 @@ def control_centre(s):
     with t1: st.text_input("Participant ID"); action("Recover participant","recover_participant")
     with t2: st.selectbox("Team",[t.name for t in s.teams],key="leader_team"); action("Recover leader","recover_leader")
     with t3: st.selectbox("Adjust team",[t.name for t in s.teams],key="adjust_team"); st.number_input("Credit adjustment",-500,500,0); st.text_input("Required reason"); action("Prepare adjustment","adjust_credit")
-    st.warning("DEMO DATA · Live controls will call data.control_runtime.ControlRuntime only after canonical event, identity and authority checks pass.")
+    if not control: st.warning("DEMO DATA · No live mutation is performed.")
 
 
 def show_formula_race(db=None, event_id=""):
@@ -275,7 +302,7 @@ def show_formula_race(db=None, event_id=""):
         checkpoints(snapshot) if view=="Checkpoint Control" else build_status(snapshot,control)
     elif page=="Reviews":
         view=st.radio("Review view",["Review Queue","Photo Gallery","Judging"],horizontal=True,label_visibility="collapsed")
-        reviews(snapshot) if view=="Review Queue" else (gallery(snapshot) if view=="Photo Gallery" else judging(snapshot,control))
+        reviews(snapshot,control) if view=="Review Queue" else (gallery(snapshot) if view=="Photo Gallery" else judging(snapshot,control))
     elif page=="Marketplace":
         if snapshot.is_demo: marketplace(snapshot)
         else:
@@ -284,5 +311,4 @@ def show_formula_race(db=None, event_id=""):
             st.dataframe([x.__dict__ for x in snapshot.transactions if x.kind in {"SPEND", "REFUND"}], width="stretch", hide_index=True)
     elif page=="Race Map": race_map(snapshot)
     else:
-        if snapshot.is_demo: control_centre(snapshot)
-        else: st.info("Use the Race Control workspace above for canonical live mutations.")
+        control_centre(snapshot,control)

@@ -24,6 +24,7 @@ CONTENT_HANDLERS = {
     "Sync AI": "sync_ai",
     "Catalyst": "catalyst",
     "Marketplace": "marketplace",
+    "RACE Checkpoints": "race_checkpoints",
     "Judging": "judging",
     "Debrief": "debrief",
     "Custom configured content": "custom",
@@ -93,6 +94,23 @@ class ProgrammeSnapshot:
             raise ProgrammeIntegrityError(["Legacy runtime state does not resolve to one active ActivityID."])
         activity = matches[0]
         return self.module_for(activity["ActivityID"]), activity
+
+    def resolve_runtime_set(self, runtime_state):
+        """Resolve a parallel module explicitly; retain legacy single-activity rules."""
+        payload = dict((runtime_state or {}).get("Stage", {}) or runtime_state or {})
+        activity_ids = [str(value).strip() for value in payload.get("ParallelActivityIDs", []) if str(value).strip()]
+        module_id = str(payload.get("ModuleID", "")).strip()
+        if not activity_ids:
+            module, activity = self.resolve_runtime(runtime_state)
+            return module, [activity]
+        matches = [row for row in self.activities if row["ActivityID"] in activity_ids and row["Active"] and not row["Superseded"]]
+        if len(matches) != len(set(activity_ids)):
+            raise ProgrammeIntegrityError(["Parallel runtime state contains a missing or inactive ActivityID."])
+        modules = {row["ModuleID"] for row in matches}
+        if len(modules) != 1 or (module_id and module_id not in modules):
+            raise ProgrammeIntegrityError(["Parallel runtime activities must belong to one canonical ModuleID."])
+        module = next(item for item in self.modules if item["ModuleID"] in modules)
+        return module, sorted(matches, key=lambda row: (row["ActivityOrder"], row["ActivityID"]))
 
     def participant_view(self, runtime_state):
         module, activity = self.resolve_runtime(runtime_state)

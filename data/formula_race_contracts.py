@@ -121,13 +121,19 @@ class LiveFormulaRaceProvider:
         if not event:
             raise ValueError("Select a valid Formula R.A.C.E. event.")
         raw_teams = self.db.get_teams(event_id)
-        submissions_raw = self.db.get_event_submissions(event_id)
+        submissions_raw = (
+            self.db.runtime.get_canonical_submissions(event_id)
+            if self.db.runtime.can_publish and hasattr(self.db.runtime, "get_canonical_submissions")
+            else self.db.get_event_submissions(event_id)
+        )
         missions = self.db.get_event_missions(event_id)
         state = self.db.get_event_state(event_id) or {}
         control = self.db.get_runtime_control_state(event_id) or {}
         operations = {}
         if self.db.runtime.can_publish:
-            try: operations = self.db.runtime.get_formula_race_state(event_id) or {}
+            try:
+                operations = self.db.runtime.get_formula_race_state(event_id) or {}
+                operations["Checkpoints"] = self.db.runtime.get_formula_race_checkpoints(event_id)
             except Exception: operations = {}
         report = {}
         captain_status = {}
@@ -158,7 +164,8 @@ class LiveFormulaRaceProvider:
                 if str(item.get("TeamID", "")) == team_id
                 and str(item.get("Status", "")).upper() in {"APPROVED", "AWARDED"}
             )
-            build = round(100 * completed / max(len(missions), 1))
+            checkpoint_total = len(operations.get("Checkpoints", {}).get("Checkpoints", []))
+            build = round(100 * completed / max(checkpoint_total or len(missions), 1))
             teams.append(Team(
                 team_id, str(row.get("TeamName", team_id)), str(row.get("Country", "")),
                 "#e31b23", self._number(standing.get("Score", row.get("Score", 0))),
@@ -177,7 +184,9 @@ class LiveFormulaRaceProvider:
             str(row.get("Status", "PENDING")), str(row.get("SubmittedAt", row.get("Timestamp", ""))),
             str(row.get("StorageReference", row.get("PhotoURL", row.get("EvidenceType", "Evidence")))),
         ) for row in submissions_raw)
+        checkpoint_state = operations.get("Checkpoints", {})
         active = str(
+            "LIVE CHECKPOINTS" if str(checkpoint_state.get("Status", "")).upper() == "LIVE" else
             state.get("CurrentStageName", "") or state.get("StageName", "")
             or state.get("CurrentMissionName", "") or "Programme ready"
         )

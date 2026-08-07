@@ -3,6 +3,7 @@ from datetime import time
 from copy import deepcopy
 import html
 import json
+import uuid
 
 import pandas as pd
 import streamlit as st
@@ -24,6 +25,7 @@ from data.mahb_media_explore import (
     install_mahb_media_explore_pack,
 )
 from data.google_sheets import GoogleSheetsDB
+from data.runtime_database import RuntimeDatabaseError
 from engines.programme_engine import ProgrammeEngine
 from engines.programme_hierarchy import (
     CONTENT_TYPES,
@@ -40,6 +42,7 @@ from engines.recommendation_engine import RecommendationEngine
 from engines.transformation_engine import TransformationEngine
 from screens.app_state import request_navigation, select_active_event
 from screens.app_state import ACTIVE_EVENT_KEY
+from engines.formula_race_checkpoints import is_formula_race_event, module_templates
 
 
 def get_activity_name(activity):
@@ -518,6 +521,64 @@ def _new_activity(module_name, day, name, order):
     }
 
 
+def render_race_checkpoint_editor(db, event_id, module):
+    """Event-owned four-checkpoint editor; definitions are never hard-coded."""
+    runtime = db.runtime
+    module_id = str(module.get("ModuleID") or f"{event_id}-RACE-CHECKPOINTS")
+    try:
+        state = runtime.get_formula_race_checkpoints(event_id)
+    except RuntimeDatabaseError as error:
+        st.error(str(error)); return
+    source = list(state.get("Checkpoints", []))
+    state_key = f"race_checkpoint_editor_{event_id}_{module_id}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = source
+    rows = st.session_state[state_key]
+    st.markdown("### RACE Checkpoints")
+    st.caption("Four checkpoint activities launch concurrently. Names, proof rules and Credits belong to this event configuration.")
+    if len([row for row in rows if row.get("Active", True)]) > 4:
+        st.error("Maximum four active RACE checkpoints.")
+    for index, row in enumerate(list(rows)):
+        with st.container(border=True):
+            st.markdown(f"**{index + 1}. {row.get('Name') or 'Untitled checkpoint'}**")
+            name = st.text_input("Name", value=str(row.get("Name", "")), key=f"race_cp_name_{event_id}_{index}")
+            instructions = st.text_area("Instructions", value=str(row.get("Instructions", "")), key=f"race_cp_instructions_{event_id}_{index}")
+            credits_col, proof_col, active_col = st.columns([1, 2, 1])
+            credits = credits_col.number_input("Credits available", min_value=0, value=int(float(row.get("Credits", 0) or 0)), key=f"race_cp_credits_{event_id}_{index}")
+            proof_types = ["Photo", "Text", "Photo + Text"]
+            current_proof = str(row.get("ProofType", "Photo"))
+            proof = proof_col.selectbox("Proof type", proof_types, index=proof_types.index(current_proof) if current_proof in proof_types else 0, key=f"race_cp_proof_{event_id}_{index}")
+            active = active_col.checkbox("Active", value=bool(row.get("Active", True)), key=f"race_cp_active_{event_id}_{index}")
+            notes = st.text_area("Facilitator notes (optional)", value=str(row.get("FacilitatorNotes", "")), key=f"race_cp_notes_{event_id}_{index}")
+            row.update({"Name": name, "Instructions": instructions, "Credits": int(credits), "ProofType": proof,
+                        "FacilitatorNotes": notes, "Active": active, "Position": index + 1,
+                        "ModuleID": module_id, "EventID": event_id})
+            up, down, delete = st.columns(3)
+            if up.button("Move Up", disabled=index == 0, key=f"race_cp_up_{event_id}_{index}"):
+                rows[index - 1], rows[index] = rows[index], rows[index - 1]; st.rerun()
+            if down.button("Move Down", disabled=index == len(rows) - 1, key=f"race_cp_down_{event_id}_{index}"):
+                rows[index + 1], rows[index] = rows[index], rows[index + 1]; st.rerun()
+            if delete.button("Delete", key=f"race_cp_delete_{event_id}_{index}"):
+                rows.pop(index); st.rerun()
+    add, save = st.columns(2)
+    if add.button("＋ Add Checkpoint", disabled=len(rows) >= 4, key=f"race_cp_add_{event_id}"):
+        rows.append({"EventID": event_id, "ModuleID": module_id,
+                     "ActivityID": f"{event_id}-RACE-CP-{uuid.uuid4().hex[:8].upper()}",
+                     "Name": "", "Instructions": "", "Credits": 0, "ProofType": "Photo",
+                     "FacilitatorNotes": "", "Position": len(rows) + 1, "Active": True})
+        st.rerun()
+    if save.button("Save RACE Checkpoints", type="primary", key=f"race_cp_save_{event_id}"):
+        if len(rows) != 4 or len([row for row in rows if row.get("Active")]) != 4:
+            st.error("EVT-0006 requires exactly four configured active checkpoints.")
+        elif any(not str(row.get("Name", "")).strip() for row in rows):
+            st.error("Every checkpoint requires a name.")
+        else:
+            try:
+                runtime.save_formula_race_checkpoints(event_id, module_id, rows)
+                st.success("Four concurrent RACE checkpoints saved.")
+            except RuntimeDatabaseError as error: st.error(str(error))
+
+
 def render_programme_first_builder(db):
     """PowerPoint-like programme editor backed by existing stage storage."""
     events = db.get_events()
@@ -526,6 +587,7 @@ def render_programme_first_builder(db):
         return
     event = select_active_event(events, label="Event", key="programme_first_event")
     event_id = str(event.get("EventID", ""))
+    available_modules = module_templates(event) or DEFAULT_MODULES
     modules = st.session_state.get(f"canonical_programme_preview_{event_id}")
     if not modules:
         modules = canonical_event_programme(
@@ -546,7 +608,7 @@ def render_programme_first_builder(db):
     add_left, position_col, selected_col = st.columns([2, 1, 2])
     module_choice = add_left.selectbox(
         "Add module",
-        [f"DAY {day} — {name}" for day, name, _ in DEFAULT_MODULES] + ["Custom module"],
+        [f"DAY {day} — {name}" for day, name, _ in available_modules] + ["Custom module"],
         label_visibility="collapsed",
         key=f"add_module_choice_{event_id}",
     )
@@ -567,8 +629,8 @@ def render_programme_first_builder(db):
         if module_choice == "Custom module":
             day, name, activities = 1, "New Module", ["New Activity"]
         else:
-            selected = DEFAULT_MODULES[
-                [f"DAY {day} — {name}" for day, name, _ in DEFAULT_MODULES].index(module_choice)
+            selected = available_modules[
+                [f"DAY {day} — {name}" for day, name, _ in available_modules].index(module_choice)
             ]
             day, name, activities = selected
         module = {
@@ -597,7 +659,7 @@ def render_programme_first_builder(db):
         st.rerun()
     if defaults_col.button("Add Default Programme", width="stretch"):
         existing_names = {module["ModuleName"].casefold() for module in modules}
-        for default_day, default_name, default_activities in DEFAULT_MODULES:
+        for default_day, default_name, default_activities in available_modules:
             if default_name.casefold() in existing_names:
                 continue
             modules.append({
@@ -1140,6 +1202,9 @@ def render_programme_first_builder(db):
                         st.session_state["mission_studio_event_filter"] = event_id
                         st.session_state["mission_studio_module"] = "Mission AI"
                         request_navigation("Mission Studio")
+                elif module["ModuleName"].casefold() == "race checkpoints" and is_formula_race_event(event):
+                    st.divider()
+                    render_race_checkpoint_editor(db, event_id, module)
 
 
 def render_filtered_mission_library(db):

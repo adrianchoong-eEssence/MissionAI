@@ -130,3 +130,9 @@ class ControlRuntime:
 
     def save_race_result(self,event_id,team_id,time_ms,penalty_ms,bonus,verified,reason,actor):
         return self._run(self.runtime.save_formula_race_result,event_id,team_id,time_ms,penalty_ms,bonus,verified,reason,actor)
+
+    def set_race_checkpoint_runtime(self,event_id,module_id,action,actor):
+        return self._run(self.runtime.set_formula_race_checkpoint_runtime,event_id,module_id,action,actor)
+
+    def review_race_checkpoint(self,submission_id,decision,reviewer_id,notes="",reason="",idempotency_key=""):
+        return self._run(self.runtime.formula_race_review_checkpoint,submission_id,decision,reviewer_id,notes,reason,idempotency_key)

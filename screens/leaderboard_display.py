@@ -7,6 +7,7 @@ from data.runtime_database import RuntimeDatabaseError
 from engines.programme_hierarchy import friendly_type
 from engines.programme_adapter import CanonicalProgrammeAdapter, ProgrammeIntegrityError
 from engines.stage_timer import remaining_seconds
+from engines.formula_race_checkpoints import is_formula_race_event
 from screens.app_state import select_active_event
 from screens.projector_broadcast import (
     DEFAULT_BROADCAST,
@@ -726,6 +727,29 @@ def show_leaderboard_display():
 
     event_id = event.get("EventID")
     state = db.get_event_state(event_id) or {}
+    if is_formula_race_event(event) and db.runtime.can_publish:
+        try:
+            checkpoint_state = db.runtime.get_formula_race_checkpoints(event_id)
+        except RuntimeDatabaseError:
+            checkpoint_state = {}
+        if str(checkpoint_state.get("Status", "")).upper() in {"LIVE", "PAUSED", "CLOSED"}:
+            auto_refresh(refresh_seconds)
+            report = db.runtime.get_canonical_transaction_report(event_id)
+            submissions = report.get("Submissions", [])
+            balances = {str(row.get("team_id", "")): row for row in report.get("TeamBalances", [])}
+            rows = []
+            for team in db.get_teams(event_id):
+                team_id = str(team.get("TeamID", ""))
+                completed = len({str(row.get("ActivityID", "")) for row in submissions
+                    if str(row.get("TeamID", "")) == team_id and str(row.get("Status", "")).upper() == "APPROVED"})
+                rows.append({"Team": team.get("TeamName", team_id), "Completed": f"{completed}/4",
+                    "Credits": balances.get(team_id, {}).get("available_balance", 0)})
+            rows.sort(key=lambda row: (-float(row["Credits"] or 0), row["Team"]))
+            st.markdown("<div class='projector-header'><div class='projector-kicker'>FORMULA R.A.C.E.</div><div class='projector-event-title'>LIVE CHECKPOINTS</div></div>",unsafe_allow_html=True)
+            st.dataframe(rows,width="stretch",hide_index=True)
+            pending=sum(str(row.get("Status", "")).upper()=="PENDING_REVIEW" for row in submissions)
+            a,b=st.columns(2);a.metric("Pending Reviews",pending);b.metric("Current Leader",rows[0]["Team"] if rows else "—")
+            return
     programme = CanonicalProgrammeAdapter.load(db, event_id)
     try:
         current_module, current_activity = programme.resolve_runtime(state)

@@ -636,6 +636,70 @@ class SupabaseRuntimeDB:
         })
         return self._normalise_result(result) or {}
 
+    def get_formula_race_checkpoints(self, event_id):
+        result = self._request("POST", "rpc/exos_formula_race_checkpoint_state", payload={
+            "p_event_id": str(event_id).strip(),
+        }, admin=True)
+        return self._normalise_result(result) or {}
+
+    def save_formula_race_checkpoint(self, checkpoint):
+        payload = {
+            "event_id": str(checkpoint.get("EventID", "")),
+            "module_id": str(checkpoint.get("ModuleID", "")),
+            "activity_id": str(checkpoint.get("ActivityID", "")),
+            "name": str(checkpoint.get("Name", "")).strip(),
+            "instructions": str(checkpoint.get("Instructions", "")),
+            "credits": float(checkpoint.get("Credits", 0) or 0),
+            "proof_type": str(checkpoint.get("ProofType", "Photo")),
+            "facilitator_notes": str(checkpoint.get("FacilitatorNotes", "")),
+            "position": int(checkpoint.get("Position", 1)),
+            "active": bool(checkpoint.get("Active", True)),
+            "updated_by": str(checkpoint.get("UpdatedBy", "Programme Builder")),
+        }
+        return self._request("POST", "formula_race_checkpoints", payload=payload,
+            query={"on_conflict": "event_id,activity_id"}, admin=True) or payload
+
+    def save_formula_race_checkpoints(self, event_id, module_id, checkpoints, actor="Programme Builder"):
+        result = self._request("POST", "rpc/exos_formula_race_save_checkpoints", payload={
+            "p_event_id": str(event_id), "p_module_id": str(module_id),
+            "p_checkpoints": list(checkpoints or []), "p_actor": str(actor),
+        }, admin=True)
+        return self._normalise_result(result) or {}
+
+    def delete_formula_race_checkpoint(self, event_id, activity_id):
+        return self._request("DELETE", "formula_race_checkpoints", query={
+            "event_id": f"eq.{str(event_id)}", "activity_id": f"eq.{str(activity_id)}",
+        }, admin=True) or {}
+
+    def set_formula_race_checkpoint_runtime(self, event_id, module_id, action, actor):
+        require_control_centre("Formula R.A.C.E. checkpoint launch")
+        result = self._request("POST", "rpc/exos_formula_race_set_checkpoint_runtime", payload={
+            "p_event_id": str(event_id), "p_module_id": str(module_id),
+            "p_action": str(action), "p_actor": str(actor),
+        }, admin=True)
+        return self._normalise_result(result) or {}
+
+    def formula_race_submit_checkpoint(self, session_token, device_id, activity_id,
+                                       text_response="", storage_reference="", idempotency_key=""):
+        result = self._request("POST", "rpc/exos_formula_race_submit_checkpoint", payload={
+            "p_session_token": str(session_token), "p_device_id": str(device_id),
+            "p_activity_id": str(activity_id), "p_text_response": str(text_response),
+            "p_storage_reference": str(storage_reference),
+            "p_idempotency_key": str(idempotency_key or uuid.uuid4()),
+        })
+        return self._normalise_result(result) or {}
+
+    def formula_race_review_checkpoint(self, submission_id, decision, reviewer_id,
+                                       notes="", reason="", idempotency_key=""):
+        require_control_centre("Formula R.A.C.E. checkpoint review")
+        result = self._request("POST", "rpc/exos_formula_race_review_checkpoint", payload={
+            "p_submission_id": str(submission_id), "p_decision": str(decision),
+            "p_reviewer_id": str(reviewer_id), "p_notes": str(notes),
+            "p_reason": str(reason),
+            "p_idempotency_key": str(idempotency_key or f"{submission_id}:{decision}"),
+        }, admin=True)
+        return self._normalise_result(result) or {}
+
     def formula_race_purchase(self, session_token, device_id, item_id, quantity=1,
                               idempotency_key=""):
         result = self._request("POST", "rpc/exos_formula_race_purchase", payload={
