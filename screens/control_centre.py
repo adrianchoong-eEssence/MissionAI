@@ -377,6 +377,37 @@ def _render_stage_widgets(db, control, event_id, family):
         st.info("Export the detailed result table from Results & Reports.")
 
 
+def _render_nasi_operations(db, control, event_id, activity_id):
+    """Show the live, individual NASI queue using the existing submission store."""
+    submissions = [
+        row for row in db.get_submissions(event_id)
+        if str(row.get("MissionID", "")) == str(activity_id)
+        and str(row.get("SubmissionType", "")).upper() == "NASI"
+    ]
+    submitted_people = {
+        str(row.get("ParticipantName", "")).strip().casefold()
+        for row in submissions
+        if str(row.get("ParticipantName", "")).strip()
+    }
+    registered = db.get_participant_count(event_id)
+    submitted = len(submitted_people)
+    outstanding = max(registered - submitted, 0)
+
+    st.subheader("NASI Live Status")
+    participant_metric, submitted_metric, outstanding_metric = st.columns(3)
+    participant_metric.metric("Registered participants", registered)
+    submitted_metric.metric("NASI submitted", submitted)
+    outstanding_metric.metric("NASI outstanding", outstanding)
+    st.caption("NASI is an individual reflection. It always carries zero competitive credits.")
+    render_review_scoring_widget(
+        db,
+        event_id,
+        mission_id=activity_id,
+        control=control,
+        force_runtime_rows=True,
+    )
+
+
 def show_control_centre():
     st.markdown(
         """
@@ -590,7 +621,10 @@ def show_control_centre():
         render_broadcast_controller(db, event_id, control=control)
 
     st.divider()
-    _render_stage_widgets(db, control, event_id, stage_family(stage))
+    if str(stage.get("StageName", "")).strip().upper() == "NASI":
+        _render_nasi_operations(db, control, event_id, stage.get("ActivityID", ""))
+    else:
+        _render_stage_widgets(db, control, event_id, stage_family(stage))
     st.divider()
     _render_team_management(db, control, event_id)
 

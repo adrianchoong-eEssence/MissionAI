@@ -29,6 +29,8 @@ def _remember_widget_event(key):
     selected_id = str(st.session_state.get(key, "")).strip()
     if selected_id:
         st.session_state[ACTIVE_EVENT_KEY] = selected_id
+        if key == "control_event" and "facilitator_mode" in st.session_state:
+            st.query_params["event_id"] = selected_id
 
 
 def get_active_event(events):

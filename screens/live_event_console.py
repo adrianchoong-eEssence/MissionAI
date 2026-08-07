@@ -258,7 +258,44 @@ def render_submission_details(submission):
         st.metric("Completed", metric1)
     elif submission_type == "NASI":
         st.markdown("### NASI Reflection")
-        st.info(remarks or "No reflection text recorded.")
+        participant_name = str(get_value(submission, "ParticipantName", "")).strip()
+        first_name, _, last_name = participant_name.partition(" ")
+        team_name = str(get_value(submission, "TeamName", "")).strip()
+        submitted_at = str(get_value(submission, "SubmittedAt", "")).strip()
+        details = st.columns(3)
+        details[0].metric("First Name", first_name or "—")
+        details[1].metric("Last Name", last_name or "—")
+        details[2].metric("Team / Country", team_name or "—")
+        if submitted_at:
+            st.caption(f"Submitted: {submitted_at}")
+
+        sections = {
+            "New Ideas": "",
+            "Areas of Improvement": "",
+            "Strengths": "",
+            "Implementation": "",
+        }
+        markers = [
+            ("N - New Ideas:", "New Ideas"),
+            ("A - Areas for Improvement:", "Areas of Improvement"),
+            ("S - Strengths:", "Strengths"),
+            ("I - Implementation:", "Implementation"),
+        ]
+        text = remarks
+        for position, (marker, label) in enumerate(markers):
+            if marker not in text:
+                continue
+            start = text.index(marker) + len(marker)
+            end = min(
+                (text.index(next_marker, start) for next_marker, _ in markers[position + 1:]
+                 if next_marker in text[start:]),
+                default=len(text),
+            )
+            sections[label] = text[start:end].strip() or "—"
+        for label, value in sections.items():
+            st.markdown(f"**{label}**")
+            st.write(value)
+        st.caption("Reflection only — no score or competitive credits.")
     elif remarks:
         st.info(remarks)
 
@@ -327,7 +364,10 @@ def render_enterprise_pipeline_form(db, event_id, mission):
         st.rerun()
 
 
-def render_review_scoring_widget(db, event_id, show_all=False, control=None):
+def render_review_scoring_widget(
+    db, event_id, show_all=False, control=None, mission_id=None,
+    force_runtime_rows=False,
+):
     mission = db.get_current_mission(event_id)
     canonical_rows = []
     if db.runtime.can_publish:
@@ -335,9 +375,9 @@ def render_review_scoring_widget(db, event_id, show_all=False, control=None):
             canonical_rows = db.runtime.get_canonical_submissions(event_id)
         except RuntimeDatabaseError:
             canonical_rows = []
-    submissions = canonical_rows or db.get_submissions(event_id)
-    canonical_mode = bool(canonical_rows)
-    mission_id = mission.get("MissionID") if mission else ""
+    submissions = db.get_submissions(event_id) if force_runtime_rows else (canonical_rows or db.get_submissions(event_id))
+    canonical_mode = bool(canonical_rows) and not force_runtime_rows
+    mission_id = mission_id or (mission.get("MissionID") if mission else "")
     rows = [
         row for row in submissions
         if show_all or not mission_id
@@ -404,12 +444,14 @@ def render_review_scoring_widget(db, event_id, show_all=False, control=None):
         ):
             render_submission_details(submission)
             st.caption(formula)
+            is_nasi = str(submission.get("SubmissionType", "")).upper() == "NASI"
             score = st.number_input(
                 "Awarded score / credits",
                 min_value=0.0,
                 max_value=10000.0,
-                value=float(suggested),
+                value=0.0 if is_nasi else float(suggested),
                 step=1.0,
+                disabled=is_nasi,
                 key=f"control_score_{submission_id}",
             )
             remarks = st.text_area(
