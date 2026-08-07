@@ -664,7 +664,7 @@ def render_programme_first_builder(db):
                 "Safety confirmation",
                 [
                     "Not confirmed",
-                    "Confirmed — replace destination configuration only",
+                    "Confirmed — duplicate configuration now",
                 ],
                 key=f"duplicate_confirm_{event_id}",
             )
@@ -673,12 +673,13 @@ def render_programme_first_builder(db):
                 "No participants, teams, submissions, scores, wallets, transactions, "
                 "judging, results, sessions, or runtime state will be copied."
             )
-            if st.button("Duplicate Programme", type="primary", disabled=not confirmed, key=f"duplicate_programme_{event_id}"):
+            if confirmed:
                 result = db.duplicate_programme_configuration(source_id, event_id)
                 st.session_state[f"programme_save_state_{event_id}"] = saved_state()
                 st.session_state[f"programme_notice_{event_id}"] = (
                     f"Duplicated {result['ModuleCount']} modules and {result['ActivityCount']} activities from {source_id}. Programme remains unlaunched."
                 )
+                st.session_state[f"duplicate_confirm_{event_id}"] = "Not confirmed"
                 st.rerun()
     from engines.programme_adapter import CanonicalProgrammeAdapter
     validation = CanonicalProgrammeAdapter(event_id, db.get_programme_stages(event_id)).snapshot()
