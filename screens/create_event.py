@@ -9,6 +9,8 @@ from screens.app_state import ACTIVE_EVENT_KEY, request_navigation
 PROGRAMME_TYPES = [
     "Mission AI",
     "Formula R.A.C.E.",
+    "AGILE",
+    "Enterprise AGILE",
     "Road Rally",
     "Catalyst",
     "CSR",
@@ -196,11 +198,15 @@ def show_create_event():
 
     result = _event_form(db, event if mode == "Edit Active Event" else None)
     if result:
-        st.success(
-            f"Event saved · {result['EventID']} · Join code {result['JoinCode']}"
-        )
-        build, exit_col = st.columns(2)
-        if build.button("Build Programme", type="primary", width="stretch"):
+        if result["Created"]:
+            st.success(f"Event created successfully: {result['EventID']}")
+            st.write("What would you like to do next?")
+        else:
+            st.success(f"Event saved · {result['EventID']} · Join code {result['JoinCode']}")
+        template, duplicate, blank = st.columns(3)
+        if template.button("Use Template", type="primary", width="stretch"):
             request_navigation("Programme Builder")
-        if exit_col.button("Save and Exit", width="stretch"):
-            request_navigation("Events")
+        if duplicate.button("Duplicate Existing Programme", width="stretch"):
+            request_navigation("Programme Builder")
+        if blank.button("Build From Scratch", width="stretch"):
+            request_navigation("Programme Builder")

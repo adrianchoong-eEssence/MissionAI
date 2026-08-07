@@ -2932,6 +2932,68 @@ class GoogleSheetsDB:
 
         self.clear_cache()
 
+    def duplicate_programme_configuration(self, source_event_id, destination_event_id):
+        """Copy editable programme configuration only; never copy live event data."""
+        from data.experience_repository import SupabaseExperienceRepository
+        from engines.programme_duplication import (
+            clone_experience_assignments,
+            clone_programme_stages,
+            duplication_summary,
+        )
+
+        source_event_id = str(source_event_id).strip()
+        destination_event_id = str(destination_event_id).strip()
+        if not source_event_id or not destination_event_id:
+            raise ValueError("Source and destination events are required.")
+        if source_event_id == destination_event_id:
+            raise ValueError("Source and destination events must be different.")
+        if not self.get_event(source_event_id) or not self.get_event(destination_event_id):
+            raise ValueError("Source or destination event was not found.")
+
+        source_stages = self.get_programme_stages(source_event_id)
+        if not source_stages:
+            raise ValueError("The source event has no programme configuration.")
+        cloned_stages, id_map = clone_programme_stages(
+            source_stages, source_event_id, destination_event_id,
+        )
+
+        # Mission configuration is copied only when referenced by a stage. It is
+        # saved as DRAFT and therefore does not launch or mutate runtime state.
+        mission_ids = {
+            str(row.get("MissionID", "")).strip().upper()
+            for row in source_stages if str(row.get("MissionID", "")).strip()
+        }
+        copied_missions = []
+        for mission in self.get_event_missions(source_event_id, include_closed=True):
+            if str(mission.get("MissionID", "")).strip().upper() not in mission_ids:
+                continue
+            copied = dict(mission)
+            copied.update({"EventID": destination_event_id, "Status": "DRAFT"})
+            self.upsert_event_mission(copied)
+            copied_missions.append(str(copied.get("MissionID", "")))
+
+        self.save_programme_stages(destination_event_id, cloned_stages)
+        assignments_copied = 0
+        if self.runtime.can_publish:
+            repository = SupabaseExperienceRepository(self.runtime)
+            assignments = clone_experience_assignments(
+                repository.assignments(source_event_id), destination_event_id, id_map,
+            )
+            for assignment in assignments:
+                repository.save_assignment(assignment)
+            assignments_copied = len(assignments)
+
+        summary = duplication_summary(cloned_stages)
+        summary.update({
+            "SourceEventID": source_event_id,
+            "DestinationEventID": destination_event_id,
+            "MissionCount": len(copied_missions),
+            "ExperienceAssignmentCount": assignments_copied,
+            "OperationalDataCopied": False,
+            "RuntimeLaunched": False,
+        })
+        return summary
+
     def build_event_programme(
         self,
         event_id,

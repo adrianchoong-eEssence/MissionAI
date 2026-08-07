@@ -1,5 +1,5 @@
 from pathlib import Path
-from datetime import time
+from datetime import datetime, time
 from copy import deepcopy
 import html
 import json
@@ -43,6 +43,12 @@ from engines.transformation_engine import TransformationEngine
 from screens.app_state import request_navigation, select_active_event
 from screens.app_state import ACTIVE_EVENT_KEY
 from engines.formula_race_checkpoints import is_formula_race_event, module_templates
+from engines.programme_duplication import (
+    duplication_summary,
+    programme_family,
+    saved_state,
+    templates_for_event,
+)
 
 
 def get_activity_name(activity):
@@ -431,6 +437,7 @@ def _save_modules(db, event_id, modules):
         st.session_state[f"canonical_programme_preview_{event_id}"] = deepcopy(modules)
         return
     db.save_programme_stages(event_id, flatten_programme_hierarchy(modules))
+    st.session_state[f"programme_save_state_{event_id}"] = saved_state()
 
 
 def _content_choices(db, event_id, content_type, current_id="", current_name=""):
@@ -587,7 +594,9 @@ def render_programme_first_builder(db):
         return
     event = select_active_event(events, label="Event", key="programme_first_event")
     event_id = str(event.get("EventID", ""))
-    available_modules = module_templates(event) or DEFAULT_MODULES
+    available_modules = templates_for_event(
+        event, DEFAULT_MODULES, module_templates(event),
+    )
     modules = st.session_state.get(f"canonical_programme_preview_{event_id}")
     if not modules:
         modules = canonical_event_programme(
@@ -616,6 +625,52 @@ def render_programme_first_builder(db):
                 "DurationMinutes": sum(int(row.get("DurationMinutes", 0)) for row in activities),
                 "StartTime": activities[0].get("StartTime", "") if activities else ""})
     st.caption("Arrange the programme like slides. Open a module to edit everything inside it.")
+    state = st.session_state.get(f"programme_save_state_{event_id}")
+    if state:
+        timestamp = datetime.fromisoformat(state["Timestamp"]).astimezone().strftime("%d %b %Y · %H:%M:%S")
+        st.success(f"SAVED · {timestamp}")
+    else:
+        st.caption("SAVED · loaded from persisted configuration")
+
+    with st.expander("Duplicate Existing Programme", expanded=not modules):
+        family = programme_family(event)
+        candidates = []
+        for candidate in events:
+            candidate_id = str(candidate.get("EventID", ""))
+            candidate_stages = db.get_programme_stages(candidate_id)
+            if candidate_id != event_id and candidate_stages:
+                candidates.append((candidate, candidate_stages))
+        candidates.sort(
+            key=lambda item: (programme_family(item[0]) == family, str(item[0].get("EventDate", ""))),
+            reverse=True,
+        )
+        if not candidates:
+            st.info("No existing configured programme is available to duplicate.")
+        else:
+            source_id = st.selectbox(
+                "Source programme",
+                [str(item[0].get("EventID", "")) for item in candidates],
+                format_func=lambda value: next(
+                    f"{value} · {item[0].get('EventName', '')} · {item[0].get('ProgrammeType', 'Generic')}"
+                    for item in candidates if str(item[0].get("EventID", "")) == value
+                ),
+                key=f"duplicate_source_{event_id}",
+            )
+            source_stages = next(rows for item, rows in candidates if str(item.get("EventID", "")) == source_id)
+            summary = duplication_summary(source_stages)
+            st.write(f"{summary['ModuleCount']} modules · {summary['ActivityCount']} activities")
+            st.caption("Modules: " + ", ".join(summary["Modules"]))
+            confirmed = st.checkbox(
+                "I confirm this replaces the destination programme configuration only. No participants, teams, submissions, scores, wallets, transactions, judging, results, sessions, or runtime state will be copied.",
+                key=f"duplicate_confirm_{event_id}",
+            )
+            if st.button("Duplicate Programme", type="primary", disabled=not confirmed, key=f"duplicate_programme_{event_id}"):
+                result = db.duplicate_programme_configuration(source_id, event_id)
+                st.session_state[f"programme_save_state_{event_id}"] = saved_state()
+                st.session_state[f"programme_notice_{event_id}"] = (
+                    f"Duplicated {result['ModuleCount']} modules and {result['ActivityCount']} activities from {source_id}. Programme remains unlaunched."
+                )
+                st.rerun()
     from engines.programme_adapter import CanonicalProgrammeAdapter
     validation = CanonicalProgrammeAdapter(event_id, db.get_programme_stages(event_id)).snapshot()
     if validation.errors:
@@ -701,7 +756,8 @@ def render_programme_first_builder(db):
         st.success(notice)
 
     if not modules:
-        st.info("Start by adding the first module.")
+        st.info("This event has no programme yet.")
+        st.caption("Use Template · Duplicate Existing Programme · Build From Scratch")
         return
 
     days = sorted({int(module.get("Day", 1)) for module in modules})
