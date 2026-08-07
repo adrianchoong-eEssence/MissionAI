@@ -11,10 +11,12 @@ CHECKPOINT_STATUSES = (
 
 
 def is_formula_race_event(event):
-    value = " ".join(str((event or {}).get(key, "")) for key in (
+    event = event or {}
+    event_name = str(event.get("EventName", "")).strip().casefold()
+    value = " ".join(str(event.get(key, "")) for key in (
         "ProgrammeType", "EventType", "EventName", "ProgrammeName",
     )).casefold()
-    return "formula r.a.c.e" in value or "formula race" in value or value.strip() == "race"
+    return "formula r.a.c.e" in value or "formula race" in value or event_name == "race"
 
 
 def module_templates(event):

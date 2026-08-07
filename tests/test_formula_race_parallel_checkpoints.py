@@ -18,6 +18,7 @@ def test_formula_race_catalogue_is_product_specific_and_has_parallel_module():
     assert [row[1] for row in race] == ["Launch EXOS", "RACE Checkpoints", "Marketplace / Spend Credits", "Build", "Team Photo", "Drag Race", "Judging", "Championship"]
     assert module_templates({"ProgrammeType": "Mission AI"}) is None
     assert is_formula_race_event({"EventName": "RACE"})
+    assert is_formula_race_event({"EventName": "RACE", "ProgrammeType": "Team Building"})
 
 
 def test_team_checkpoint_order_is_deterministic_across_refresh_and_reconnect():
