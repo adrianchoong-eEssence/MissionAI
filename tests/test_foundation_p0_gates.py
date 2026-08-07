@@ -72,7 +72,7 @@ def test_runtime_join_uses_v2_with_atomic_requested_team():
     assert calls[0][1]["payload"]["p_requested_team_id"] == "T1"
 
 
-def test_country_selection_is_passed_once_and_never_patched_after_join():
+def test_join_by_code_never_accepts_or_assigns_a_participant_selected_team():
     class Runtime:
         is_configured = True
         can_publish = True
@@ -88,12 +88,9 @@ def test_country_selection_is_passed_once_and_never_patched_after_join():
             raise AssertionError("Post-join team mutation is forbidden")
 
     database = bare_database(Runtime())
-    database.get_teams = lambda event_id: [{
-        "TeamID": "T-FR", "TeamName": "🇫🇷 France", "Country": "France",
-    }]
-    result = database.join_player_by_code("CODE", "Adrian Choong", "France", "DEVICE")
-    assert result["TeamID"] == "T-FR"
-    assert database.runtime.requested_team_id == "T-FR"
+    result = database.join_player_by_code("CODE", "Adrian Choong", device_id="DEVICE")
+    assert result["TeamID"] == ""
+    assert database.runtime.requested_team_id == ""
 
 
 def test_identity_guard_blocks_automatic_team_country_and_leader_mutation():

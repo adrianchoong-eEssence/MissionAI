@@ -1822,24 +1822,20 @@ class GoogleSheetsDB:
     # Participants
     # -------------------------
 
-    def join_player_by_code(self, join_code, name, country="", device_id=""):
+    def join_player_by_code(self, join_code, name, *, device_id=""):
+        """Join through the canonical runtime without participant-selected teams.
+
+        Team and country are assigned or restored by ``exos_join_event_v2``.
+        Keeping those inputs out of this compatibility boundary prevents an old
+        caller from reintroducing country selection into participant joining.
+        """
         require_runtime(self.runtime, "Participant join")
         event = self.runtime.get_event_by_join_code(join_code)
         if not event:
             raise ValueError("Invalid Join Code")
-        event_id = str(event.get("EventID", "")).strip()
-        teams = self.get_teams(event_id)
-        matching = [
-            team for team in teams
-            if str(team.get("Country", "")).strip().casefold()
-            == str(country or "").strip().casefold()
-        ]
-        if country and len(matching) != 1:
-            raise ValueError("Select one country configured for this event.")
-        requested_team_id = str((matching[0] if matching else {}).get("TeamID", ""))
         return self.runtime.join_player(
             join_code, name, device_id,
-            requested_team_id=requested_team_id,
+            requested_team_id="",
         )
 
     def get_player_by_session_token(self, session_token):
