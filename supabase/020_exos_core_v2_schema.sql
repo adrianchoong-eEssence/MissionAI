@@ -440,8 +440,39 @@ returns text language sql stable as $$
      left join public.participants_v2 p on p.event_id=t.event_id and p.team_id=t.team_id and p.merged_into_participant_id is null
      where t.event_id=trim(p_event_id)
      group by t.team_id, t.event_id
-     order by count(p.participant_id), t.team_id
-     limit 1;
+    order by count(p.participant_id), t.team_id
+    limit 1;
+$$;
+
+create or replace function public.exos_v2_identity_payload(
+    p_event_id text,
+    p_participant_id uuid
+)
+returns jsonb
+language sql stable
+as $$
+    select jsonb_build_object(
+        'RecoveryRequired', false,
+        'Ambiguous', false,
+        'EventID', p.event_id,
+        'EventName', e.event_name,
+        'ParticipantID', p.participant_id::text,
+        'TeamID', p.team_id,
+        'Team', t.team_name,
+        'Country', p.country,
+        'Flag', p.flag,
+        'Name', p.display_name,
+        'SessionToken', s.session_token::text
+    )
+      from public.participants_v2 p
+      join public.events_v2 e on e.event_id = p.event_id
+      join public.teams_v2 t on t.team_id = p.team_id
+      left join public.participant_sessions_v2 s on s.participant_id = p.participant_id
+         and s.event_id = p.event_id
+         and s.is_active
+      where p.event_id = trim(p_event_id)
+        and p.participant_id = p_participant_id
+      limit 1;
 $$;
 
 create or replace function public.exos_v2_publish_event(
@@ -516,6 +547,9 @@ declare
     v_count integer;
     v_participant public.participants_v2%rowtype;
     v_session public.participant_sessions_v2%rowtype;
+    v_event_lock bigint;
+    v_identity_lock bigint;
+    v_next_participant_id uuid := gen_random_uuid();
 begin
     if nullif(trim(p_participant_name),'') is null then raise exception 'Participant full name is required'; end if;
     if nullif(trim(p_device_id),'') is null then raise exception 'Device identifier is required'; end if;
@@ -527,6 +561,10 @@ begin
 
     v_normalized := public.exos_v2_normalize_participant_name(p_participant_name);
     v_idempotency_key := encode(digest(v_event.event_id||'|'||v_normalized||'|'||lower(trim(p_device_id)), 'sha256'), 'hex');
+    v_event_lock := hashtextextended(v_event.event_id, 11);
+    v_identity_lock := hashtextextended(v_event.event_id || '|' || v_normalized, 17);
+    perform pg_advisory_xact_lock(v_event_lock);
+    perform pg_advisory_xact_lock(v_identity_lock);
 
     select participant_id into v_existing_id
       from public.participant_sessions_v2 s
@@ -535,21 +573,27 @@ begin
 
     if v_existing_id is not null then
         select * into v_participant from public.participants_v2 where participant_id=v_existing_id;
+        if v_participant.participant_id is null or v_participant.merged_into_participant_id is not null then
+            return jsonb_build_object(
+                'RecoveryRequired', true,
+                'Ambiguous', false,
+                'EventID', v_event.event_id,
+                'Name', trim(p_participant_name),
+                'Message', 'Identity is merged. Recovery required with facilitator.'
+            );
+        end if;
         select * into v_session from public.participant_sessions_v2
           where participant_id=v_existing_id and event_id=v_event.event_id and idempotency_key=v_idempotency_key
           order by created_at desc limit 1;
-        update public.participant_sessions_v2 set last_seen_at=now(), is_active=true
-         where participant_session_id=v_session.participant_session_id;
-        update public.participants_v2 set last_seen_at=now() where participant_id=v_existing_id;
-        return jsonb_build_object(
-            'RecoveryRequired', false,
-            'Ambiguous', false,
-            'EventID', v_event.event_id,
-            'ParticipantID', v_participant.participant_id,
-            'TeamID', v_participant.team_id,
-            'Team', (select team_name from public.teams_v2 where team_id=v_participant.team_id),
-            'SessionToken', v_session.session_token
-        );
+        if v_session.participant_session_id is not null then
+            update public.participant_sessions_v2
+               set last_seen_at = now(), is_active = true
+             where participant_session_id = v_session.participant_session_id;
+            update public.participants_v2
+               set last_seen_at = now()
+             where participant_id = v_existing_id;
+            return public.exos_v2_identity_payload(v_event.event_id, v_existing_id);
+        end if;
     end if;
 
     select count(*) into v_count
@@ -577,10 +621,10 @@ begin
     if v_team_id is null then raise exception 'No teams are published for this event'; end if;
 
     insert into public.participants_v2 (
-        event_id,team_id,normalized_name,display_name,country,flag,participant_payload
+        participant_id,event_id,team_id,normalized_name,display_name,country,flag,participant_payload
     )
     values (
-        v_event.event_id,v_team_id,v_normalized,trim(p_participant_name),
+        v_next_participant_id,v_event.event_id,v_team_id,v_normalized,trim(p_participant_name),
         (select country from public.teams_v2 where team_id=v_team_id),
         (select team_flag from public.teams_v2 where team_id=v_team_id),
         '{}'::jsonb
@@ -591,20 +635,30 @@ begin
         event_id,participant_id,device_id,idempotency_key
     ) values (
         v_event.event_id,v_participant.participant_id,trim(p_device_id),v_idempotency_key
+    ) on conflict (event_id, idempotency_key) do update
+      set device_id = excluded.device_id,
+          last_seen_at = now(),
+          is_active = true
     ) returning * into v_session;
+
+    if v_session.participant_id is distinct from v_participant.participant_id then
+        delete from public.participants_v2 where participant_id = v_next_participant_id;
+        select * into v_participant from public.participants_v2 where participant_id = v_session.participant_id;
+        select * into v_session from public.participant_sessions_v2
+          where participant_session_id = v_session.participant_session_id;
+        update public.participant_sessions_v2
+           set last_seen_at = now(), is_active = true
+         where participant_session_id = v_session.participant_session_id;
+        update public.participants_v2
+           set last_seen_at = now()
+         where participant_id = v_session.participant_id;
+        return public.exos_v2_identity_payload(v_event.event_id, v_session.participant_id);
+    end if;
 
     insert into public.audit_log_v2 (event_id,actor,action,entity_type,entity_id,before_state,after_state)
     values (v_event.event_id, 'system', 'PARTICIPANT_REGISTERED', 'participants_v2', v_participant.participant_id::text, '{}'::jsonb, to_jsonb(v_participant));
 
-    return jsonb_build_object(
-        'RecoveryRequired', false,
-        'Ambiguous', false,
-        'EventID', v_event.event_id,
-        'ParticipantID', v_participant.participant_id,
-        'TeamID', v_participant.team_id,
-        'Team', (select team_name from public.teams_v2 where team_id=v_participant.team_id),
-        'SessionToken', v_session.session_token
-    );
+    return public.exos_v2_identity_payload(v_event.event_id, v_participant.participant_id);
 end;
 $$;
 
@@ -677,7 +731,160 @@ begin
         'ParticipantID', v_participant.participant_id,
         'TeamID', v_participant.team_id,
         'Team', (select team_name from public.teams_v2 where team_id=v_participant.team_id),
+        'Country', v_participant.country,
+        'Flag', v_participant.flag,
+        'Name', v_participant.display_name,
         'SessionToken', v_session.session_token
+    );
+end;
+$$;
+
+create or replace function public.exos_v2_admin_recover_identity(
+    p_event_id text,
+    p_participant_id uuid,
+    p_target_team_id text,
+    p_actor text,
+    p_reason text
+)
+returns jsonb
+language plpgsql security definer
+set search_path = public as $$
+declare
+    v_participant public.participants_v2%rowtype;
+    v_team public.teams_v2%rowtype;
+    v_before jsonb;
+begin
+    if nullif(trim(p_event_id), '') is null then
+        raise exception 'EventID is required';
+    end if;
+    if nullif(trim(p_target_team_id), '') is null then
+        raise exception 'Target team is required';
+    end if;
+
+    select * into v_participant from public.participants_v2
+      where participant_id = p_participant_id and event_id = trim(p_event_id) for update;
+    if not found then
+        raise exception 'Participant not found for event';
+    end if;
+
+    select * into v_team from public.teams_v2
+      where team_id = trim(p_target_team_id) and event_id = trim(p_event_id);
+    if not found then
+        raise exception 'Target team is not valid for this event';
+    end if;
+
+    v_before := jsonb_build_object(
+        'EventID', v_participant.event_id,
+        'ParticipantID', v_participant.participant_id,
+        'TeamID', v_participant.team_id
+    );
+
+    update public.participants_v2
+       set team_id = v_team.team_id,
+           merged_into_participant_id = null
+     where participant_id = v_participant.participant_id;
+
+    update public.participant_sessions_v2
+       set is_active = true, last_seen_at = now()
+     where participant_id = v_participant.participant_id
+       and event_id = trim(p_event_id);
+
+    insert into public.audit_log_v2 (event_id, actor, action, entity_type, entity_id, before_state, after_state)
+    values (
+        trim(p_event_id),
+        coalesce(trim(p_actor), 'system'),
+        'ADMIN_RECOVER_PARTICIPANT',
+        'participants_v2',
+        p_participant_id::text,
+        v_before,
+        jsonb_build_object('event_id', trim(p_event_id), 'team_id', v_team.team_id)
+    );
+
+    return jsonb_build_object(
+        'RecoveryRequired', false,
+        'EventID', trim(p_event_id),
+        'ParticipantID', p_participant_id,
+        'TeamID', v_team.team_id,
+        'Reason', coalesce(trim(p_reason), 'manual_recovery')
+    );
+end;
+$$;
+
+create or replace function public.exos_v2_admin_merge_participants(
+    p_event_id text,
+    p_target_participant_id uuid,
+    p_merged_participant_id uuid,
+    p_actor text,
+    p_reason text
+)
+returns jsonb
+language plpgsql security definer
+set search_path = public as $$
+declare
+    v_target public.participants_v2%rowtype;
+    v_merged public.participants_v2%rowtype;
+    v_before jsonb;
+begin
+    if p_target_participant_id = p_merged_participant_id then
+        raise exception 'Cannot merge a participant into itself';
+    end if;
+
+    select * into v_target from public.participants_v2
+      where event_id = trim(p_event_id) and participant_id = p_target_participant_id
+      for update;
+    select * into v_merged from public.participants_v2
+      where event_id = trim(p_event_id) and participant_id = p_merged_participant_id
+      for update;
+    if v_target.participant_id is null or v_merged.participant_id is null then
+        raise exception 'Both participants must belong to the same event';
+    end if;
+
+    v_before := jsonb_build_object(
+        'target', to_jsonb(v_target),
+        'merged', to_jsonb(v_merged)
+    );
+
+    update public.submissions_v2
+       set participant_id = v_target.participant_id
+     where event_id = trim(p_event_id)
+       and participant_id = v_merged.participant_id;
+
+    update public.activity_runtime_v2
+       set participant_id = v_target.participant_id
+     where event_id = trim(p_event_id)
+       and participant_id = v_merged.participant_id;
+
+    update public.participants_v2
+       set merged_into_participant_id = v_target.participant_id,
+           is_archived = true
+     where participant_id = v_merged.participant_id;
+
+    update public.participant_sessions_v2
+       set participant_id = v_target.participant_id
+     where participant_id = v_merged.participant_id
+       and event_id = trim(p_event_id);
+
+    insert into public.audit_log_v2 (event_id, actor, action, entity_type, entity_id, before_state, after_state)
+    values (
+        trim(p_event_id),
+        coalesce(trim(p_actor), 'system'),
+        'ADMIN_MERGE_PARTICIPANTS',
+        'participants_v2',
+        p_target_participant_id::text,
+        v_before,
+        jsonb_build_object(
+            'target_participant_id', p_target_participant_id,
+            'merged_participant_id', p_merged_participant_id,
+            'reason', coalesce(trim(p_reason), 'manual_merge')
+        )
+    );
+
+    return jsonb_build_object(
+        'RecoveryRequired', false,
+        'EventID', trim(p_event_id),
+        'TargetParticipantID', p_target_participant_id,
+        'MergedParticipantID', p_merged_participant_id,
+        'Reason', coalesce(trim(p_reason), 'manual_merge')
     );
 end;
 $$;
@@ -767,14 +974,19 @@ revoke all on table public.audit_log_v2 from anon, authenticated;
 
 revoke all on function public.exos_v2_normalize_participant_name(text) from public;
 revoke all on function public.exos_v2_next_team_id(text) from public;
+revoke all on function public.exos_v2_identity_payload(text,uuid) from public;
 revoke all on function public.exos_v2_publish_event(text,text,text,jsonb,public.exos_v2_scoring_mode,text) from public;
 revoke all on function public.exos_v2_join_event_v2(text,text,text,text) from public;
 revoke all on function public.exos_v2_restore_join(text,text,text) from public;
+revoke all on function public.exos_v2_admin_recover_identity(text,uuid,text,text,text) from public;
+revoke all on function public.exos_v2_admin_merge_participants(text,uuid,uuid,text,text) from public;
 revoke all on function public.exos_v2_ledger_score(text,text,uuid,numeric,text,public.exos_v2_scoring_mode,text) from public;
 revoke all on function public.exos_v2_ledger_credit(text,text,uuid,text,integer,text,text) from public;
 
 grant execute on function public.exos_v2_join_event_v2(text,text,text,text) to anon, authenticated;
 grant execute on function public.exos_v2_restore_join(text,text,text) to anon, authenticated;
+grant execute on function public.exos_v2_admin_recover_identity(text,uuid,text,text,text) to service_role;
+grant execute on function public.exos_v2_admin_merge_participants(text,uuid,uuid,text,text) to service_role;
 grant execute on function public.exos_v2_publish_event(text,text,text,jsonb,public.exos_v2_scoring_mode,text) to service_role;
 grant execute on function public.exos_v2_ledger_score(text,text,uuid,numeric,text,public.exos_v2_scoring_mode,text) to service_role;
 grant execute on function public.exos_v2_ledger_credit(text,text,uuid,text,integer,text,text) to service_role;

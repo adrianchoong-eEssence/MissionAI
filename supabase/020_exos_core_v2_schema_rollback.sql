@@ -41,8 +41,11 @@ begin
     drop function if exists public.exos_v2_publish_event(text,text,text,jsonb,public.exos_v2_scoring_mode,text);
     drop function if exists public.exos_v2_next_team_id(text);
     drop function if exists public.exos_v2_normalize_participant_name(text);
+    drop function if exists public.exos_v2_identity_payload(text,uuid);
     drop function if exists public.exos_v2_ledger_score(text,text,uuid,numeric,text,public.exos_v2_scoring_mode,text);
     drop function if exists public.exos_v2_ledger_credit(text,text,uuid,text,integer,text,text);
+    drop function if exists public.exos_v2_admin_recover_identity(text,uuid,text,text,text);
+    drop function if exists public.exos_v2_admin_merge_participants(text,uuid,uuid,text,text);
 
     drop table if exists public.audit_log_v2;
     drop table if exists public.ai_results_v2;

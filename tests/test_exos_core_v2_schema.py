@@ -49,6 +49,8 @@ def test_core_v2_identity_contracts_present():
         "exos_v2_publish_event",
         "exos_v2_join_event_v2",
         "exos_v2_restore_join",
+        "exos_v2_admin_recover_identity",
+        "exos_v2_admin_merge_participants",
         "exos_v2_ledger_score",
         "exos_v2_ledger_credit",
     ):

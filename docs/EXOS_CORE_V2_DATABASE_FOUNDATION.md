@@ -51,6 +51,13 @@ flowchart TD
 - `exos_v2_join_event_v2` uses per-event/device idempotency key to keep rejoin behaviour deterministic.
 - `exos_v2_restore_join` returns `RecoveryRequired` when ambiguity or cross-device mismatch is detected.
 
+### Atomic queue
+
+- `exos_v2_join_event_v2` uses advisory locks (`v_event_lock`, `v_identity_lock`) to keep registration + allocation in one serialised path per event/name.
+- Session upsert uses `ON CONFLICT (event_id, idempotency_key)` for safe retries and repeated clicks.
+- Duplicate name checks run before allocation; ambiguous matches return `RecoveryRequired`.
+- `exos_v2_admin_recover_identity` and `exos_v2_admin_merge_participants` support controlled, audited recovery operations.
+
 ## Scoring modes
 
 - `TEAM_COMPETITIVE`: contributes to leaderboard and `score_transactions_v2`.
