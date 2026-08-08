@@ -68,7 +68,7 @@ def test_canonical_scoring_modes_route_to_scores_and_credits_correctly():
     )
     assert enterprise["mode"] == "ENTERPRISE"
     assert enterprise["score"] == 0.0
-    assert enterprise["credits"] == 77.0
+    assert enterprise["credits"] == 0.0
     assert enterprise["score_disabled"] is False
 
     non_scoring = live_event_console._canonical_review_metrics(

@@ -231,9 +231,9 @@ def _canonical_review_metrics(submission, event_id, db, activity_scoring_map):
             "mode": scoring_mode,
             "suggested": suggested,
             "score": 0.0,
-            "credits": suggested,
+            "credits": 0.0,
             "score_disabled": False,
-            "label": "Credits (competitive excluded for ENTERPRISE)",
+            "label": "No score/competitive credits",
         }
     return {
         "mode": scoring_mode,
@@ -554,7 +554,9 @@ def render_review_scoring_widget(
                 key=f"control_approve_{submission_id}",
             ):
                 if canonical_mode:
-                    credits_input = 0.0 if review["mode"] == "NON_SCORING" else score
+                    credits_input = (
+                        0.0 if review["mode"] != "TEAM_COMPETITIVE" else score
+                    )
                     score_input = score if review["mode"] == "TEAM_COMPETITIVE" else 0.0
                     control.decide_canonical_submission(
                         submission_id, "APPROVE", "Facilitator",

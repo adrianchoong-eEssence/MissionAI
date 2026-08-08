@@ -809,8 +809,8 @@ def show_leaderboard_display():
     wallet_status = {}
     if (
         mode == "Credit Leaderboard"
-        or broadcast_state.get("Mode") == "Credits"
-    ) and db.runtime.can_publish:
+        or broadcast_state.get("Mode") in {"Scores", "Credits"}  # Scores mode maps both active and credits broadcasts for race.
+        ) and db.runtime.can_publish:
         try:
             wallet_status = db.runtime.get_credit_wallet_status(event_id)
         except RuntimeDatabaseError:
