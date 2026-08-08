@@ -1,0 +1,234 @@
+{
+  "environment": {
+    "mode": "local",
+    "target": "local",
+    "event_id": "EVT-SCALE-LOCAL",
+    "join_code": "SCALE",
+    "number_of_teams": 8,
+    "worker_preset": {
+      "70": 24,
+      "260": 80,
+      "800": 160
+    }
+  },
+  "generated_at_utc": "2026-08-08T13:49:59Z",
+  "profiles": [
+    70,
+    260,
+    800
+  ],
+  "scales": {
+    "70": {
+      "status": "PASS",
+      "profile": {
+        "requested": 70,
+        "participants": 70,
+        "registration": {
+          "success_rate": 1.0,
+          "error_rate": 0.0,
+          "success_count": 70,
+          "error_count": 0,
+          "duplicate_registrations": 0,
+          "duplicate_by_name": 0,
+          "latency_ms": {
+            "p50": 0.488,
+            "p95": 3.071,
+            "p99": 3.396
+          },
+          "errors": {}
+        },
+        "reconnect": {
+          "success_rate": 1.0,
+          "success_count": 70,
+          "requested": 70
+        },
+        "activity_read": {
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.001
+          },
+          "success_count": 210,
+          "requested": 70
+        },
+        "submission": {
+          "requested": 140,
+          "success_rate": 1.0,
+          "success_count": 140,
+          "error_count": 0,
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.002
+          }
+        },
+        "facilitator": {
+          "p50": 0.008,
+          "p95": 0.01,
+          "p99": 0.012,
+          "error_count": 0
+        },
+        "team_distribution": {
+          "Team 07": 8,
+          "Team 05": 9,
+          "Team 06": 9,
+          "Team 02": 9,
+          "Team 01": 9,
+          "Team 08": 8,
+          "Team 03": 9,
+          "Team 04": 9
+        },
+        "team_spread": 1,
+        "team_balance_ok": true,
+        "bottlenecks": []
+      }
+    },
+    "260": {
+      "status": "PASS",
+      "profile": {
+        "requested": 260,
+        "participants": 260,
+        "registration": {
+          "success_rate": 1.0,
+          "error_rate": 0.0,
+          "success_count": 260,
+          "error_count": 0,
+          "duplicate_registrations": 0,
+          "duplicate_by_name": 0,
+          "latency_ms": {
+            "p50": 2.734,
+            "p95": 9.851,
+            "p99": 14.201
+          },
+          "errors": {}
+        },
+        "reconnect": {
+          "success_rate": 1.0,
+          "success_count": 260,
+          "requested": 260
+        },
+        "activity_read": {
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.001
+          },
+          "success_count": 780,
+          "requested": 260
+        },
+        "submission": {
+          "requested": 520,
+          "success_rate": 1.0,
+          "success_count": 520,
+          "error_count": 0,
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.001
+          }
+        },
+        "facilitator": {
+          "p50": 0.019,
+          "p95": 0.027,
+          "p99": 0.028,
+          "error_count": 0
+        },
+        "team_distribution": {
+          "Team 04": 33,
+          "Team 01": 33,
+          "Team 03": 33,
+          "Team 05": 32,
+          "Team 07": 32,
+          "Team 02": 33,
+          "Team 08": 32,
+          "Team 06": 32
+        },
+        "team_spread": 1,
+        "team_balance_ok": true,
+        "bottlenecks": []
+      }
+    },
+    "800": {
+      "status": "PASS",
+      "profile": {
+        "requested": 800,
+        "participants": 800,
+        "registration": {
+          "success_rate": 1.0,
+          "error_rate": 0.0,
+          "success_count": 800,
+          "error_count": 0,
+          "duplicate_registrations": 0,
+          "duplicate_by_name": 0,
+          "latency_ms": {
+            "p50": 7.864,
+            "p95": 30.484,
+            "p99": 45.992
+          },
+          "errors": {}
+        },
+        "reconnect": {
+          "success_rate": 1.0,
+          "success_count": 800,
+          "requested": 800
+        },
+        "activity_read": {
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.001
+          },
+          "success_count": 2400,
+          "requested": 800
+        },
+        "submission": {
+          "requested": 1600,
+          "success_rate": 1.0,
+          "success_count": 1600,
+          "error_count": 0,
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.001
+          }
+        },
+        "facilitator": {
+          "p50": 0.054,
+          "p95": 0.065,
+          "p99": 0.073,
+          "error_count": 0
+        },
+        "team_distribution": {
+          "Team 06": 100,
+          "Team 05": 100,
+          "Team 03": 100,
+          "Team 04": 100,
+          "Team 07": 100,
+          "Team 08": 100,
+          "Team 02": 100,
+          "Team 01": 100
+        },
+        "team_spread": 0,
+        "team_balance_ok": true,
+        "bottlenecks": []
+      }
+    }
+  },
+  "database_safety": {
+    "schema_checks": [
+      "runtime_participants_event_idx",
+      "runtime_participants_event_name_idx",
+      "runtime_submissions_event_idx",
+      "runtime_submissions_mission_idx"
+    ],
+    "preflight_sql": "supabase/003_runtime_programme.sql",
+    "postflight_sql": "supabase/005_participant_identity.sql",
+    "rollback_verification_sql": "supabase/013_experience_definition_assignment_rollback.sql",
+    "notes": "Use the listed SQL checks only in test/staging. This harness does not execute direct catalog SQL in this repository."
+  },
+  "pass_fail": {
+    "70": "PASS",
+    "260": "PASS",
+    "800": "PASS"
+  }
+}
