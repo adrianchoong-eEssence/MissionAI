@@ -1,4 +1,7 @@
+import csv
 import html
+import io
+import re
 
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
@@ -353,6 +356,217 @@ def _render_rankings(db, event_id, final=False):
         st.metric(f"{position}. {team}", f"{format_score(score)} pts")
 
 
+_NASI_LABEL_PATTERNS = [
+    ("New Ideas", re.compile(
+        r"^\s*[Nn]\s*[—\-]\s*(?:New\s+Ideas)\b\s*:?",
+        re.IGNORECASE,
+    )),
+    ("Areas of Improvement", re.compile(
+        r"^\s*[Aa]\s*[—\-]\s*(?:Areas\s+(?:of|for)\s+Improvement)\b\s*:?",
+        re.IGNORECASE,
+    )),
+    ("Strengths", re.compile(
+        r"^\s*[Ss]\s*[—\-]\s*(?:Strengths)\b\s*:?",
+        re.IGNORECASE,
+    )),
+    ("Implementation", re.compile(
+        r"^\s*[Ii]\s*[—\-]\s*(?:Implementation)\b\s*:?",
+        re.IGNORECASE,
+    )),
+]
+
+
+def _normalise_nasi_name(value):
+    if not isinstance(value, str):
+        return "", ""
+    clean = value.strip()
+    if not clean:
+        return "", ""
+    parts = [part for part in re.split(r"\s+", clean) if part]
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])
+
+
+def _normalise_nasi_submission(submission):
+    participant_name = (
+        str(submission.get("ParticipantName", "") or "")
+        or str(submission.get("ParticipantNameText", "") or "")
+        or str(submission.get("Name", "") or "")
+    )
+    first_name = str(
+        submission.get("FirstName", "")
+        or submission.get("ParticipantFirstName", "")
+        or ""
+    ).strip() or None
+    last_name = str(
+        submission.get("LastName", "")
+        or submission.get("ParticipantLastName", "")
+        or ""
+    ).strip() or None
+    if (not first_name and not last_name) and participant_name:
+        first_name, last_name = _normalise_nasi_name(participant_name)
+
+    parsed = _parse_nasi_labelled_remarks(submission.get("Remarks", ""))
+    normalised = {
+        "SubmissionID": str(submission.get("SubmissionID", "")),
+        "ParticipantID": str(submission.get("ParticipantID", "")),
+        "EventID": str(submission.get("EventID", "")),
+        "TeamID": str(submission.get("TeamID", "")),
+        "MissionID": str(submission.get("MissionID", "")),
+        "ActivityID": str(submission.get("ActivityID", "") or submission.get("MissionID", "")),
+        "SubmittedAt": str(submission.get("SubmittedAt", "")),
+        "TeamOrCountry": str(submission.get("TeamName", "")).strip()
+        or str(submission.get("Country", "")).strip()
+        or "—",
+        "FirstName": (str(first_name).strip() if first_name is not None else ""),
+        "LastName": (str(last_name).strip() if last_name is not None else ""),
+        "NewIdeas": str(
+            submission.get("NewIdeas", "")
+            or submission.get("New_Ideas", "")
+            or submission.get("NewIdeasText", "")
+        ).strip() or parsed.get("New Ideas", ""),
+        "AreasOfImprovement": str(
+            submission.get("AreasOfImprovement", "")
+            or submission.get("AreasForImprovement", "")
+            or submission.get("Areas_of_Improvement", "")
+        ).strip() or parsed.get("Areas of Improvement", ""),
+        "Strengths": str(
+            submission.get("Strengths", "")
+            or submission.get("StrengthsText", "")
+        ).strip() or parsed.get("Strengths", ""),
+        "Implementation": str(
+            submission.get("Implementation", "")
+            or submission.get("ImplementationText", "")
+        ).strip() or parsed.get("Implementation", ""),
+    }
+    if not normalised["NewIdeas"] and not normalised["AreasOfImprovement"] and not normalised["Strengths"] and not normalised["Implementation"]:
+        raw_remarks = str(submission.get("Remarks", "")).strip()
+        if raw_remarks:
+            normalised["NewIdeas"] = raw_remarks
+    for key in ("NewIdeas", "AreasOfImprovement", "Strengths", "Implementation"):
+        if not normalised[key]:
+            normalised[key] = "—"
+    return normalised
+
+
+def _parse_nasi_labelled_remarks(remarks):
+    if not isinstance(remarks, str):
+        return {
+            "New Ideas": "—",
+            "Areas of Improvement": "—",
+            "Strengths": "—",
+            "Implementation": "—",
+        }
+    text = str(remarks).strip()
+    parsed = {
+        "New Ideas": "—",
+        "Areas of Improvement": "—",
+        "Strengths": "—",
+        "Implementation": "—",
+    }
+    if not text:
+        return parsed
+
+    sections = {key: [] for key in parsed}
+    current_label = None
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        matched = None
+        label_name = None
+        for key, pattern in _NASI_LABEL_PATTERNS:
+            if pattern.match(line):
+                matched = pattern
+                label_name = key
+                break
+
+        if label_name:
+            after = line[matched.match(line).end():].strip() if matched else ""
+            after = after[1:] if after.startswith(":") else after
+            after = after.strip()
+            active_key = label_name
+            current_label = label_name
+            if after:
+                sections[current_label].append(after)
+            continue
+
+        if current_label:
+            sections[current_label].append(raw_line)
+
+    for label, values in sections.items():
+        value = "\n".join(value.strip() for value in values if str(value).strip())  # pragma: no cover
+        if value:
+            parsed[label] = value.strip()
+
+    # If line-by-line parsing fails, keep raw text as New Ideas.
+    if all(value == "—" for value in parsed.values()) and text:
+        parsed["New Ideas"] = text
+
+    return parsed
+
+
+def _build_nasi_result_rows(submissions, event_id, activity_id):
+    filtered = [
+        row
+        for row in submissions
+        if str(row.get("EventID", "")) == str(event_id)
+        and str(row.get("MissionID", "")) == str(activity_id)
+    ]
+    normalised = [
+        _normalise_nasi_submission(row)
+        for row in filtered
+        if str(row.get("SubmissionType", "")).upper() == "NASI"
+    ]
+    normalised.sort(key=lambda row: str(row.get("SubmittedAt", "")))
+    return normalised
+
+
+def _count_unique_nasi_participants(rows):
+    seen = set()
+    for row in rows:
+        participant_key = str(row.get("ParticipantID", "")).strip()
+        if not participant_key:
+            participant_key = (
+                f"{row.get('FirstName', '')}|{row.get('LastName', '')}"
+            ).strip("|").casefold()
+        if not participant_key:
+            participant_key = str(row.get("SubmissionID", "")).strip()
+        if participant_key:
+            seen.add(participant_key)
+    return len(seen)
+
+
+def _build_nasi_csv_bytes(rows):
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "First Name",
+            "Last Name",
+            "Team",
+            "New Ideas",
+            "Areas of Improvement",
+            "Strengths",
+            "Implementation",
+            "Submitted At",
+        ],
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({
+            "First Name": row.get("FirstName", ""),
+            "Last Name": row.get("LastName", ""),
+            "Team": row.get("TeamOrCountry", ""),
+            "New Ideas": row.get("NewIdeas", ""),
+            "Areas of Improvement": row.get("AreasOfImprovement", ""),
+            "Strengths": row.get("Strengths", ""),
+            "Implementation": row.get("Implementation", ""),
+            "Submitted At": row.get("SubmittedAt", ""),
+        })
+    return output.getvalue().encode("utf-8")
+
+
 def _render_stage_widgets(db, control, event_id, family):
     if family == "registration":
         _render_registration(db, control, event_id)
@@ -379,19 +593,11 @@ def _render_stage_widgets(db, control, event_id, family):
 
 
 def _render_nasi_operations(db, control, event_id, activity_id):
-    """Show the live, individual NASI queue using the existing submission store."""
-    submissions = [
-        row for row in db.get_submissions(event_id)
-        if str(row.get("MissionID", "")) == str(activity_id)
-        and str(row.get("SubmissionType", "")).upper() == "NASI"
-    ]
-    submitted_people = {
-        str(row.get("ParticipantName", "")).strip().casefold()
-        for row in submissions
-        if str(row.get("ParticipantName", "")).strip()
-    }
+    """Show the live, individual NASI queue using canonical-submission records."""
+    submissions = db.get_submissions(event_id)
+    rows = _build_nasi_result_rows(submissions, event_id, activity_id)
+    submitted = _count_unique_nasi_participants(rows)
     registered = db.get_participant_count(event_id)
-    submitted = len(submitted_people)
     outstanding = max(registered - submitted, 0)
 
     st.subheader("NASI Live Status")
@@ -400,16 +606,42 @@ def _render_nasi_operations(db, control, event_id, activity_id):
     submitted_metric.metric("NASI submitted", submitted)
     outstanding_metric.metric("NASI outstanding", outstanding)
     st.caption("NASI is an individual reflection. It always carries zero competitive credits.")
-    if not submissions:
+    if not rows:
         st.info("No NASI submissions are waiting for review.")
         return
-    for submission in submissions:
+    for submission in rows:
         with st.expander(
-            f"{submission.get('ParticipantName', 'Participant')} · "
-            f"{submission.get('TeamName', '')} · {submission.get('Status', 'PENDING')}",
+            f"{submission.get('FirstName', 'Participant')} "
+            f"{submission.get('LastName', '')} · "
+            f"{submission.get('TeamOrCountry', '—')} · "
+            f"{submission.get('SubmittedAt', '—')}",
             expanded=True,
         ):
-            render_submission_details(submission)
+            st.markdown("**First Name**")
+            st.write(submission.get("FirstName", ""))
+            st.markdown("**Last Name**")
+            st.write(submission.get("LastName", ""))
+            st.markdown("**Team / Country**")
+            st.write(submission.get("TeamOrCountry", "—"))
+            st.markdown("**Submitted At**")
+            st.write(submission.get("SubmittedAt", "—"))
+            st.markdown("**New Ideas**")
+            st.write(submission.get("NewIdeas", "—"))
+            st.markdown("**Areas of Improvement**")
+            st.write(submission.get("AreasOfImprovement", "—"))
+            st.markdown("**Strengths**")
+            st.write(submission.get("Strengths", "—"))
+            st.markdown("**Implementation**")
+            st.write(submission.get("Implementation", "—"))
+
+    csv_text = _build_nasi_csv_bytes(rows)
+    st.download_button(
+        "Export NASI Results CSV",
+        data=csv_text,
+        file_name=f"nasi-results-{event_id}.csv",
+        mime="text/csv",
+        key=f"nasi_export_csv_{event_id}_{activity_id}",
+    )
 
 
 def show_control_centre():
