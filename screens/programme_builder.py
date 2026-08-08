@@ -425,9 +425,33 @@ def render_programme_order(db):
                     if mission:
                         archived = dict(mission)
                         archived["Status"] = "CLOSED"
-                        db.upsert_event_mission(archived)
+                db.upsert_event_mission(archived)
                 st.success("Module removed from this event.")
                 st.rerun()
+
+
+def _set_programme_save_state(event_id, state, error=None):
+    payload = {"State": state, "Timestamp": saved_state()["Timestamp"]}
+    if error:
+        payload["Error"] = str(error)
+    st.session_state[f"programme_save_state_{event_id}"] = payload
+
+
+def _show_programme_save_state(event_id):
+    state = st.session_state.get(f"programme_save_state_{event_id}", {})
+    if not state:
+        return
+    timestamp = datetime.fromisoformat(state["Timestamp"]).astimezone().strftime(
+        "%d %b %Y · %H:%M:%S"
+    )
+    if state.get("State") == "SAVED":
+        st.success(f"SAVED · {timestamp}")
+        return
+    if state.get("State") == "SAVE FAILED":
+        st.error(
+            f"SAVE FAILED · {timestamp}: "
+            f"{state.get('Error', 'Unable to persist changes.')}"
+        )
 
 
 def _save_modules(db, event_id, modules):
@@ -435,9 +459,17 @@ def _save_modules(db, event_id, modules):
         module.get("ProjectionOnly") for module in modules
     ):
         st.session_state[f"canonical_programme_preview_{event_id}"] = deepcopy(modules)
-        return
-    db.save_programme_stages(event_id, flatten_programme_hierarchy(modules))
-    st.session_state[f"programme_save_state_{event_id}"] = saved_state()
+        _set_programme_save_state(event_id, "SAVED")
+        return True
+
+    try:
+        db.save_programme_stages(event_id, flatten_programme_hierarchy(modules))
+    except Exception as error:
+        _set_programme_save_state(event_id, "SAVE FAILED", error=error)
+        st.error(f"SAVE FAILED: {error}")
+        return False
+    _set_programme_save_state(event_id, "SAVED")
+    return True
 
 
 def _content_choices(db, event_id, content_type, current_id="", current_name=""):
@@ -482,7 +514,8 @@ def _add_activity(db, event_id, modules, module, name, minutes):
     )
     activity["DurationMinutes"] = int(minutes)
     module["Activities"].append(activity)
-    _save_modules(db, event_id, modules)
+    if not _save_modules(db, event_id, modules):
+        return None
     return activity
 
 
@@ -499,6 +532,74 @@ DEFAULT_MODULES = [
     (2, "Debrief", ["Debrief"]),
     (2, "Programme Closing", ["Programme Closing"]),
 ]
+
+
+def _program_type_option_label(event):
+    detected = programme_family(event or {})
+    if detected == "RACE":
+        return "Formula R.A.C.E."
+    if detected == "AGILE":
+        return "AGILE"
+    if detected == "MISSION_AI":
+        return "Mission AI"
+    return "Standard"
+
+
+def _available_template_family(event):
+    detected = programme_family(event or {})
+    if detected == "RACE":
+        return "Formula R.A.C.E."
+    if detected == "AGILE":
+        return "AGILE"
+    if detected == "MISSION_AI":
+        return "Mission AI"
+    return "Standard"
+
+
+def _template_family_catalogue(event, programme_type):
+    selected = str(programme_type or "").strip().casefold()
+    if selected == "formula r.a.c.e.":
+        template_event = {"ProgrammeType": "Formula R.A.C.E."}
+        return templates_for_event(
+            template_event, DEFAULT_MODULES, module_templates(template_event)
+        )
+    if selected == "agile":
+        return templates_for_event({"ProgrammeType": "Enterprise AGILE"}, DEFAULT_MODULES, module_templates({}))
+    if selected == "mission ai":
+        return templates_for_event({"ProgrammeType": "Mission AI"}, DEFAULT_MODULES, module_templates({}))
+    return templates_for_event({"ProgrammeType": "Standard"}, DEFAULT_MODULES, module_templates({}))
+
+
+def _build_modules_from_catalogue(event_id, catalogue, day_start=1):
+    modules = []
+    for position, module in enumerate(catalogue, start=1):
+        day, module_name, activities = module
+        module_id = f"{event_id}-MOD-{uuid.uuid4().hex[:12].upper()}"
+        module_activities = [
+            _new_activity(
+                module_name,
+                int(day or day_start),
+                str(name or "Activity"),
+                activity_position + 1,
+                event_id=event_id,
+                module_id=module_id,
+            )
+            for activity_position, name in enumerate(activities, start=0)
+        ]
+        modules.append({
+            "ModuleID": module_id,
+            "ModuleName": module_name,
+            "Day": int(day or day_start),
+            "Activities": module_activities,
+            "ActivityCount": len(module_activities),
+            "DurationMinutes": sum(
+                int(activity.get("DurationMinutes", 0) or 0)
+                for activity in module_activities
+            ),
+            "StartTime": module_activities[0].get("StartTime", ""),
+            "ModuleOrder": position,
+        })
+    return modules
 
 
 def _new_activity(module_name, day, name, order, *, event_id="", module_id=""):
@@ -616,9 +717,15 @@ def render_programme_first_builder(db):
         return
     event = select_active_event(events, label="Event", key="programme_first_event")
     event_id = str(event.get("EventID", ""))
-    available_modules = templates_for_event(
-        event, DEFAULT_MODULES, module_templates(event),
+    template_type = st.selectbox(
+        "Programme Type Template",
+        ["Standard", "AGILE", "Mission AI", "Formula R.A.C.E."],
+        index=["Standard", "AGILE", "Mission AI", "Formula R.A.C.E."].index(
+            _program_type_option_label(event)
+        ),
+        key=f"programme_template_type_{event_id}",
     )
+    available_modules = _template_family_catalogue(event, template_type)
     modules = st.session_state.get(f"canonical_programme_preview_{event_id}")
     if not modules:
         modules = canonical_event_programme(
@@ -647,14 +754,23 @@ def render_programme_first_builder(db):
                 "DurationMinutes": sum(int(row.get("DurationMinutes", 0)) for row in activities),
                 "StartTime": activities[0].get("StartTime", "") if activities else ""})
     st.caption("Arrange the programme like slides. Open a module to edit everything inside it.")
-    state = st.session_state.get(f"programme_save_state_{event_id}")
-    if state:
-        timestamp = datetime.fromisoformat(state["Timestamp"]).astimezone().strftime("%d %b %Y · %H:%M:%S")
-        st.success(f"SAVED · {timestamp}")
-    else:
+    _show_programme_save_state(event_id)
+    if not st.session_state.get(f"programme_save_state_{event_id}"):
         st.caption("SAVED · loaded from persisted configuration")
 
-    with st.expander("Duplicate Existing Programme", expanded=True):
+    with st.expander("Use Template", expanded=not bool(modules)):
+        st.caption("Replace the current timeline with one of the available template families.")
+        if st.button("Apply selected template", key=f"apply_template_{event_id}"):
+            rebuilt = _build_modules_from_catalogue(event_id, available_modules)
+            if _save_modules(db, event_id, rebuilt):
+                modules = rebuilt
+                st.session_state.pop(f"canonical_programme_preview_{event_id}", None)
+                st.session_state[f"programme_notice_{event_id}"] = (
+                    f"Template '{template_type}' applied."
+                )
+                st.rerun()
+
+    with st.expander("Duplicate Existing Programme"):
         family = programme_family(event)
         candidates = []
         for candidate in events:
@@ -678,34 +794,45 @@ def render_programme_first_builder(db):
                 ),
                 key=f"duplicate_source_{event_id}",
             )
-            source_stages = next(rows for item, rows in candidates if str(item.get("EventID", "")) == source_id)
+            source_stages = next(
+                rows for item, rows in candidates
+                if str(item[0].get("EventID", "")) == source_id
+            )
             summary = duplication_summary(source_stages)
             st.write(f"{summary['ModuleCount']} modules · {summary['ActivityCount']} activities")
             st.caption("Modules: " + ", ".join(summary["Modules"]))
-            confirmation = st.selectbox(
-                "Safety confirmation",
-                [
-                    "Not confirmed",
-                    "Confirmed — duplicate configuration now",
-                ],
-                key=f"duplicate_confirm_{event_id}",
-            )
-            confirmed = confirmation.startswith("Confirmed")
+            if st.button("Duplicate now", type="primary", key=f"duplicate_now_{event_id}"):
+                try:
+                    result = db.duplicate_programme_configuration(source_id, event_id)
+                except Exception as error:
+                    _set_programme_save_state(event_id, "SAVE FAILED", error=error)
+                    st.error(f"Programme duplication failed: {error}")
+                else:
+                    st.session_state[f"programme_notice_{event_id}"] = (
+                        f"Duplicated {result['ModuleCount']} modules and "
+                        f"{result['ActivityCount']} activities from {source_id}. "
+                        "Destination remains unlaunched."
+                    )
+                    st.session_state.pop(f"programme_duplication_applied_{event_id}", None)
+                    st.session_state.pop(f"canonical_programme_preview_{event_id}", None)
+                    _set_programme_save_state(event_id, "SAVED")
+                    st.rerun()
+
             st.caption(
-                "No participants, teams, submissions, scores, wallets, transactions, "
+                "No participants, teams, registrations, submissions, scores, wallets, transactions, "
                 "judging, results, sessions, or runtime state will be copied."
             )
-            applied_key = f"programme_duplication_applied_{event_id}"
-            if not confirmed:
-                st.session_state[applied_key] = False
-            elif not st.session_state.get(applied_key, False):
-                result = db.duplicate_programme_configuration(source_id, event_id)
-                st.session_state[f"programme_save_state_{event_id}"] = saved_state()
-                st.session_state[f"programme_notice_{event_id}"] = (
-                    f"Duplicated {result['ModuleCount']} modules and {result['ActivityCount']} activities from {source_id}. Programme remains unlaunched."
-                )
-                st.session_state[applied_key] = True
+
+    with st.expander("Start Blank"):
+        st.warning(
+            "Start over with an empty programme, preserving only past operational data."
+        )
+        if st.button("Start blank", key=f"start_blank_{event_id}"):
+            if _save_modules(db, event_id, []):
+                st.session_state[f"programme_notice_{event_id}"] = "Started with a blank programme."
+                st.session_state.pop(f"canonical_programme_preview_{event_id}", None)
                 st.rerun()
+
     from engines.programme_adapter import CanonicalProgrammeAdapter
     validation = CanonicalProgrammeAdapter(event_id, db.get_programme_stages(event_id)).snapshot()
     if validation.errors:
@@ -769,11 +896,11 @@ def render_programme_first_builder(db):
                 1 if insert_position == "After selected module" else 0
             )
         modules.insert(insert_at, module)
-        _save_modules(db, event_id, modules)
-        st.session_state[f"programme_notice_{event_id}"] = (
-            f"{name} added at position {insert_at + 1}"
-        )
-        st.rerun()
+        if _save_modules(db, event_id, modules):
+            st.session_state[f"programme_notice_{event_id}"] = (
+                f"{name} added at position {insert_at + 1}"
+            )
+            st.rerun()
     if defaults_col.button("Add Default Programme", width="stretch"):
         existing_names = {module["ModuleName"].casefold() for module in modules}
         for default_day, default_name, default_activities in available_modules:
@@ -792,9 +919,9 @@ def render_programme_first_builder(db):
                     for position, activity in enumerate(default_activities, start=1)
                 ],
             })
-        _save_modules(db, event_id, modules)
-        st.session_state[f"programme_notice_{event_id}"] = "Default programme added"
-        st.rerun()
+        if _save_modules(db, event_id, modules):
+            st.session_state[f"programme_notice_{event_id}"] = "Default programme added"
+            st.rerun()
     notice = st.session_state.pop(f"programme_notice_{event_id}", "")
     if notice:
         st.success(notice)
@@ -851,23 +978,23 @@ def render_programme_first_builder(db):
             if move_action_col.button("Move", key=f"module_move_direct_{event_id}_{index}"):
                 moved = modules.pop(index)
                 modules.insert(int(move_target) - 1, moved)
-                _save_modules(db, event_id, modules)
-                st.session_state[f"programme_notice_{event_id}"] = (
-                    f"{moved['ModuleName']} moved to position {move_target}"
-                )
-                st.rerun()
+                if _save_modules(db, event_id, modules):
+                    st.session_state[f"programme_notice_{event_id}"] = (
+                        f"{moved['ModuleName']} moved to position {move_target}"
+                    )
+                    st.rerun()
             if up_col.button("↑ Move", disabled=index == 0, key=f"mod_up_{event_id}_{index}"):
                 modules[index - 1], modules[index] = modules[index], modules[index - 1]
-                _save_modules(db, event_id, modules)
-                st.rerun()
+                if _save_modules(db, event_id, modules):
+                    st.rerun()
             if down_col.button("↓ Move", disabled=index == len(modules) - 1, key=f"mod_down_{event_id}_{index}"):
                 modules[index + 1], modules[index] = modules[index], modules[index + 1]
-                _save_modules(db, event_id, modules)
-                st.rerun()
+                if _save_modules(db, event_id, modules):
+                    st.rerun()
             if remove_col.button("Delete", key=f"mod_remove_{event_id}_{index}"):
                 modules.pop(index)
-                _save_modules(db, event_id, modules)
-                st.rerun()
+                if _save_modules(db, event_id, modules):
+                    st.rerun()
 
             notice_key = f"activity_added_notice_{event_id}"
             activity_added = (
@@ -1036,9 +1163,9 @@ def render_programme_first_builder(db):
                             ),
                         },
                     })
-                    _save_modules(db, event_id, modules)
-                    st.session_state[f"programme_notice_{event_id}"] = "Module saved"
-                    st.rerun()
+                    if _save_modules(db, event_id, modules):
+                        st.session_state[f"programme_notice_{event_id}"] = "Module saved"
+                        st.rerun()
                 if cancel_module_col.button("Cancel", key=f"mod_cancel_{event_id}_{index}"):
                     st.rerun()
                 st.markdown("#### Activities")
@@ -1090,9 +1217,9 @@ def render_programme_first_builder(db):
                         })
                         revised.append(item)
                     module["Activities"] = revised
-                    _save_modules(db, event_id, modules)
-                    st.success("Internal flow saved to this event copy.")
-                    st.rerun()
+                    if _save_modules(db, event_id, modules):
+                        st.success("Internal flow saved to this event copy.")
+                        st.rerun()
 
                 with st.form(
                     f"add_activity_form_{event_id}_{module['ModuleID']}",
@@ -1120,7 +1247,7 @@ def render_programme_first_builder(db):
                                 "Activity Name is required. Enter a name before adding."
                             )
                         else:
-                            _add_activity(
+                            activity = _add_activity(
                                 db,
                                 event_id,
                                 modules,
@@ -1128,8 +1255,9 @@ def render_programme_first_builder(db):
                                 new_name,
                                 new_minutes,
                             )
-                            st.session_state[notice_key] = module["ModuleName"]
-                            st.rerun()
+                            if activity is not None:
+                                st.session_state[notice_key] = module["ModuleName"]
+                                st.rerun()
 
                 activity_names = [
                     f"{position}. {item.get('StageName', 'Activity')}"
@@ -1251,11 +1379,11 @@ def render_programme_first_builder(db):
                     ):
                         moved_activity = module["Activities"].pop(selected_position)
                         module["Activities"].insert(int(activity_target) - 1, moved_activity)
-                        _save_modules(db, event_id, modules)
-                        st.session_state[f"programme_notice_{event_id}"] = (
-                            f"{moved_activity.get('StageName', 'Activity')} moved"
-                        )
-                        st.rerun()
+                        if _save_modules(db, event_id, modules):
+                            st.session_state[f"programme_notice_{event_id}"] = (
+                                f"{moved_activity.get('StageName', 'Activity')} moved"
+                            )
+                            st.rerun()
                     save_activity, delete_activity = st.columns([3, 1])
                     if save_activity.button(
                         "Save Activity", type="primary",
@@ -1298,9 +1426,9 @@ def render_programme_first_builder(db):
                             "EvidenceRequired": activity_evidence,
                             "ModuleDetails": details["ModuleDetails"],
                         })
-                        _save_modules(db, event_id, modules)
-                        st.session_state[f"programme_notice_{event_id}"] = "Activity saved"
-                        st.rerun()
+                        if _save_modules(db, event_id, modules):
+                            st.session_state[f"programme_notice_{event_id}"] = "Activity saved"
+                            st.rerun()
                     if delete_activity.button(
                         "Delete Activity",
                         key=f"delete_activity_{event_id}_{index}_{selected_position}",
@@ -1308,8 +1436,8 @@ def render_programme_first_builder(db):
                         module["Activities"].pop(selected_position)
                         if not module["Activities"]:
                             modules.pop(index)
-                        _save_modules(db, event_id, modules)
-                        st.rerun()
+                        if _save_modules(db, event_id, modules):
+                            st.rerun()
                 if module["ModuleName"].casefold() == "sync ai":
                     st.divider()
                     render_sync_ai_editor(db, event_id)
