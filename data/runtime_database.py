@@ -1,3 +1,4 @@
+import csv
 import io
 import json
 import os
@@ -1562,6 +1563,145 @@ class SupabaseRuntimeDB:
                 admin=True,
             ) or []
             for table in tables
+        }
+
+    def _to_csv_payload(self, rows, fieldnames):
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in fieldnames})
+        return buffer.getvalue().encode("utf-8")
+
+    def export_event_csv_bundle(self, event_id):
+        """Return CSV payloads for key event surfaces required for reporting."""
+        clean_event_id = str(event_id).strip()
+
+        def fetch(table):
+            return self._request(
+                "GET",
+                table,
+                query={"event_id": f"eq.{clean_event_id}"},
+                admin=True,
+            ) or []
+
+        participants = fetch("runtime_participants")
+        teams = fetch("runtime_teams")
+        submissions = fetch("runtime_submissions")
+        credits = fetch("runtime_credit_transactions")
+        marketplace_items = fetch("runtime_marketplace_items")
+        marketplace_purchases = fetch("runtime_marketplace_purchases")
+        score_rows = fetch("judge_scores")
+        race_results = fetch("formula_race_results")
+        judging = fetch("formula_race_judging")
+        programme = self.get_programme_hierarchy(clean_event_id)
+
+        nasi_rows = [
+            row for row in submissions
+            if str(row.get("SubmissionType", "")).upper() in {"NASI", "REFLECTION"}
+        ]
+        gps_rows = [
+            {
+                **row,
+                "accuracy_meters": (
+                    row.get("AccuracyMeters", "")
+                    if not isinstance(row.get("CanonicalContext", {}), dict)
+                    else row.get("CanonicalContext", {}).get("accuracy_meters", "")
+                ),
+                "captured_at": (
+                    row.get("CapturedAt", "")
+                    if not isinstance(row.get("CanonicalContext", {}), dict)
+                    else row.get("CanonicalContext", {}).get("timestamp", "")
+                ),
+                "radius_meters": (
+                    row.get("RadiusMeters", "")
+                    if not isinstance(row.get("CanonicalContext", {}), dict)
+                    else row.get("CanonicalContext", {}).get("radius_meters", "")
+                ),
+                "distance_meters": (
+                    row.get("DistanceMeters", "")
+                    if not isinstance(row.get("CanonicalContext", {}), dict)
+                    else row.get("CanonicalContext", {}).get("distance_meters", "")
+                ),
+            }
+            for row in submissions
+            if str(row.get("SubmissionType", "")).upper().startswith("GPS")
+        ]
+
+        programme_rows = []
+        for module in programme:
+            module_id = module.get("ModuleID", "")
+            for activity in module.get("Activities", []):
+                activity_record = dict(activity)
+                activity_record.update({
+                    "programme_id": module.get("ProgrammeID", ""),
+                    "programme_name": module.get("ProgrammeName", ""),
+                    "module_id": module_id,
+                    "module_name": module.get("ModuleName", ""),
+                })
+                programme_rows.append(activity_record)
+
+        return {
+            "participants.csv": self._to_csv_payload(
+                participants,
+                ["ParticipantID", "TeamID", "Name", "DisplayName", "Status", "RegisteredAt", "JoinedAt"],
+            ),
+            "teams.csv": self._to_csv_payload(
+                teams,
+                ["TeamID", "TeamName", "EventID", "MemberCount", "Country", "CreatedAt"],
+            ),
+            "programme.csv": self._to_csv_payload(
+                programme_rows,
+                [
+                    "programme_id", "programme_name", "module_id", "module_name",
+                    "ActivityID", "ActivityName", "Title", "ActivityType",
+                    "ScoringMode", "DisplayOrder", "Duration",
+                ],
+            ),
+            "submissions.csv": self._to_csv_payload(
+                submissions,
+                ["SubmissionID", "EventID", "ProgrammeID", "ModuleID", "ActivityID",
+                 "ParticipantID", "TeamID", "SubmissionType", "Metric1", "Metric2",
+                 "Metric3", "SubmittedAt", "Judged", "GPSResult", "Remarks"],
+            ),
+            "nasi.csv": self._to_csv_payload(
+                nasi_rows,
+                ["SubmissionID", "EventID", "TeamID", "ActivityID", "Remarks",
+                 "SubmittedAt", "SubmissionType"],
+            ),
+            "scores.csv": self._to_csv_payload(
+                score_rows,
+                ["judge_score_id", "event_id", "team_id", "activity_id",
+                 "experience_assignment_id", "judge_id", "score", "status", "created_at"],
+            ),
+            "credits.csv": self._to_csv_payload(
+                credits,
+                ["TransactionID", "EventID", "TeamID", "Amount", "Description",
+                 "Balance", "CreatedAt", "TransactionType", "Reason"],
+            ),
+            "marketplace_items.csv": self._to_csv_payload(
+                marketplace_items,
+                ["ItemID", "EventID", "ItemName", "Price", "Description", "ItemType", "Enabled"],
+            ),
+            "marketplace.csv": self._to_csv_payload(
+                marketplace_purchases,
+                ["PurchaseID", "EventID", "TeamID", "ItemID", "Quantity", "PointsSpent", "PurchasedAt"],
+            ),
+            "judging.csv": self._to_csv_payload(
+                judging,
+                ["judging_score_id", "event_id", "team_id", "total_score", "scores",
+                 "reason", "is_current", "created_at"],
+            ),
+            "race_results.csv": self._to_csv_payload(
+                race_results,
+                ["race_result_id", "event_id", "team_id", "finish_time_ms", "penalty_ms",
+                 "bonus_credits", "verified", "reason", "updated_at", "created_at"],
+            ),
+            "gps_evidence.csv": self._to_csv_payload(
+                gps_rows,
+                ["SubmissionID", "TeamID", "EventID", "ActivityID", "Metric1", "Metric2", "accuracy_meters",
+                 "captured_at", "radius_meters", "distance_meters"],
+            ),
         }
 
     def permanently_delete_event(self, event_id):

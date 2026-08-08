@@ -15,21 +15,20 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_all_facilitator_broadcast_modes_are_available():
     assert BROADCAST_MODES == [
         "Welcome",
-        "Story",
-        "Experience",
-        "Countdown",
+        "Current Activity",
+        "Multiple Activities",
         "Leaderboard",
-        "Credits",
-        "Announcement",
-        "Sync AI",
-        "The King",
+        "Scores",
+        "Timer",
+        "Instructions",
+        "Results",
+        "Championship",
+        "Custom Message",
         "Blank",
-        "Custom Image",
-        "Custom Video",
     ]
 
 
-def test_broadcast_state_uses_event_metadata_only():
+def test_broadcast_state_normalises_legacy_modes():
     event = {
         "EventID": "EVT-0004",
         "Notes": json.dumps({
@@ -44,17 +43,17 @@ def test_broadcast_state_uses_event_metadata_only():
 
     state = projector_broadcast_state(event)
 
-    assert state["Mode"] == "Announcement"
+    assert state["Mode"] == "Custom Message"
     assert state["Title"] == "Lunch Break"
     assert state["Message"] == "Return at 2:00 PM"
     assert state["PresentationMode"] is True
 
 
-def test_announcement_renders_as_full_screen_projector_content():
+def test_custom_message_renders_as_full_screen_projector_content():
     with patch("screens.projector_broadcast.st.markdown") as markdown:
         rendered = render_projector_broadcast(
             {
-                "Mode": "Announcement",
+                "Mode": "Custom Message",
                 "Title": "Lunch Break",
                 "Message": "Return at 2:00 PM",
                 "PresentationMode": True,
@@ -70,7 +69,7 @@ def test_announcement_renders_as_full_screen_projector_content():
     assert rendered is True
     assert "Lunch Break" in markup
     assert "Return at 2:00 PM" in markup
-    assert "broadcast-presentation" in markup
+    assert "broadcast-presentation" in markup.lower()
 
 
 def test_blank_mode_is_a_true_black_projector_screen():
@@ -88,7 +87,7 @@ def test_blank_mode_is_a_true_black_projector_screen():
     assert 'class="broadcast-blank"' in markdown.call_args.args[0]
 
 
-def test_experience_mode_uses_existing_experience_without_mutating_it():
+def test_current_activity_mode_uses_current_experience_without_mutating_it():
     mission = {
         "Title": "The Paris Fragment",
         "ParticipantInstructions": "Recover visual confirmation.",
@@ -100,8 +99,8 @@ def test_experience_mode_uses_existing_experience_without_mutating_it():
         return_value="https://example.test/paris.jpg",
     ), patch("screens.projector_broadcast.st.markdown") as markdown:
         render_projector_broadcast(
-            {"Mode": "Experience", "PresentationMode": True},
-            event={},
+            {"Mode": "Current Activity", "PresentationMode": True},
+            event={"EventName": "Demo"},
             mission=mission,
             leaderboard=[],
             wallet_status={},

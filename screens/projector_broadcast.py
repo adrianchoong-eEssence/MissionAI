@@ -12,18 +12,47 @@ from engines.stage_timer import remaining_seconds
 
 BROADCAST_MODES = [
     "Welcome",
+    "Current Activity",
+    "Multiple Activities",
+    "Leaderboard",
+    "Scores",
+    "Timer",
+    "Instructions",
+    "Results",
+    "Championship",
+    "Custom Message",
+    "Blank",
+]
+
+LEGACY_BROADCAST_MODES = {
     "Story",
     "Experience",
     "Countdown",
-    "Leaderboard",
     "Credits",
     "Announcement",
     "Sync AI",
     "The King",
-    "Blank",
     "Custom Image",
     "Custom Video",
-]
+}
+
+_LEGACY_MODE_MAP = {
+    "Story": "Current Activity",
+    "Experience": "Current Activity",
+    "Countdown": "Timer",
+    "Credits": "Scores",
+    "Announcement": "Custom Message",
+    "Sync AI": "Instructions",
+    "The King": "Results",
+    "Custom Image": "Custom Message",
+    "Custom Video": "Custom Message",
+}
+
+
+def _normalise_mode(mode):
+    if not mode:
+        return "Welcome"
+    return _LEGACY_MODE_MAP.get(str(mode).strip(), str(mode).strip())
 
 DEFAULT_BROADCAST = {
     "Mode": "Welcome",
@@ -48,6 +77,7 @@ def projector_broadcast_state(event):
         for key, value in dict(stored).items()
         if key in state
     })
+    state["Mode"] = _normalise_mode(state.get("Mode"))
     if state["Mode"] not in BROADCAST_MODES:
         state["Mode"] = "Welcome"
     state["PresentationMode"] = bool(state.get("PresentationMode", True))
@@ -113,24 +143,24 @@ def render_broadcast_controller(db, event_id, control=None):
 
     title = str(state.get("Title", ""))
     message = str(state.get("Message", ""))
-    if mode in {"Announcement", "Sync AI", "The King"}:
+    if mode in {"Instructions", "Custom Message", "Results"}:
         title = st.text_input(
             "Broadcast title",
             value=title,
             placeholder=(
-                "Lunch Break"
-                if mode == "Announcement"
+                "Projector Message"
+                if mode == "Custom Message"
                 else mode
             ),
             key=f"projector_broadcast_title_{event_id}_{mode}",
         )
-    if mode in {"Story", "Announcement", "The King"}:
+    if mode in {"Instructions", "Custom Message", "Results", "Championship"}:
         message = st.text_area(
             "Broadcast message",
             value=message,
             placeholder=(
                 "Return at 2:00 PM"
-                if mode == "Announcement"
+                if mode == "Custom Message"
                 else "Enter the full-screen transmission."
             ),
             key=f"projector_broadcast_message_{event_id}_{mode}",
@@ -141,7 +171,7 @@ def render_broadcast_controller(db, event_id, control=None):
     character_reference = str(state.get("CharacterReference", ""))
     custom_image_reference = str(state.get("CustomImageReference", ""))
 
-    if mode in {"Welcome", "Sync AI", "The King"}:
+    if mode in {"Welcome", "Instructions", "Results", "Championship"}:
         background_label = st.selectbox(
             "Background image",
             list(backgrounds),
@@ -157,7 +187,7 @@ def render_broadcast_controller(db, event_id, control=None):
             key=f"projector_logo_{event_id}",
         )
         logo_reference = logos[logo_label]
-    if mode in {"Story", "The King"}:
+    if mode in {"Instructions", "Results", "Championship"}:
         character_label = st.selectbox(
             "Character portrait",
             list(characters),
@@ -167,18 +197,16 @@ def render_broadcast_controller(db, event_id, control=None):
         character_reference = characters[character_label]
 
     uploaded_image = None
-    if mode == "Custom Image":
+    if mode in {"Current Activity", "Instructions", "Results", "Championship"}:
         uploaded_image = st.file_uploader(
-            "Upload projector image",
+            "Optional projector image",
             type=["jpg", "jpeg", "png", "webp", "heic"],
-            key=f"projector_custom_image_{event_id}",
+            key=f"projector_custom_image_{event_id}_{mode}",
         )
         if custom_image_reference:
             preview = get_mission_media_url(custom_image_reference)
             if preview:
                 st.image(preview, width="stretch")
-    elif mode == "Custom Video":
-        st.info("Custom Video is reserved. Playback is not enabled yet.")
 
     if control is None:
         st.info("Broadcast controls are read-only outside Control Centre.")
@@ -289,73 +317,78 @@ def render_projector_broadcast(
         )
         return True
 
-    if mode == "Story":
-        portrait_reference = (
-            state.get("CharacterReference")
-            or (mission or {}).get("CharacterPortraitURL", "")
-        )
-        portrait = _image(
-            portrait_reference,
-            "broadcast-character",
-            str((mission or {}).get("CharacterSource", "Character")),
-        )
-        transmission = message or html.escape(
-            str((mission or {}).get("Transmission", "Incoming transmission…"))
-        ).replace("\n", "<br>")
-        character_name = html.escape(
-            str((mission or {}).get("CharacterSource", "Transmission"))
-        )
-        st.markdown(
-            f"""
-            <div class="broadcast-screen broadcast-story{presentation_class}">
-              {portrait}
-              <div class="broadcast-story-copy">
-                <div class="broadcast-kicker">{character_name}</div>
-                <div class="broadcast-message">{transmission}</div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        return True
-
-    if mode == "Experience":
-        image = _image(
-            (mission or {}).get("ReferenceImageURL", ""),
-            "broadcast-experience-image",
-            "Experience reference",
-        )
-        mission_title = html.escape(
-            str((mission or {}).get("Title", "Waiting for Experience"))
-        )
-        instructions = html.escape(
-            str(
-                (mission or {}).get("ParticipantInstructions")
-                or (mission or {}).get("Description")
-                or "Stand by for the next Experience."
+    if mode in {"Current Activity", "Multiple Activities"}:
+        if not mission:
+            st.markdown(
+                f"""
+                <div class="broadcast-screen broadcast-centred{presentation_class}">
+                  <div class="broadcast-message">No activity selected.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
-        ).replace("\n", "<br>")
+            return True
+
+        if mode == "Current Activity":
+            mission_title = html.escape(
+                str((mission or {}).get("Title", "Waiting for Activity"))
+            )
+            instructions = html.escape(
+                str(
+                    (mission or {}).get("ParticipantInstructions")
+                    or (mission or {}).get("Description")
+                    or "Stand by for the next Activity."
+                )
+            ).replace("\n", "<br>")
+            image = _image(
+                (mission or {}).get("ReferenceImageURL", ""),
+                "broadcast-experience-image",
+                "Activity reference",
+            )
+            st.markdown(
+                f"""
+                <div class="broadcast-screen broadcast-experience{presentation_class}">
+                  <div class="broadcast-experience-copy">
+                    <div class="broadcast-kicker">Current Activity</div>
+                    <div class="broadcast-title">{mission_title}</div>
+                    <div class="broadcast-message">{instructions}</div>
+                  </div>
+                  {image}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            return True
+
+        rows = "".join(
+            f"""
+            <div class="broadcast-ranking">
+              <span>{position}. {html.escape(str(activity.get('Title', 'Activity')))}</span>
+              <strong>{html.escape(str(activity.get('DurationMinutes', '')))} min</strong>
+            </div>
+            """
+            for position, activity in enumerate(
+                mission.get("Activities", []) if isinstance(mission, dict) else mission, start=1
+            )
+            if position <= 6
+        ) or '<div class="broadcast-message">No activities are active.</div>'
         st.markdown(
             f"""
-            <div class="broadcast-screen broadcast-experience{presentation_class}">
-              <div class="broadcast-experience-copy">
-                <div class="broadcast-kicker">Current Experience</div>
-                <div class="broadcast-title">{mission_title}</div>
-                <div class="broadcast-message">{instructions}</div>
-              </div>
-              {image}
+            <div class="broadcast-screen broadcast-centred{presentation_class}">
+              <div class="broadcast-title">Multiple Activities</div>
+              {rows}
             </div>
             """,
             unsafe_allow_html=True,
         )
         return True
 
-    if mode == "Countdown":
+    if mode == "Timer":
         remaining = remaining_seconds(timer or {})
         st.markdown(
             f"""
             <div class="broadcast-screen broadcast-centred{presentation_class}">
-              <div class="broadcast-kicker">Countdown</div>
+              <div class="broadcast-kicker">Timer</div>
               <div class="broadcast-countdown">
                 {remaining // 60:02d}:{remaining % 60:02d}
               </div>
@@ -386,7 +419,7 @@ def render_projector_broadcast(
         )
         return True
 
-    if mode == "Credits":
+    if mode == "Scores":
         wallets = sorted(
             (wallet_status or {}).get("Wallets", []) or [],
             key=lambda row: -float(row.get("EarnedCredits", 0) or 0),
@@ -411,11 +444,11 @@ def render_projector_broadcast(
         )
         return True
 
-    if mode == "Announcement":
+    if mode == "Custom Message":
         st.markdown(
             f"""
             <div class="broadcast-screen broadcast-centred{presentation_class}">
-              <div class="broadcast-title">{title or 'Announcement'}</div>
+              <div class="broadcast-title">{title or 'Projector Message'}</div>
               <div class="broadcast-message">{message}</div>
             </div>
             """,
@@ -423,33 +456,34 @@ def render_projector_broadcast(
         )
         return True
 
-    if mode == "Sync AI":
+    if mode == "Instructions":
         st.markdown(
             f"""
             <div class="broadcast-screen broadcast-centred{presentation_class}"
                  style="{_background_style(state.get('BackgroundReference'))}">
-              <div class="broadcast-kicker">EXOS</div>
-              <div class="broadcast-title">{title or 'Sync AI'}</div>
+              <div class="broadcast-kicker">Instructions</div>
+              <div class="broadcast-title">{title or 'Instructions'}</div>
+              <div class="broadcast-message">{message}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
         return True
 
-    if mode == "The King":
+    if mode == "Results":
         portrait = _image(
             state.get("CharacterReference"),
             "broadcast-king",
-            "The King",
+            "Champion",
         )
         st.markdown(
             f"""
-            <div class="broadcast-screen broadcast-king-screen{presentation_class}"
+            <div class="broadcast-screen broadcast-centred{presentation_class}"
                  style="{_background_style(state.get('BackgroundReference'))}">
               {portrait}
-              <div class="broadcast-king-copy">
-                <div class="broadcast-kicker">The King</div>
-                <div class="broadcast-title">{title or 'The King'}</div>
+              <div>
+                <div class="broadcast-kicker">Results</div>
+                <div class="broadcast-title">{title or 'Live Results'}</div>
                 <div class="broadcast-message">{message}</div>
               </div>
             </div>
@@ -458,28 +492,13 @@ def render_projector_broadcast(
         )
         return True
 
-    if mode == "Custom Image":
-        image = _image(
-            state.get("CustomImageReference"),
-            "broadcast-custom-image",
-            "Custom projector broadcast",
-        )
+    if mode == "Championship":
         st.markdown(
             f"""
-            <div class="broadcast-screen broadcast-centred{presentation_class}">
-              {image or '<div class="broadcast-message">No custom image selected.</div>'}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        return True
-
-    if mode == "Custom Video":
-        st.markdown(
-            f"""
-            <div class="broadcast-screen broadcast-centred{presentation_class}">
-              <div class="broadcast-title">Custom Video</div>
-              <div class="broadcast-message">Playback will be enabled in a future release.</div>
+            <div class="broadcast-screen broadcast-rankings{presentation_class}">
+              <div class="broadcast-title">Championship</div>
+              <div class="broadcast-message">{message or 'Top team by competitive score.'}</div>
+              <div class="broadcast-metric">{title}</div>
             </div>
             """,
             unsafe_allow_html=True,

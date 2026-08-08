@@ -14,7 +14,7 @@ from branding import (
     footer,
     participant_install_experience,
 )
-from ai.facilitator import ask_facilitator
+from services.platform_ai_service import get_platform_ai_service
 from components.team_geolocation import team_geolocation
 from data.google_drive import (
     delete_evidence_file,
@@ -320,6 +320,10 @@ def persist_session_in_query_params():
 
 
 def normalise_submission_type(mission):
+    gps_pref = _normalise_gps_support(mission)
+    if gps_pref:
+        return gps_pref
+
     raw_type = str(mission.get("SubmissionType", "") or "").strip().upper()
     title = str(mission.get("Title", "") or "").strip().upper()
     description = str(mission.get("Description", "") or "").strip().upper()
@@ -355,6 +359,136 @@ def normalise_submission_type(mission):
         return "NONE"
 
     return raw_type or "PHOTO"
+
+
+def _normalise_bool(value):
+    text = str(value).strip().upper()
+    return text in {"1", "YES", "TRUE", "ON"}
+
+
+def _mission_evidence_required(mission):
+    details = activity_details(mission)
+    module_details = details.get("ModuleDetails", {})
+    if isinstance(module_details, dict):
+        if str(module_details.get("EvidenceType", "")).strip().upper() != "":
+            evidence_type = str(module_details.get("EvidenceType", "")).strip().upper()
+            if evidence_type == "NONE":
+                return False
+            if evidence_type:
+                return True
+        if str(module_details.get("EvidenceRequired", "")).strip().upper():
+            return _normalise_bool(module_details.get("EvidenceRequired"))
+
+    if str(mission.get("EvidenceType", "")).strip():
+        return str(mission.get("EvidenceType")).strip().upper() != "NONE"
+    return bool(details.get("EvidenceRequired", False)) or _normalise_bool(
+        mission.get("EvidenceRequired")
+    )
+
+
+def _split_evidence_modes(raw):
+    tokens = []
+    if isinstance(raw, (list, tuple, set)):
+        return [str(item).strip().upper() for item in raw]
+    if not raw:
+        return []
+    text = str(raw)
+    for separator in [",", ";", "|"]:
+        text = text.replace(separator, " ")
+    for token in text.replace("/", " ").split():
+        token = str(token or "").strip().upper()
+        if token:
+            tokens.append(token)
+    if not tokens:
+        return []
+    if len(tokens) == 1:
+        return tokens
+    normalised = []
+    for token in tokens:
+        if token in {"PHOTO", "VIDEO", "AUDIO", "TEXT", "NONE", "MULTIPLE", "BOTH"}:
+            normalised.append(token)
+    return normalised
+
+
+def _mission_evidence_modes(mission):
+    raw_evidence = _split_evidence_modes(mission.get("EvidenceType", ""))
+    if raw_evidence:
+        if raw_evidence == ["NONE"]:
+            return []
+        return raw_evidence
+    module_details = activity_details(mission).get("ModuleDetails", {})
+    evidence = _split_evidence_modes(
+        module_details.get("EvidenceType") if isinstance(module_details, dict) else ""
+    )
+    if evidence:
+        return evidence
+    evidence = _split_evidence_modes(mission.get("EvidenceType", mission.get("EvidenceRequirement", "")))
+    if evidence:
+        return evidence
+    if not evidence:
+        evidence = ["TEXT"]
+    if evidence == ["NONE"]:
+        return []
+    return evidence
+
+
+def _read_gps_radius(mission, default=50):
+    details = activity_details(mission).get("ModuleDetails", {})
+    radius = (
+        mission.get("GeofenceRadius")
+        if mission.get("GeofenceRadius") not in (None, "")
+        else details.get("GeofenceRadius")
+    )
+    if radius in (None, ""):
+        radius = mission.get("Radius")
+    if radius in (None, ""):
+        radius =  details.get("RadiusMeters", default)
+    try:
+        parsed = float(radius)
+        if parsed <= 0:
+            raise ValueError
+        return parsed
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _gps_payload_from_position(location):
+    if not isinstance(location, dict):
+        return None
+    try:
+        return {
+            "latitude": float(location.get("latitude")),
+            "longitude": float(location.get("longitude")),
+            "accuracy_meters": float(location.get("accuracy_meters"))
+            if location.get("accuracy_meters") not in (None, "")
+            else float(location.get("accuracy") or 0),
+            "captured_at": str(location.get("captured_at") or datetime.utcnow().isoformat()),
+            "heading_degrees": float(location.get("heading_degrees") or 0),
+            "speed_mps": float(location.get("speed_mps") or 0),
+        }
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalise_gps_support(mission):
+    if not _normalise_bool(mission.get("GPSRequired")):
+        return ""
+    if not _mission_evidence_required(mission):
+        return "GPS"
+    types = set(_mission_evidence_modes(mission))
+    if types == {"PHOTO"}:
+        return "GPS_PHOTO"
+    if types == {"VIDEO"}:
+        return "GPS_VIDEO"
+    if types == {"AUDIO"}:
+        return "GPS_AUDIO"
+    if types in ({"TEXT"},):
+        return "GPS_TEXT"
+    if types == {"VIDEO", "PHOTO"}:
+        return "GPS_BOTH"
+    if types in ({"TEXT", "MULTIPLE"}, {"PHOTO", "MULTIPLE"}, {"PHOTO", "TEXT"}, {"VIDEO", "TEXT"}, {"AUDIO", "TEXT"}, {"AUDIO", "PHOTO"}, {"TEXT", "VIDEO", "PHOTO"}, {"MULTIPLE", "TEXT", "PHOTO"}):
+        return "GPS_BOTH"
+    return "GPS_BOTH"
 
 
 def render_team_assignment_card(db):
@@ -988,6 +1122,8 @@ def render_submission_form(db, mission, submission_type):
         render_multiple_evidence_form(db, mission)
     elif submission_type == "QR":
         render_qr_form(db, mission)
+    elif submission_type in {"GPS_TEXT", "GPS_PHOTO", "GPS_VIDEO", "GPS_AUDIO", "GPS_BOTH"}:
+        render_gps_submission_form(db, mission, submission_type)
     elif submission_type == "GPS":
         render_gps_form(db, mission)
     elif submission_type == "NONE":
@@ -1036,40 +1172,187 @@ def _distance_metres(latitude1, longitude1, latitude2, longitude2):
     return radius * 2 * math.atan2(math.sqrt(value), math.sqrt(1 - value))
 
 
-def render_gps_form(db, mission):
-    st.subheader("📍 GPS Validation")
+def _gps_within_radius(gps_payload, mission):
+    if not gps_payload:
+        return False, 0, 0
+
+    target_latitude = mission.get("Latitude")
+    target_longitude = mission.get("Longitude")
+    if target_latitude in (None, "") or target_longitude in (None, ""):
+        details = activity_details(mission).get("ModuleDetails", {})
+        target_latitude = details.get("Latitude")
+        target_longitude = details.get("Longitude")
+
+    try:
+        target_latitude = float(target_latitude)
+        target_longitude = float(target_longitude)
+    except (TypeError, ValueError):
+        return False, 0, 0
+
+    radius = _read_gps_radius(mission)
+    distance = _distance_metres(
+        gps_payload["latitude"],
+        gps_payload["longitude"],
+        target_latitude,
+        target_longitude,
+    )
+    return distance <= radius, distance, radius
+
+
+def render_gps_submission_form(db, mission, gps_type):
+    st.subheader("📍 GPS Checkpoint")
     st.caption(str(mission.get("LocationDescription", "") or ""))
-    st.info("Location is requested only when you press the button below.")
+    st.info("Location is captured from your device and paired with this checkpoint.")
+
+    requires_photo = gps_type in {"GPS_PHOTO", "GPS_BOTH"}
+    requires_video = gps_type == "GPS_VIDEO"
+    requires_audio = gps_type == "GPS_AUDIO"
+    requires_media = requires_video or requires_audio
+    requires_text = gps_type in {"GPS_TEXT", "GPS_BOTH"}
+
+    selected_photo = None
+    selected_media = None
+    media_kind = "PHOTO"
+    response_text = ""
+    if requires_media:
+        media_kind = (
+            "VIDEO" if requires_video else "AUDIO"
+        )
+        media_label = (
+            "Checkpoint video" if requires_video else
+            "Checkpoint audio"
+        )
+        extensions = (
+            ["mp4", "mov", "webm"]
+            if requires_video else
+            ["mp3", "m4a", "wav", "aac", "ogg"]
+        )
+        selected_media = st.file_uploader(
+            media_label,
+            type=extensions,
+            key=f"gps_media_{mission.get('MissionID', '')}_{media_kind}",
+        )
+        if selected_media is not None and requires_video:
+            st.video(selected_media)
+        elif selected_media is not None and requires_audio:
+            st.audio(selected_media)
+        if requires_video and selected_media is not None:
+            st.caption("Video received and ready to submit.")
+        if requires_audio and selected_media is not None:
+            st.caption("Audio received and ready to submit.")
+    if requires_photo:
+        selected_photo = st.file_uploader(
+            "Checkpoint photo",
+            type=["jpg", "jpeg", "png", "webp"],
+            key=f"gps_photo_{mission.get('MissionID', '')}",
+        )
+        if selected_photo is not None:
+            st.image(selected_photo, width="stretch")
+    if requires_text:
+        response_text = st.text_area(
+            "Checkpoint response",
+            key=f"gps_text_{mission.get('MissionID', '')}",
+            placeholder="Add a short checkpoint response.",
+        )
+
     location = team_geolocation(
         interval_seconds=20,
         key=f"mission_gps_{mission.get('EventID')}_{mission.get('MissionID')}",
     )
-    if location:
-        try:
-            latitude = float(location.get("latitude"))
-            longitude = float(location.get("longitude"))
-            target_latitude = float(mission.get("Latitude"))
-            target_longitude = float(mission.get("Longitude"))
-            radius = float(mission.get("GeofenceRadius", 50) or 50)
-            distance = _distance_metres(
-                latitude, longitude, target_latitude, target_longitude,
-            )
-        except (TypeError, ValueError):
-            st.error("The configured checkpoint location is incomplete.")
-            return
-        st.caption(f"Distance to checkpoint: {distance:.0f} metres")
-        if distance <= radius:
-            if st.button("Confirm Arrival and Submit", width="stretch"):
-                save_structured_submission(
-                    db, mission, "GPS",
-                    metric1=str(latitude), metric2=str(longitude),
-                    metric3=f"{distance:.1f}",
-                    remarks="GPS checkpoint validated.",
+    payload = _gps_payload_from_position(location)
+    if not payload:
+        st.caption("Waiting for GPS reading.")
+        return
+
+    in_zone, distance, radius = _gps_within_radius(payload, mission)
+    if not in_zone:
+        st.warning(
+            f"Distance to checkpoint: {distance:.1f}m (must be within {radius:.0f}m)."
+        )
+        return
+
+    st.success("Checkpoint location confirmed.")
+    if st.button("📤 Submit Checkpoint", width="stretch", key=f"submit_gps_{mission.get('MissionID', '')}"):
+        if requires_photo and selected_photo is None:
+            st.warning("Please provide the checkpoint photo.")
+            st.stop()
+        if (requires_video or requires_audio) and selected_media is None:
+            st.warning("Please provide the checkpoint media.")
+            st.stop()
+        if requires_text and not response_text.strip():
+            st.warning("Please provide a checkpoint response.")
+            st.stop()
+
+        image_url = ""
+        drive_file_id = ""
+        if selected_photo is not None:
+            try:
+                uploaded = upload_photo(
+                    event_id=st.session_state["participant_event_id"],
+                    mission_id=mission["MissionID"],
+                    team_name=st.session_state["participant_team"],
+                    participant_name=st.session_state["participant_name"],
+                    uploaded_file=selected_photo,
                 )
-                st.success("Checkpoint arrival confirmed.")
-                st.rerun()
-        else:
-            st.warning(f"Move within {radius:.0f} metres of the checkpoint.")
+                image_url = uploaded.get("url", "")
+                drive_file_id = uploaded.get("file_id", "")
+
+            except (RuntimeDatabaseError, ValueError) as error:
+                st.error(upload_error_message(
+                    "Photo upload", saved=False, retry=True, error=error,
+                ))
+                st.stop()
+        elif selected_media is not None:
+            try:
+                uploaded = upload_evidence_file(
+                    event_id=st.session_state["participant_event_id"],
+                    mission_id=mission["MissionID"],
+                    team_name=st.session_state["participant_team"],
+                    participant_name=st.session_state["participant_name"],
+                    uploaded_file=selected_media,
+                    evidence_type=media_kind,
+                )
+                image_url = uploaded.get("url", "")
+                drive_file_id = uploaded.get("file_id", "")
+
+            except (RuntimeDatabaseError, ValueError) as error:
+                st.error(upload_error_message(
+                    f"{media_kind.lower()} upload",
+                    saved=False,
+                    retry=True,
+                    error=error,
+                ))
+                st.stop()
+
+        save_structured_submission(
+            db,
+            mission,
+            submission_type=gps_type,
+            metric1=f'{payload["latitude"]}',
+            metric2=f'{payload["longitude"]}',
+            metric3=f'{distance:.1f}',
+            remarks=response_text.strip() or "GPS checkpoint validated.",
+            image_url=image_url,
+            drive_file_id=drive_file_id,
+            canonical_context={
+                **mission.get("_CanonicalContext", {}),
+                "GPSResult": {
+                    "latitude": payload["latitude"],
+                    "longitude": payload["longitude"],
+                    "accuracy_meters": payload["accuracy_meters"],
+                    "timestamp": payload["captured_at"],
+                    "radius_meters": radius,
+                    "distance_meters": distance,
+                    "location_type": "participant",
+                },
+            },
+        )
+        st.success("Checkpoint arrival confirmed.")
+        st.rerun()
+
+
+def render_gps_form(db, mission):
+    render_gps_submission_form(db, mission, "GPS")
 
 
 def render_mission_content(mission):
@@ -1500,6 +1783,7 @@ def render_ai_facilitator(db, mission, runtime_session):
         st.warning("AI Facilitator is reconnecting. Please try again shortly.")
         st.caption(str(error))
         conversation = []
+    ai_service = get_platform_ai_service()
 
     for row in conversation:
         role = (
@@ -1545,23 +1829,26 @@ def render_ai_facilitator(db, mission, runtime_session):
 
                     released_level = int(hint.get("Level", 0) or 0)
                     hint_text = str(hint.get("HintText", "")).strip()
-                    try:
-                        reply = ask_facilitator(
-                            facilitator_name=facilitator_name,
-                            personality=st.session_state["ai_personality"],
-                            greeting=st.session_state["ai_greeting"],
-                            mission=mission,
-                            user_message=(
-                                "Our team requested the approved controlled hint. "
-                                "Coach us using only that hint."
-                            ),
-                            assistance_mode="HINT",
-                            allowed_hint=hint_text,
-                        )
-                    except Exception:
+                    ai_reply = ai_service.facilitator_insights(
+                        facilitator_name=facilitator_name,
+                        personality=st.session_state["ai_personality"],
+                        greeting=st.session_state["ai_greeting"],
+                        mission=mission,
+                        user_message=(
+                            "Our team requested the approved controlled hint. "
+                            "Coach us using only that hint."
+                        ),
+                        assistance_mode="HINT",
+                        allowed_hint=hint_text,
+                    )
+                    if ai_reply.fallback:
                         reply = (
                             f"**{hint.get('Label', 'Hint')}** — {hint_text}"
                         )
+                    else:
+                        reply = ai_reply.text
+                    if ai_reply.fallback:
+                        st.caption("AI is running in fallback mode.")
 
                     db.save_conversation(
                         event_id=st.session_state["participant_event_id"],
@@ -1603,7 +1890,7 @@ def render_ai_facilitator(db, mission, runtime_session):
             hint_level=0,
         )
 
-        reply = ask_facilitator(
+        assistant_reply = ai_service.facilitator_insights(
             facilitator_name=facilitator_name,
             personality=st.session_state["ai_personality"],
             greeting=st.session_state["ai_greeting"],
@@ -1611,6 +1898,7 @@ def render_ai_facilitator(db, mission, runtime_session):
             user_message=prompt,
             assistance_mode="COACH",
         )
+        reply = assistant_reply.text
         db.save_conversation(
             event_id=st.session_state["participant_event_id"],
             team=st.session_state["participant_team"],
