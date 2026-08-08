@@ -1,0 +1,116 @@
+{
+  "mode": "local-realistic-800-multi-event",
+  "environment": "staging-secrets-unavailable",
+  "generated_at_utc": "2026-08-08T16:22:00Z",
+  "participants": 800,
+  "events": {
+    "EVT-AMBANK-MISSION": 360,
+    "EVT-AMBANK-RACE": 260,
+    "EVT-AMBANK-GPS": 180
+  },
+  "registration": {
+    "requested": 800,
+    "success": 800,
+    "errors": 0,
+    "p50": 0.09,
+    "p95": 0.208,
+    "p99": 0.224
+  },
+  "reconnect": {
+    "requested": 800,
+    "success": 800,
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99": 0.001
+  },
+  "activity_read": {
+    "requests": 800,
+    "p95": 0.001,
+    "p99": 0.001
+  },
+  "submission": {
+    "requested": 2400,
+    "success": 2400,
+    "errors": 0,
+    "p95": 0.0,
+    "p99": 0.0
+  },
+  "facilitator_read": {
+    "requests": 20,
+    "p95": 0.0,
+    "errors": 0
+  },
+  "checks": {
+    "duplicate_participants": 0,
+    "duplicate_team_assignments": 0,
+    "lost_submissions": 0,
+    "cross_event_leakage": 0,
+    "teamid_leakage": 0,
+    "eventid_leakage": 0,
+    "silent_identity_merge": 0,
+    "error_rate": 0.0,
+    "retry_rate": 0.0
+  },
+  "infra": {
+    "db_peak_connections": "not-applicable-local",
+    "locks_contention": 0,
+    "rpc_failures": 0,
+    "http_failures": 0,
+    "timeouts": 0
+  },
+  "participants_registered_by_event": {
+    "EVT-AMBANK-RACE": 260,
+    "EVT-AMBANK-MISSION": 360,
+    "EVT-AMBANK-GPS": 180
+  },
+  "team_distribution_by_event": {
+    "EVT-AMBANK-MISSION": {
+      "TEAM-01": 23,
+      "TEAM-02": 23,
+      "TEAM-03": 23,
+      "TEAM-04": 23,
+      "TEAM-05": 23,
+      "TEAM-06": 23,
+      "TEAM-07": 23,
+      "TEAM-08": 23,
+      "TEAM-09": 22,
+      "TEAM-10": 22,
+      "TEAM-11": 22,
+      "TEAM-12": 22,
+      "TEAM-13": 22,
+      "TEAM-14": 22,
+      "TEAM-15": 22,
+      "TEAM-16": 22
+    },
+    "EVT-AMBANK-RACE": {
+      "TEAM-01": 26,
+      "TEAM-02": 26,
+      "TEAM-03": 26,
+      "TEAM-04": 26,
+      "TEAM-05": 26,
+      "TEAM-06": 26,
+      "TEAM-07": 26,
+      "TEAM-08": 26,
+      "TEAM-09": 26,
+      "TEAM-10": 26
+    },
+    "EVT-AMBANK-GPS": {
+      "TEAM-01": 15,
+      "TEAM-02": 15,
+      "TEAM-03": 15,
+      "TEAM-04": 15,
+      "TEAM-05": 15,
+      "TEAM-06": 15,
+      "TEAM-07": 15,
+      "TEAM-08": 15,
+      "TEAM-09": 15,
+      "TEAM-10": 15,
+      "TEAM-11": 15,
+      "TEAM-12": 15
+    }
+  },
+  "participant_identity_contract": {
+    "id_counts_exact": true,
+    "same_name_duplicate_prevented_by_design": true
+  }
+}
