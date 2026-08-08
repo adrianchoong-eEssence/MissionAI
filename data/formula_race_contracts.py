@@ -117,20 +117,47 @@ class LiveFormulaRaceProvider:
             return default
 
     def snapshot(self, event_id: str = "") -> RaceSnapshot:
-        event = self.db.get_event(event_id) or {}
+        event = None
+        if hasattr(self.db, "runtime") and getattr(self.db.runtime, "can_publish", False):
+            try:
+                event = self.db.runtime.get_runtime_event(event_id)
+            except Exception:
+                event = None
+        if not event:
+            event = self.db.get_event(event_id) or {}
         if not event:
             raise ValueError("Select a valid Formula R.A.C.E. event.")
-        raw_teams = self.db.get_teams(event_id)
-        submissions_raw = (
-            self.db.runtime.get_canonical_submissions(event_id)
-            if self.db.runtime.can_publish and hasattr(self.db.runtime, "get_canonical_submissions")
-            else self.db.get_event_submissions(event_id)
-        )
-        missions = self.db.get_event_missions(event_id)
+        raw_teams = []
+        if hasattr(self.db, "runtime") and getattr(self.db.runtime, "can_publish", False):
+            try:
+                raw_teams = self.db.runtime.get_runtime_teams(event_id)
+            except Exception:
+                raw_teams = []
+        if not raw_teams:
+            raw_teams = self.db.get_teams(event_id)
+
+        submissions_raw = []
+        if hasattr(self.db, "runtime") and getattr(self.db.runtime, "can_publish", False):
+            try:
+                submissions_raw = self.db.runtime.get_canonical_submissions(event_id)
+            except Exception:
+                submissions_raw = []
+        if not submissions_raw and hasattr(self.db, "get_event_submissions"):
+            submissions_raw = self.db.get_event_submissions(event_id)
+
+        missions = []
+        if hasattr(self.db, "runtime") and getattr(self.db.runtime, "can_publish", False):
+            try:
+                missions = self.db.runtime.get_programme_hierarchy(event_id)
+            except Exception:
+                missions = []
+        if not missions and hasattr(self.db, "get_event_missions"):
+            missions = self.db.get_event_missions(event_id)
+
         state = self.db.get_event_state(event_id) or {}
         control = self.db.get_runtime_control_state(event_id) or {}
         operations = {}
-        if self.db.runtime.can_publish:
+        if hasattr(self.db, "runtime") and getattr(self.db.runtime, "can_publish", False):
             try:
                 operations = self.db.runtime.get_formula_race_state(event_id) or {}
                 operations["Checkpoints"] = self.db.runtime.get_formula_race_checkpoints(event_id)
@@ -164,7 +191,12 @@ class LiveFormulaRaceProvider:
                 if str(item.get("TeamID", "")) == team_id
                 and str(item.get("Status", "")).upper() in {"APPROVED", "AWARDED"}
             )
-            checkpoint_total = len(operations.get("Checkpoints", {}).get("Checkpoints", []))
+            raw_checkpoint_state = operations.get("Checkpoints", {})
+            checkpoints_snapshot = (
+                raw_checkpoint_state.get("Checkpoints", [])
+                if isinstance(raw_checkpoint_state, dict) else raw_checkpoint_state
+            )
+            checkpoint_total = len(checkpoints_snapshot or [])
             build = round(100 * completed / max(checkpoint_total or len(missions), 1))
             teams.append(Team(
                 team_id, str(row.get("TeamName", team_id)), str(row.get("Country", "")),
@@ -185,6 +217,8 @@ class LiveFormulaRaceProvider:
             str(row.get("StorageReference", row.get("PhotoURL", row.get("EvidenceType", "Evidence")))),
         ) for row in submissions_raw)
         checkpoint_state = operations.get("Checkpoints", {})
+        if isinstance(checkpoint_state, list):
+            checkpoint_state = {"Status": ""}
         active = str(
             "LIVE CHECKPOINTS" if str(checkpoint_state.get("Status", "")).upper() == "LIVE" else
             state.get("CurrentStageName", "") or state.get("StageName", "")

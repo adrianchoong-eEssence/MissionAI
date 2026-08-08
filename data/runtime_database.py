@@ -1327,6 +1327,29 @@ class SupabaseRuntimeDB:
             "CurrentStage": int(row.get("current_stage_no", 0) or 0),
         }
 
+    def get_runtime_teams(self, event_id):
+        """Return runtime team ordering for a published event."""
+        if not self.can_publish:
+            return []
+        rows = self._request(
+            "GET",
+            "runtime_teams",
+            query={
+                "event_id": f"eq.{str(event_id).strip()}",
+                "select": "team_id,team_name,country,position",
+                "order": "position.asc",
+            },
+            admin=True,
+        ) or []
+        return [
+            {
+                "TeamID": row.get("team_id", ""),
+                "TeamName": row.get("team_name", ""),
+                "Country": row.get("country", ""),
+            }
+            for row in rows
+        ]
+
     def get_players(self, event_id=None):
         if not self.can_publish:
             return []

@@ -4,7 +4,6 @@ from pathlib import Path
 import uuid
 import html
 import streamlit as st
-from data.google_sheets import GoogleSheetsDB
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 
 ASSET_ROOT=Path(__file__).resolve().parents[1]/"Assets"/"race_teams"
@@ -30,29 +29,35 @@ def show_formula_race_captain():
         st.title("Formula R.A.C.E.");st.caption("TEAM CAPTAIN ACCESS · ONE TEAM · ONE ACTIVE DEVICE")
         join_code=st.text_input("Event Join Code").upper().strip()
         event=runtime.get_event_by_join_code(join_code) if join_code else None
-        db=GoogleSheetsDB() if event else None
-        teams=db.get_teams(str(event.get("EventID",""))) if event else []
+        teams=runtime.get_runtime_teams(str(event.get("EventID",""))) if event else []
         team_map={str(r.get("TeamName","")):str(r.get("TeamID","")) for r in teams}
+        team_names=sorted(team_map.keys())
         with st.form("race_captain_login"):
-            team=st.selectbox("Team",list(team_map),disabled=not team_map);pin=st.text_input("Team PIN",type="password")
+            team=st.selectbox("Team",team_names,disabled=not team_names);pin=st.text_input("Team PIN",type="password")
             submit=st.form_submit_button("Open Team Dashboard",type="primary",width="stretch")
         if submit:
             if not event:st.error("Enter a valid Formula R.A.C.E. event code.");return
+            if not team:
+                st.error("Choose a team before continuing.")
+                return
             try:payload=runtime.formula_race_captain_login(join_code,team_map[team],pin,device)
             except RuntimeDatabaseError as error:st.error(str(error));return
             _set_session(payload);st.rerun()
         return
-    db=GoogleSheetsDB()
     event_id=str(session.get("EventID",""));team_id=str(session.get("TeamID",""));name=str(session.get("TeamName",""))
     try:workspace=runtime.formula_race_captain_workspace(session.get("SessionToken",""),device)
     except RuntimeDatabaseError as error:
         st.error(str(error));return
+    submissions=[
+        row for row in (
+            runtime.get_canonical_submissions(event_id) if runtime.can_publish else []
+        ) if str(row.get("TeamID",""))==team_id
+    ]
     asset=ASSET_ROOT/TEAM_ASSETS.get(name,"")
     if asset.is_file():st.image(str(asset),width=96)
     st.title(name);st.caption(f"{event_id} · {team_id}")
     checkpoints=list(workspace.get("Checkpoints",[]))
     checkpoint_runtime=dict(workspace.get("CheckpointRuntime",{}))
-    submissions=[r for r in db.get_event_submissions(event_id) if str(r.get("TeamID",""))==team_id]
     approved=sum(str(r.get("Status","")).upper()=="APPROVED" for r in checkpoints)
     wallet=dict(workspace.get("Wallet",{}));build=dict(workspace.get("BuildStatus",{}))
     a,b,c=st.columns(3);a.metric("RACE Checkpoints",f"{approved} / {len(checkpoints) or 4}");b.metric("Build status",build.get("status","Not Started"));c.metric("Wallet",wallet.get("Balance",0))
@@ -97,7 +102,11 @@ def show_formula_race_captain():
                 except RuntimeDatabaseError as error:st.error(str(error))
         purchases=list(workspace.get("Purchases",[]))
         if purchases:st.dataframe(purchases,width="stretch",hide_index=True)
-    with three:st.dataframe(submissions,width="stretch",hide_index=True)
+    with three:
+        if submissions:
+            st.dataframe(submissions,width="stretch",hide_index=True)
+        else:
+            st.info("No submissions yet for this team.")
     if st.button("Log out",width="stretch"):
         try:runtime.formula_race_captain_logout(session.get("SessionToken",""),device)
         except RuntimeDatabaseError:pass
