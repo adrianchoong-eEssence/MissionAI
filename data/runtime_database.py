@@ -325,7 +325,7 @@ class SupabaseRuntimeDB:
 
     @staticmethod
     def _scoring_mode_from_row(row):
-        raw = str(row.get("ScoringMode", "")).casefold()
+        raw = str(row.get("ScoringMode", row.get("scoring_mode", ""))).casefold()
         if raw in {"enterprise", "enterprise_scorer"}:
             return "ENTERPRISE"
         if raw in {"non_scoring", "noscore", "noscoring"}:
@@ -507,6 +507,7 @@ class SupabaseRuntimeDB:
                 "ModuleID": module_id,
                 "ActivityID": str(activity.get("activity_id", "")),
                 "ActivityType": str(payload.get("activity_type", "STANDARD")),
+                "ScoringMode": SupabaseRuntimeDB._scoring_mode_from_row(activity),
                 "AdminDisplayName": str(payload.get("activity_name", "")),
                 "ParticipantDisplayName": str(payload.get("activity_name", "")),
                 "Questions": str(payload.get("questions", "")),
@@ -529,6 +530,7 @@ class SupabaseRuntimeDB:
                 "ProgrammeID": str(programme_row.get("programme_id", "")),
                 "ModuleID": module_id,
                 "ActivityID": str(activity.get("activity_id", "")),
+                "ScoringMode": SupabaseRuntimeDB._scoring_mode_from_row(activity),
                 "StageNo": stage_no,
                 "DurationMinutes": int((activity.get("duration_seconds", 0) or 0) / 60),
                 "StageName": str(activity.get("activity_name", "")).strip() or "Activity",

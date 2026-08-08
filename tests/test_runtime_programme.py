@@ -167,6 +167,57 @@ class RuntimeProgrammeTests(unittest.TestCase):
         self.assertIn("stage_payload", call["query"]["select"])
         self.assertTrue(call["admin"])
 
+    def test_get_programme_hierarchy_exposes_activity_scoring_mode(self):
+        runtime = self.make_runtime()
+        original_request = runtime._request
+
+        def fake_request(method, path, payload=None, query=None, admin=False, retries=4):
+            if path == "programmes_v2":
+                return [{"programme_id": "E1-PROG"}]
+            if path == "modules_v2":
+                return [{
+                    "module_id": "M1",
+                    "module_name": "Build",
+                    "module_payload": {
+                        "module_order": 1,
+                        "day": 1,
+                        "start_time": "09:00",
+                        "duration_minutes": 60,
+                        "status": "Active",
+                        "participant_title": "",
+                        "admin_display_name": "",
+                    },
+                    "activity_sequence": [],
+                    "created_at": "2026-01-01T00:00:00Z",
+                }]
+            if path == "activities_v2":
+                return [{
+                    "activity_id": "A1",
+                    "module_id": "M1",
+                    "activity_type": "STANDARD",
+                    "scoring_mode": "enterprise",
+                    "activity_name": "Mission one",
+                    "activity_order": 1,
+                    "activity_payload": {
+                        "activity_name": "Mission one",
+                        "activity_type": "STANDARD",
+                        "mission_id": "M01",
+                        "participant_message": "",
+                        "questions": "",
+                        "duration_seconds": 300,
+                        "start_time": "09:00",
+                    },
+                    "is_active": True,
+                    "created_at": "2026-01-01T00:00:00Z",
+                }]
+            return original_request(method, path, payload=payload, query=query, admin=admin, retries=retries)
+
+        runtime.calls = []
+        runtime._request = fake_request
+        programme = runtime.get_programme_hierarchy("EVT-TEST")
+        runtime_mode = programme[0]["ScoringMode"]
+        self.assertEqual(runtime_mode, "ENTERPRISE")
+
     def test_has_event_mission_checks_runtime_payload(self):
         runtime = self.make_runtime()
 

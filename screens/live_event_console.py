@@ -105,6 +105,12 @@ def calculate_leaderboard(submissions):
         if str(submission.get("Status", "")).upper() != "APPROVED":
             continue
 
+        scoring_mode = str(
+            submission.get("ScoringMode", submission.get("scoring_mode", ""))
+        ).strip().upper()
+        if scoring_mode and scoring_mode != "TEAM_COMPETITIVE":
+            continue
+
         submission_type = str(submission.get("SubmissionType", "")).upper()
         if submission_type in {"NASI", "PIPELINE_ENTERPRISE"}:
             continue
@@ -171,6 +177,78 @@ def calculate_score(submission):
         return 0.0, "Reflection only — no score"
 
     return safe_float(get_value(submission, "Score", 0)), "Manual score"
+
+
+def _normalise_scoring_mode(raw):
+    normalised = str(raw or "").strip().upper().replace("-", "_")
+    if normalised in {"TEAM_COMPETITIVE", "ENTERPRISE", "NON_SCORING"}:
+        return normalised
+    return "TEAM_COMPETITIVE"
+
+
+def _build_activity_scoring_mode_map(db, event_id):
+    if not db.runtime.can_publish:
+        return {}
+    try:
+        programme = db.runtime.get_programme_hierarchy(event_id)
+    except RuntimeDatabaseError:
+        return {}
+    modes = {}
+    for module in programme:
+        for activity in module.get("Activities", []):
+            modes[str(activity.get("ActivityID", ""))] = _normalise_scoring_mode(
+                activity.get("ScoringMode", ""),
+            )
+    return modes
+
+
+def _resolve_review_scoring_mode(submission, db, event_id, activity_scoring_map):
+    submission_type = str(submission.get("SubmissionType", "")).upper()
+    if submission_type == "NASI":
+        return "NON_SCORING"
+    if submission_type == "PIPELINE_ENTERPRISE":
+        return "ENTERPRISE"
+    activity_id = str(submission.get("ActivityID", "")).strip()
+    return activity_scoring_map.get(activity_id, "TEAM_COMPETITIVE")
+
+
+def _canonical_review_metrics(submission, event_id, db, activity_scoring_map):
+    scoring_mode = _resolve_review_scoring_mode(
+        submission, db, event_id, activity_scoring_map,
+    )
+    suggested = float(approval_score(db, event_id, submission))
+    if scoring_mode == "TEAM_COMPETITIVE":
+        return {
+            "mode": scoring_mode,
+            "suggested": suggested,
+            "score": suggested,
+            "credits": suggested,
+            "score_disabled": False,
+            "label": "Awarded score / credits",
+        }
+    if scoring_mode == "ENTERPRISE":
+        return {
+            "mode": scoring_mode,
+            "suggested": suggested,
+            "score": 0.0,
+            "credits": suggested,
+            "score_disabled": False,
+            "label": "Credits (competitive excluded for ENTERPRISE)",
+        }
+    return {
+        "mode": scoring_mode,
+        "suggested": 0.0,
+        "score": 0.0,
+        "credits": 0.0,
+        "score_disabled": True,
+        "label": "No score/credits",
+    }
+
+
+def _is_canonical_review_mode(db, event_id):
+    if not db.runtime.can_publish:
+        return False
+    return bool(_build_activity_scoring_mode_map(db, event_id))
 
 
 def mission_defaults(submission_type):
@@ -369,14 +447,19 @@ def render_review_scoring_widget(
     force_runtime_rows=False,
 ):
     mission = db.get_current_mission(event_id)
+    canonical_mode = False
+    activity_scoring_map = {}
     canonical_rows = []
-    if db.runtime.can_publish:
+    if _is_canonical_review_mode(db, event_id):
+        canonical_mode = True
         try:
             canonical_rows = db.runtime.get_canonical_submissions(event_id)
         except RuntimeDatabaseError:
             canonical_rows = []
+        activity_scoring_map = _build_activity_scoring_mode_map(db, event_id)
+        if force_runtime_rows:
+            canonical_mode = False
     submissions = db.get_submissions(event_id) if force_runtime_rows else (canonical_rows or db.get_submissions(event_id))
-    canonical_mode = bool(canonical_rows) and not force_runtime_rows
     mission_id = mission_id or (mission.get("MissionID") if mission else "")
     rows = [
         row for row in submissions
@@ -395,17 +478,19 @@ def render_review_scoring_widget(
         key=f"control_approve_all_{event_id}_{mission_id}_{show_all}",
     ):
         for submission in pending:
-            score = approval_score(db, event_id, submission)
+            review = _canonical_review_metrics(
+                submission, event_id, db, activity_scoring_map,
+            )
             if canonical_mode:
                 control.decide_canonical_submission(
                     submission.get("SubmissionID"), "APPROVE", "Facilitator",
-                    score=round(score, 1), credits=round(score, 1),
+                    score=round(review["score"], 1), credits=round(review["credits"], 1),
                     notes=submission.get("ReviewerNotes", ""),
                     idempotency_key=f"BULK:{submission.get('SubmissionID')}:APPROVE",
                 )
             else:
                 control.review_submission(
-                    submission_id=submission.get("SubmissionID"), score=round(score, 1),
+                    submission_id=submission.get("SubmissionID"), score=round(review["score"], 1),
                     remarks=submission.get("Remarks", ""), judged="Yes", status="APPROVED",
                 )
         st.success("Pending submissions approved.")
@@ -433,8 +518,11 @@ def render_review_scoring_widget(
 
     for submission in rows:
         submission_id = str(submission.get("SubmissionID", ""))
+        review = _canonical_review_metrics(
+            submission, event_id, db, activity_scoring_map,
+        )
         suggested, formula = (
-            (0.0, "Use the configured scoring rule or an authorised manual value.")
+            (review["suggested"], "Use the configured scoring rule or an authorised manual value.")
             if canonical_mode else calculate_score(submission)
         )
         with st.expander(
@@ -446,12 +534,12 @@ def render_review_scoring_widget(
             st.caption(formula)
             is_nasi = str(submission.get("SubmissionType", "")).upper() == "NASI"
             score = st.number_input(
-                "Awarded score / credits",
+                review["label"],
                 min_value=0.0,
                 max_value=10000.0,
                 value=0.0 if is_nasi else float(suggested),
                 step=1.0,
-                disabled=is_nasi,
+                disabled=is_nasi or (canonical_mode and review["score_disabled"]),
                 key=f"control_score_{submission_id}",
             )
             remarks = st.text_area(
@@ -466,9 +554,12 @@ def render_review_scoring_widget(
                 key=f"control_approve_{submission_id}",
             ):
                 if canonical_mode:
+                    credits_input = 0.0 if review["mode"] == "NON_SCORING" else score
+                    score_input = score if review["mode"] == "TEAM_COMPETITIVE" else 0.0
                     control.decide_canonical_submission(
-                        submission_id, "APPROVE", "Facilitator", score=round(score, 1),
-                        credits=round(score, 1), notes=remarks,
+                        submission_id, "APPROVE", "Facilitator",
+                        score=round(score_input, 1), credits=round(credits_input, 1),
+                        notes=remarks,
                         idempotency_key=f"{submission_id}:APPROVE:{round(score, 1)}",
                     )
                 else:

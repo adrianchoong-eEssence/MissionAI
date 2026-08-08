@@ -867,12 +867,16 @@ def show_control_centre():
     st.divider()
     st.subheader("Emergency Recovery")
     st.caption("Runtime restart republishes configuration without resetting participant identity.")
-    pause, resume, restart = st.columns(3)
+    pause, resume, close, restart = st.columns(4)
     if pause.button("Pause Event", width="stretch"):
         control.pause_event(event_id)
         st.rerun()
     if resume.button("Resume Event", width="stretch"):
         control.resume_event(event_id)
+        st.rerun()
+    if close.button("Close Event", width="stretch"):
+        control.control_state(event_id, "CurrentStageStatus", "CLOSED")
+        st.success("Event closed. Live activity state is preserved for reporting.")
         st.rerun()
     restart_confirmed = st.checkbox("Confirm non-destructive runtime restart")
     if restart.button("Restart Runtime", width="stretch", disabled=not restart_confirmed):
