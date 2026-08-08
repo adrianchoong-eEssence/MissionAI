@@ -18,6 +18,34 @@ GENERIC_MODULES = [
     (1, "Lunch", ["Lunch"]), (1, "Debrief", ["Debrief"]),
     (1, "Closing", ["Closing"]),
 ]
+
+WALK_HUNT_MODULES = [
+    (1, "Arrival & Registration", ["Arrival & Registration"]),
+    (1, "Walk Briefing", ["Walk Briefing"]),
+    (1, "Clue Trail", ["Trail Setup", "Clue One", "Clue Two", "Clue Three"]),
+    (1, "Checkpoints", ["Checkpoint One", "Checkpoint Two", "Checkpoint Three"]),
+    (1, "Closing", ["Closing"]),
+]
+
+ROAD_RALLY_MODULES = [
+    (1, "Arrival & Registration", ["Arrival & Registration"]),
+    (1, "Road Rally Briefing", ["Briefing", "Road Safety", "Navigation Setup"]),
+    (1, "Rally Start", ["Navigation Start", "First Check", "Second Check"]),
+    (1, "Rally Finishing", ["Penalties", "Debrief"]),
+    (1, "Closing", ["Closing"]),
+]
+
+F1_CIRCUIT_MODULES = [
+    (1, "Arrival & Registration", ["Arrival & Registration"]),
+    (1, "Circuit Briefing", ["Qualifying", "Grid Assignment"]),
+    (1, "Build & Launch", ["Build", "Launch", "Lap Test"]),
+    (1, "Race", ["Race Start", "Race Review", "Lap Awards"]),
+    (1, "Closing", ["Closing"]),
+]
+
+MISSION_AI_MODULES = [
+    (1, "Mission AI", ["Mission AI Briefing", "Mission AI Board", "AI Missions", "Debrief"]),
+]
 AGILE_MODULES = [
     (1, "Opening", ["Opening"]),
     (1, "Pipeline", ["Pipeline Challenge", "Pipeline Results", "Pipeline Debrief"]),
@@ -37,7 +65,14 @@ def programme_family(event):
     client = str(event.get("Client", "")).casefold()
     if "formula r.a.c.e" in kind or "formula race" in kind or name.strip() == "race": return "RACE"
     if "agile" in kind or "agile" in name or ("aia" in client and "squad" in name): return "AGILE"
-    if "mission ai" in kind: return "MISSION_AI"
+    if "mission ai" in kind or "mission ai" in name:
+        return "MISSION_AI"
+    if "walk hunt" in kind or "walk hunt" in name:
+        return "WALK_HUNT"
+    if "road rally" in kind or "road rally" in name:
+        return "ROAD_RALLY"
+    if "f1" in kind or "formula one" in kind or "f1 circuit" in kind or "circuit" in name:
+        return "F1_CIRCUIT"
     return "GENERIC"
 
 
@@ -46,6 +81,9 @@ def templates_for_event(event, mission_ai_modules, race_modules):
     if family == "RACE": return list(race_modules) + list(GENERIC_MODULES)
     if family == "AGILE": return list(AGILE_MODULES) + [row for row in GENERIC_MODULES if row[1] not in {x[1] for x in AGILE_MODULES}]
     if family == "MISSION_AI": return list(mission_ai_modules) + list(GENERIC_MODULES)
+    if family == "WALK_HUNT": return list(WALK_HUNT_MODULES) + list(GENERIC_MODULES)
+    if family == "ROAD_RALLY": return list(ROAD_RALLY_MODULES) + list(GENERIC_MODULES)
+    if family == "F1_CIRCUIT": return list(F1_CIRCUIT_MODULES) + list(GENERIC_MODULES)
     return list(GENERIC_MODULES)
 
 

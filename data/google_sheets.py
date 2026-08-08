@@ -2923,6 +2923,13 @@ class GoogleSheetsDB:
     # -------------------------
 
     def get_programme_stages(self, event_id):
+        if self.runtime.can_publish:
+            try:
+                runtime_rows = self.runtime.get_programme_hierarchy(event_id)
+                if runtime_rows:
+                    return runtime_rows
+            except Exception:
+                pass
         stages = [
             row
             for row in get_sheet_records("ProgrammeStages")
@@ -2932,6 +2939,16 @@ class GoogleSheetsDB:
         return sorted(stages, key=lambda row: int(row.get("StageNo") or 0))
 
     def save_programme_stages(self, event_id, stages):
+        if self.runtime.can_publish:
+            from engines.programme_hierarchy import build_programme_hierarchy
+
+            try:
+                modules = build_programme_hierarchy(stages)
+                self.runtime.upsert_programme_configuration(event_id, modules)
+                return
+            except Exception as error:
+                raise RuntimeError(f"Runtime programme save failed: {error}")
+
         existing_rows = []
         for index, row in enumerate(get_sheet_records("ProgrammeStages"), start=2):
             if str(row.get("EventID", "")) == str(event_id):
@@ -2978,6 +2995,25 @@ class GoogleSheetsDB:
             raise ValueError("Source and destination events are required.")
         if source_event_id == destination_event_id:
             raise ValueError("Source and destination events must be different.")
+        if self.runtime.can_publish:
+            try:
+                result = self.runtime.duplicate_programme_configuration(source_event_id, destination_event_id)
+                if isinstance(result, dict):
+                    return {
+                        "ModuleCount": int(result.get("ModuleCount", 0) or 0),
+                        "ActivityCount": int(result.get("ActivityCount", 0) or 0),
+                        "MissionCount": 0,
+                        "ExperienceAssignmentCount": 0,
+                        "OperationalDataCopied": False,
+                        "RuntimeLaunched": False,
+                        "SourceEventID": source_event_id,
+                        "DestinationEventID": destination_event_id,
+                    }
+            except Exception:
+                # Fall back to legacy duplication only when canonical runtime write
+                # cannot be used for this event.
+                pass
+
         if not self.get_event(source_event_id) or not self.get_event(destination_event_id):
             raise ValueError("Source or destination event was not found.")
 

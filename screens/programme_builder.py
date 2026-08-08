@@ -542,6 +542,12 @@ def _program_type_option_label(event):
         return "AGILE"
     if detected == "MISSION_AI":
         return "Mission AI"
+    if detected == "WALK_HUNT":
+        return "Walk Hunt"
+    if detected == "ROAD_RALLY":
+        return "Road Rally"
+    if detected == "F1_CIRCUIT":
+        return "F1 Circuit"
     return "Standard"
 
 
@@ -553,6 +559,12 @@ def _available_template_family(event):
         return "AGILE"
     if detected == "MISSION_AI":
         return "Mission AI"
+    if detected == "WALK_HUNT":
+        return "Walk Hunt"
+    if detected == "ROAD_RALLY":
+        return "Road Rally"
+    if detected == "F1_CIRCUIT":
+        return "F1 Circuit"
     return "Standard"
 
 
@@ -567,7 +579,114 @@ def _template_family_catalogue(event, programme_type):
         return templates_for_event({"ProgrammeType": "Enterprise AGILE"}, DEFAULT_MODULES, module_templates({}))
     if selected == "mission ai":
         return templates_for_event({"ProgrammeType": "Mission AI"}, DEFAULT_MODULES, module_templates({}))
+    if selected == "walk hunt":
+        return templates_for_event({"ProgrammeType": "Walk Hunt"}, DEFAULT_MODULES, module_templates({}))
+    if selected == "road rally":
+        return templates_for_event({"ProgrammeType": "Road Rally"}, DEFAULT_MODULES, module_templates({}))
+    if selected == "f1 circuit" or selected == "f1":
+        return templates_for_event({"ProgrammeType": "F1 Circuit"}, DEFAULT_MODULES, module_templates({}))
     return templates_for_event({"ProgrammeType": "Standard"}, DEFAULT_MODULES, module_templates({}))
+
+
+def _parse_programme_import_payload(raw_text):
+    raw_text = str(raw_text or "").strip()
+    if not raw_text:
+        raise ValueError("Provide import text for module/activity rows.")
+
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError as error:
+        raise ValueError("Programme import must be valid JSON.") from error
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Programme import must be a JSON object.")
+    payload_modules = parsed.get("modules", parsed.get("Modules", parsed.get("programme", [])))
+    if isinstance(payload_modules, dict):
+        payload_modules = [payload_modules]
+    if not isinstance(payload_modules, list):
+        raise ValueError("Import payload must include a modules list.")
+    return {
+        "programme_name": str(parsed.get("programme_name", parsed.get("ProgrammeName", "")) or ""),
+        "programme_type": str(parsed.get("programme_type", parsed.get("ProgrammeType", "")) or ""),
+        "modules": payload_modules,
+    }
+
+
+def _normalise_imported_modules(event_id, modules):
+    normalised_modules = []
+    for module_position, module in enumerate(modules, start=1):
+        if not isinstance(module, dict):
+            continue
+        activities = module.get("Activities", module.get("activities", []))
+        if not isinstance(activities, list):
+            continue
+        module_id = str(module.get("ModuleID", f"{event_id}-MOD-IMP-{module_position:03d}")).strip()
+        module_name = str(module.get("ModuleName", module.get("name", "")) or "Module").strip()
+        if not module_name:
+            continue
+        module_activities = []
+        for activity_position, activity in enumerate(activities, start=1):
+            if not isinstance(activity, dict):
+                continue
+            activity_name = str(
+                activity.get("StageName", activity.get("Name", ""))
+            ).strip()
+            if not activity_name:
+                continue
+            source_type = str(activity.get("ActivityType", activity.get("StageType", "") )).strip() or "Activity"
+            day = int(module.get("Day", module.get("day", 1)) or 1)
+            activity_row = _new_activity(
+                module_name, day, activity_name, activity_position,
+                event_id=event_id, module_id=module_id,
+            )
+            activity_row["DurationMinutes"] = int(activity.get("DurationMinutes", activity_row.get("DurationMinutes", 15)) or 15)
+            details = activity_details(activity_row)
+            details.update({
+                "ProgrammeID": f"{event_id}-PROGRAMME",
+                "ModuleID": module_id,
+                "ActivityID": f"{activity.get('ActivityID', activity_row.get('ActivityID', ''))}",
+                "AdminDisplayName": activity_name,
+                "ParticipantDisplayName": str(activity.get("ParticipantDisplayName", activity_name) or activity_name),
+                "Questions": str(activity.get("Questions", details["Questions"])),
+                "Credits": int(activity.get("Credits", details["Credits"]) or 0),
+                "Rules": str(activity.get("Rules", details["Rules"])),
+                "Objectives": str(activity.get("Objectives", details["Objectives"])),
+                "Scoring": str(activity.get("Scoring", details["Scoring"])),
+                "EvidenceRequired": bool(activity.get("EvidenceRequired", details["EvidenceRequired"])),
+                "EvidenceRequirement": str(activity.get("EvidenceRequirement", details["EvidenceRequirement"])),
+                "ParticipantNarrative": str(activity.get("ParticipantNarrative", details["ParticipantNarrative"])),
+                "ParticipantTask": str(activity.get("ParticipantTask", details["ParticipantTask"])),
+                "ContentType": str(activity.get("ContentType", details.get("ContentType", "")) or "Standard Activity"),
+                "LinkedContent": str(activity.get("LinkedContent", details.get("LinkedContent", ""))),
+                "LinkedContentID": str(activity.get("LinkedContentID", details.get("LinkedContentID", ""))),
+                "LinkedContentName": str(activity.get("LinkedContentName", details.get("LinkedContentName", ""))),
+                "ModuleDetails": {
+                    "EvidenceType": str(activity.get("EvidenceType", details.get("EvidenceType", ""))),
+                    "EvidenceRequired": bool(activity.get("EvidenceRequired", details.get("EvidenceRequired", False))),
+                    "GPSRequired": bool(activity.get("GPSRequired", details.get("GPSRequired", False))),
+                    "AIBehaviour": str(activity.get("AIBehaviour", details.get("AIBehaviour", ""))),
+                    "ProjectorBehaviour": str(activity.get("ProjectorBehaviour", details.get("ProjectorBehaviour", ""))),
+                    "ScoreMode": str(activity.get("ScoreMode", details.get("ScoreMode", ""))),
+                    "ScoringMode": str(activity.get("ScoringMode", details.get("ScoringMode", ""))),
+                    "MaximumScore": int(activity.get("MaximumScore", details.get("MaximumScore", 0)) or 0),
+                    "ParticipantTitle": str(activity.get("ParticipantTitle", module_name)),
+                    "ParticipantNarrative": str(activity.get("ParticipantNarrative", "")),
+                },
+            })
+            activity_row["StageName"] = activity_name
+            activity_row["StageType"] = encode_module_stage_type(module_name, day, source_type)
+            activity_row["FacilitatorInstruction"] = encode_activity_details(details)
+            module_activities.append(activity_row)
+        module_payload = {
+            "ModuleID": module_id,
+            "ModuleName": module_name,
+            "Day": int(module.get("Day", 1) or 1),
+            "Activities": module_activities,
+            "DurationMinutes": sum(int(activity.get("DurationMinutes", 0) or 0) for activity in module_activities),
+            "ModuleOrder": module_position,
+        }
+        normalised_modules.append(module_payload)
+    return normalised_modules
 
 
 def _build_modules_from_catalogue(event_id, catalogue, day_start=1):
@@ -719,10 +838,11 @@ def render_programme_first_builder(db):
     event_id = str(event.get("EventID", ""))
     template_type = st.selectbox(
         "Programme Type Template",
-        ["Standard", "AGILE", "Mission AI", "Formula R.A.C.E."],
-        index=["Standard", "AGILE", "Mission AI", "Formula R.A.C.E."].index(
-            _program_type_option_label(event)
-        ),
+        ["Standard", "AGILE", "Mission AI", "Formula R.A.C.E.", "Walk Hunt", "Road Rally", "F1 Circuit"],
+        index=[
+            "Standard", "AGILE", "Mission AI", "Formula R.A.C.E.",
+            "Walk Hunt", "Road Rally", "F1 Circuit",
+        ].index(_program_type_option_label(event)),
         key=f"programme_template_type_{event_id}",
     )
     available_modules = _template_family_catalogue(event, template_type)
@@ -823,13 +943,37 @@ def render_programme_first_builder(db):
                 "judging, results, sessions, or runtime state will be copied."
             )
 
-    with st.expander("Start Blank"):
-        st.warning(
-            "Start over with an empty programme, preserving only past operational data."
+    with st.expander("Import Programme"):
+        import_text = st.text_area(
+            "Paste programme JSON",
+            placeholder="{\"programme_name\":\"...\",\"programme_type\":\"Standard\",\"modules\":[...]}",
+            key=f"programme_import_text_{event_id}",
+            height=180,
         )
-        if st.button("Start blank", key=f"start_blank_{event_id}"):
+        if st.button("Import now", key=f"import_programme_now_{event_id}", type="primary"):
+            try:
+                payload = _parse_programme_import_payload(import_text)
+                modules = _normalise_imported_modules(event_id, payload["modules"])
+                if not modules:
+                    raise ValueError("No importable modules were found.")
+                if _save_modules(db, event_id, modules):
+                    st.session_state[f"programme_notice_{event_id}"] = (
+                        f"Imported {len(modules)} module(s) from JSON."
+                    )
+                    st.session_state.pop(f"canonical_programme_preview_{event_id}", None)
+                    st.rerun()
+            except Exception as error:
+                _set_programme_save_state(event_id, "SAVE FAILED", error=error)
+
+    with st.expander("Manual Entry"):
+        st.warning(
+            "Manual entry starts from an empty timeline; add modules and activities below."
+        )
+        if st.button("Create new blank programme", key=f"start_blank_{event_id}"):
             if _save_modules(db, event_id, []):
-                st.session_state[f"programme_notice_{event_id}"] = "Started with a blank programme."
+                st.session_state[f"programme_notice_{event_id}"] = (
+                    "Manual entry mode started."
+                )
                 st.session_state.pop(f"canonical_programme_preview_{event_id}", None)
                 st.rerun()
 

@@ -553,6 +553,117 @@ class RuntimeProgrammeTests(unittest.TestCase):
             {"EVT-A", "EVT-B"},
         )
 
+    def test_upsert_programme_configuration_writes_canonical_payload(self):
+        runtime = self.make_runtime()
+        calls = []
+
+        def fake_request(method, path, payload=None, query=None, admin=False, retries=4):
+            calls.append({
+                "method": method,
+                "path": path,
+                "payload": payload,
+                "query": query,
+                "admin": admin,
+            })
+            if path == "events_v2":
+                if method == "GET":
+                    return [{
+                        "event_name": "Queue3",
+                        "event_type": "Standard",
+                        "programme_type": "Standard",
+                    }]
+                return []
+            if path in {"programmes_v2", "modules_v2", "activities_v2"}:
+                return []
+            return [{"Updated": True}]
+
+        runtime._request = fake_request
+        from data.runtime_authority import control_centre_mutation
+
+        with control_centre_mutation():
+            result = runtime.upsert_programme_configuration(
+                "EVT-TEST",
+                [
+                    {
+                        "ModuleID": "EVT-TEST-MOD-01",
+                        "ModuleName": "Opening",
+                        "ModuleOrder": 1,
+                        "Day": 1,
+                        "Activities": [
+                            {
+                                "ActivityID": "EVT-TEST-ACT-01",
+                                "StageName": "Arrival",
+                                "DurationMinutes": 12,
+                                "DurationSeconds": 720,
+                            },
+                        ],
+                    },
+                ],
+                programme_name="Queue3",
+            )
+
+        self.assertEqual(result["ModuleCount"], 1)
+        self.assertEqual(result["ActivityCount"], 1)
+        self.assertEqual(
+            [entry["path"] for entry in calls if entry["path"] == "programmes_v2"],
+            ["programmes_v2"],
+        )
+
+    def test_get_programme_hierarchy_rehydrates_activity_rows(self):
+        runtime = self.make_runtime()
+        calls = []
+
+        def fake_request(method, path, payload=None, query=None, admin=False, retries=4):
+            calls.append({"path": path, "query": query, "payload": payload, "admin": admin})
+            if path == "programmes_v2":
+                return [{
+                    "programme_id": "EVT-HIER-PROGRAMME",
+                    "programme_name": "Queue3",
+                    "programme_type": "Standard",
+                    "programme_schema_version": 1,
+                }]
+            if path == "modules_v2":
+                return [{
+                    "module_id": "EVT-HIER-MOD-01",
+                    "module_name": "Opening",
+                    "module_payload": {
+                        "module_order": 1,
+                        "day": 1,
+                        "start_time": "09:00",
+                    },
+                    "activity_sequence": 1,
+                }]
+            if path == "activities_v2":
+                return [{
+                    "activity_id": "EVT-HIER-ACT-01",
+                    "module_id": "EVT-HIER-MOD-01",
+                    "activity_type": "STANDARD",
+                    "scoring_mode": "TEAM_COMPETITIVE",
+                    "activity_name": "Arrival",
+                    "activity_order": 1,
+                    "duration_seconds": 600,
+                    "activity_payload": {
+                        "activity_type": "STANDARD",
+                        "ProgrammeID": "EVT-HIER-PROGRAMME",
+                        "ModuleID": "EVT-HIER-MOD-01",
+                        "ActivityID": "EVT-HIER-ACT-01",
+                    },
+                    "is_active": True,
+                }]
+            return []
+
+        runtime._request = fake_request
+        rows = runtime.get_programme_hierarchy("EVT-HIER")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["EventID"], "EVT-HIER")
+        self.assertEqual(rows[0]["ProgrammeID"], "EVT-HIER-PROGRAMME")
+        self.assertEqual(rows[0]["ModuleID"], "EVT-HIER-MOD-01")
+        self.assertEqual(rows[0]["ActivityID"], "EVT-HIER-ACT-01")
+        self.assertEqual(rows[0]["DurationMinutes"], 10)
+        self.assertEqual(rows[0]["StageType"], "EXOSMODULE|1|Opening|Standard")
+        self.assertEqual(len(calls), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -303,6 +303,472 @@ class SupabaseRuntimeDB:
         )
         return self._normalise_result(result) or {}
 
+    @staticmethod
+    def _activity_type_for_row(row):
+        raw = str(row.get("ActivityType", row.get("ActivityTypeLabel", "")) or "")
+        activity_type = str(raw or row.get("StageType", "") or "").casefold()
+        if "checkpoint" in activity_type:
+            return "CHECKPOINT"
+        if "reflect" in activity_type or "nasi" in activity_type:
+            return "REFLECTION"
+        if "market" in activity_type:
+            return "MARKETPLACE"
+        if "build" in activity_type or "buildstatus" in activity_type:
+            return "BUILD"
+        if "judge" in activity_type:
+            return "JUDGING"
+        if "mission" in activity_type or "narrative" in activity_type:
+            return "MISSION"
+        if "location" in activity_type or "gps" in activity_type:
+            return "LOCATION"
+        return "STANDARD"
+
+    @staticmethod
+    def _scoring_mode_from_row(row):
+        raw = str(row.get("ScoringMode", "")).casefold()
+        if raw in {"enterprise", "enterprise_scorer"}:
+            return "ENTERPRISE"
+        if raw in {"non_scoring", "noscore", "noscoring"}:
+            return "NON_SCORING"
+        return "TEAM_COMPETITIVE"
+
+    @staticmethod
+    def _normalise_module_payload(module):
+        return {
+            "module_name": str(module.get("ModuleName", "")).strip() or "Programme Module",
+            "module_payload": {
+                "module_order": int(module.get("ModuleOrder", 0) or 0),
+                "day": int(module.get("Day", 1) or 1),
+                "start_time": str(module.get("StartTime", "")),
+                "duration_minutes": int(module.get("DurationMinutes", 0) or 0),
+                "status": str(module.get("Status", "Active")),
+                "participant_title": str(module.get("ParticipantTitle", "")),
+                "admin_display_name": str(module.get("AdminDisplayName", "")),
+            },
+        }
+
+    @staticmethod
+    def _normalise_activity_payload(event_id, module, activity):
+        from engines.programme_hierarchy import activity_details, friendly_type
+        from engines.programme_hierarchy import activity_content_config
+
+        details = activity_details(activity)
+        content = activity_content_config(activity, module)
+        module_id = str(module.get("ModuleID", "") or "").strip()
+        programme_id = str(module.get("ProgrammeID", "") or f"{str(event_id)}-PROGRAMME").strip()
+        activity_id = str(activity.get("ActivityID", "") or "").strip()
+        if not activity_id:
+            seed = f"{module_id or str(event_id)}-ACT-{uuid.uuid4().hex[:8].upper()}"
+            activity_id = seed
+        payload = {
+            "event_id": str(event_id),
+            "programme_id": programme_id,
+            "module_id": module_id,
+            "activity_name": str(activity.get("StageName", "") or "").strip() or "Activity",
+            "activity_order": int(activity.get("ActivityOrder", activity.get("StageNo", 0)) or 0),
+            "duration_seconds": int(float(activity.get("DurationMinutes", 0) or 0) * 60),
+            "activity_type": SupabaseRuntimeDB._activity_type_for_row({
+                "ActivityType": str(details.get("ActivityType", "") or ""),
+                "StageType": activity.get("StageType", ""),
+            }),
+            "scoring_mode": SupabaseRuntimeDB._scoring_mode_from_row(details),
+            "is_active": str(activity.get("IsActive", "Yes")).strip().casefold() != "no",
+            "activity_id": activity_id,
+            "activity_payload": {
+                "stage_type": activity.get("StageType", ""),
+                "programme_id": programme_id,
+                "module_id": module_id,
+                "activity_id": activity_id,
+                "activity_type": str(friendly_type(activity)),
+                "display_mode": str(activity.get("DisplayMode", "Collaboration")),
+                "participant_message": str(activity.get("ParticipantMessage", "") or "").strip(),
+                "facilitator_instruction": str(activity.get("FacilitatorInstruction", "") or ""),
+                "instruction": str(details.get("FacilitatorInstructions", "")),
+                "questions": str(details.get("Questions", "")),
+                "rules": str(details.get("Rules", "")),
+                "objectives": str(details.get("Objectives", "")),
+                "credits": int(details.get("Credits", 0) or 0),
+                "scoring": str(details.get("Scoring", "")),
+                "participant_narrative": str(details.get("ParticipantNarrative", "")),
+                "participant_task": str(details.get("ParticipantTask", "")),
+                "evidence_required": bool(details.get("EvidenceRequired", False)),
+                "evidence_requirement": str(details.get("EvidenceRequirement", "")),
+                "content_type": str(content.get("ContentType", "Standard Activity")),
+                "linked_content": str(content.get("LinkedContent", "")),
+                "linked_content_id": str(content.get("LinkedContentID", "")),
+                "module_details": details.get("ModuleDetails", {}),
+                "stage_no": int(activity.get("StageNo", 0) or 0),
+                "duration_minutes": int(float(activity.get("DurationMinutes", 0) or 0)),
+                "start_time": str(activity.get("StartTime", "")),
+                "gps_required": bool(details.get("GPSRequired", False)),
+                "ai_behaviour": str(details.get("AIBehaviour", details.get("AISupport", ""))),
+                "projector_behaviour": str(activity.get("ProjectorBehaviour", "")),
+            },
+        }
+        return payload
+
+    def get_programme_hierarchy(self, event_id):
+        if not self.can_publish:
+            return []
+        event_id = str(event_id).strip()
+        from engines.programme_hierarchy import encode_module_stage_type
+        programme = self._request(
+            "GET",
+            "programmes_v2",
+            query={
+                "event_id": f"eq.{event_id}",
+                "select": "programme_id,programme_name,programme_type,published_at,programme_schema_version,created_at",
+                "limit": "1",
+            },
+            admin=True,
+        )
+        programme_row = self._normalise_result(programme)
+        if not programme_row:
+            return []
+        programme_id = str(programme_row.get("programme_id", "")).strip()
+        if not programme_id:
+            return []
+
+        modules = self._request(
+            "GET",
+            "modules_v2",
+            query={
+                "programme_id": f"eq.{programme_id}",
+                "select": "module_id,module_name,module_payload,activity_sequence,created_at",
+                "order": "activity_sequence.asc",
+            },
+            admin=True,
+        ) or []
+        activities = self._request(
+            "GET",
+            "activities_v2",
+            query={
+                "programme_id": f"eq.{programme_id}",
+                "select": "activity_id,module_id,activity_type,scoring_mode,activity_name,activity_order,activity_payload,duration_seconds,is_active,created_at",
+                "order": "activity_order.asc",
+            },
+            admin=True,
+        ) or []
+
+        by_module_id = {}
+        for module in modules:
+            payload = module.get("module_payload") or {}
+            if not isinstance(payload, dict):
+                payload = {}
+            by_module_id[str(module.get("module_id", ""))] = {
+                "ModuleID": str(module.get("module_id", "")),
+                "ModuleName": str(module.get("module_name", "")).strip(),
+                "ModuleOrder": int(payload.get("module_order", 0) or 0),
+                "Day": int(payload.get("day", 1) or 1),
+                "StartTime": str(payload.get("start_time", "")),
+                "Status": str(payload.get("status", "Active")),
+                "ParticipantTitle": str(payload.get("participant_title", "")),
+                "AdminDisplayName": str(payload.get("admin_display_name", "")),
+                "Activities": [],
+            }
+
+        ordered_activities = sorted(
+            (a for a in activities if str(a.get("activity_id", "")).strip()),
+            key=lambda item: (int(item.get("activity_order", 0) or 0), str(item.get("activity_id", ""))),
+        )
+        ordered_rows = []
+        stage_no = 1
+        for activity in ordered_activities:
+            module_id = str(activity.get("module_id", "")).strip()
+            module = by_module_id.get(module_id)
+            if not module:
+                module = {
+                    "ModuleID": module_id,
+                    "ModuleName": "Programme",
+                    "ModuleOrder": 1,
+                    "Day": 1,
+                    "StartTime": "",
+                    "Status": "Active",
+                    "Activities": [],
+                }
+                by_module_id[module_id] = module
+
+            payload = activity.get("activity_payload") or {}
+            if not isinstance(payload, dict):
+                payload = {}
+            details = payload.get("module_details", {})
+            if not isinstance(details, dict):
+                details = {}
+            else:
+                details = dict(details)
+
+            safe_module_details = dict(details.get("ModuleDetails", {})) if isinstance(details.get("ModuleDetails", {}), dict) else {}
+            details.pop("ModuleDetails", None)
+
+            from engines.programme_hierarchy import encode_activity_details
+
+            details.update({
+                "ProgrammeID": str(programme_row.get("programme_id", "")),
+                "ModuleID": module_id,
+                "ActivityID": str(activity.get("activity_id", "")),
+                "ActivityType": str(payload.get("activity_type", "STANDARD")),
+                "AdminDisplayName": str(payload.get("activity_name", "")),
+                "ParticipantDisplayName": str(payload.get("activity_name", "")),
+                "Questions": str(payload.get("questions", "")),
+                "Credits": int(payload.get("credits", 0) or 0),
+                "Rules": str(payload.get("rules", "")),
+                "Objectives": str(payload.get("objectives", "")),
+                "Scoring": str(payload.get("scoring", "")),
+                "EvidenceRequired": bool(payload.get("evidence_required", False)),
+                "ParticipantNarrative": str(payload.get("participant_narrative", "")),
+                "ParticipantTask": str(payload.get("participant_task", "")),
+                "EvidenceRequirement": str(payload.get("evidence_requirement", "")),
+                "ContentType": str(payload.get("content_type", "")),
+                "LinkedContentID": str(payload.get("linked_content_id", "")),
+                "LinkedContentName": str(payload.get("linked_content", "")),
+                "ModuleDetails": safe_module_details,
+                "FacilitatorInstructions": str(payload.get("instruction", "")),
+            })
+            row = {
+                "EventID": event_id,
+                "ProgrammeID": str(programme_row.get("programme_id", "")),
+                "ModuleID": module_id,
+                "ActivityID": str(activity.get("activity_id", "")),
+                "StageNo": stage_no,
+                "DurationMinutes": int((activity.get("duration_seconds", 0) or 0) / 60),
+                "StageName": str(activity.get("activity_name", "")).strip() or "Activity",
+                "StageType": encode_module_stage_type(
+                    module["ModuleName"] or "Programme",
+                    int(module.get("Day", 1) or 1),
+                    str(activity.get("activity_type", "STANDARD")).replace("_", " ").title(),
+                ),
+                "MissionID": str(payload.get("mission_id", "")),
+                "DisplayMode": str(payload.get("display_mode", "Collaboration")),
+                "ParticipantMessage": str(payload.get("participant_message", "")),
+                "StartTime": str(payload.get("start_time", module.get("StartTime", ""))),
+                "FacilitatorInstruction": encode_activity_details(details),
+                "IsActive": "No" if not activity.get("is_active", True) else "Yes",
+            }
+            module["Activities"].append(row)
+            ordered_rows.append(row)
+            stage_no += 1
+
+        ordered_modules = sorted(
+            by_module_id.values(),
+            key=lambda item: (
+                int(item.get("ModuleOrder", 0) or 0),
+                str(item.get("ModuleName", "")),
+            ),
+        )
+        if ordered_modules:
+            for module in ordered_modules:
+                activities_for_module = [row for row in ordered_rows if row.get("ModuleID") == module["ModuleID"]]
+                module["ActivityCount"] = len(activities_for_module)
+                module["DurationMinutes"] = sum(
+                    int(float(row.get("DurationMinutes", 0) or 0))
+                    for row in activities_for_module
+                )
+                module["Activities"] = activities_for_module
+
+        return ordered_rows
+
+    def upsert_programme_configuration(self, event_id, modules, *, programme_name="", programme_type=None):
+        require_control_centre("Canonical programme publication")
+        if not self.can_publish:
+            raise RuntimeDatabaseError(
+                "Publishing requires SUPABASE_SECRET_KEY."
+            )
+
+        event_id = str(event_id).strip()
+        event = self._request(
+            "GET",
+            "events_v2",
+            query={
+                "event_id": f"eq.{event_id}",
+                "select": "event_name,event_type,programme_type",
+                "limit": "1",
+            },
+            admin=True,
+        )
+        event_row = self._normalise_result(event)
+        if not event_row:
+            raise RuntimeDatabaseError(f"Event {event_id} is not published in canonical runtime.")
+
+        modules = list(modules or [])
+        ordered_modules = sorted(
+            [dict(module) for module in modules],
+            key=lambda module: (
+                int(module.get("ModuleOrder", 0) or 9999),
+                int(module.get("ModuleSequence", 0) or 0),
+            ),
+        )
+        programme_id = f"{event_id}-PROGRAMME"
+        module_records = []
+        activity_records = []
+
+        for module_position, module in enumerate(ordered_modules, start=1):
+            canonical_module = dict(module or {})
+            module_id = str(canonical_module.get("ModuleID", "")).strip() or f"{programme_id}-MOD-{module_position:03d}"
+            canonical_module["ModuleID"] = module_id
+            module_payload = self._normalise_module_payload(canonical_module)
+            canonical_module.update({"ModuleID": module_id, "ModuleOrder": module_position})
+            module_payload["module_payload"]["programme_id"] = programme_id
+            module_payload["module_payload"]["module_order"] = module_position
+            module_records.append({
+                "module_id": module_id,
+                "programme_id": programme_id,
+                "module_name": module_payload["module_name"],
+                "activity_sequence": module_position,
+                "module_payload": module_payload["module_payload"],
+                "is_active": True,
+            })
+
+            for activity_position, activity in enumerate(canonical_module.get("Activities", []) or [], start=1):
+                canonical_activity = dict(activity)
+                canonical_activity["ActivityOrder"] = activity_position
+                canonical_activity["ProgrammeID"] = programme_id
+                canonical_activity["ModuleID"] = module_id
+                canonical_activity["ActivityID"] = str(canonical_activity.get("ActivityID", "")).strip() or f"{module_id}-ACT-{activity_position:03d}"
+                canonical_activity["DurationSeconds"] = int(float(canonical_activity.get("DurationMinutes", 0) or 0) * 60)
+                normalised = self._normalise_activity_payload(
+                    event_id, canonical_module, canonical_activity,
+                )
+                activity_records.append({
+                    "activity_id": normalised["activity_id"],
+                    "programme_id": normalised["programme_id"],
+                    "module_id": module_id,
+                    "activity_type": normalised["activity_type"],
+                    "scoring_mode": normalised["scoring_mode"],
+                    "activity_name": normalised["activity_name"],
+                    "activity_order": activity_position,
+                    "duration_seconds": normalised["duration_seconds"],
+                    "activity_payload": normalised["activity_payload"],
+                    "is_active": normalised["is_active"],
+                })
+
+        self._request(
+            "DELETE",
+            "activities_v2",
+            query={"programme_id": f"eq.{programme_id}"},
+            admin=True,
+            retries=1,
+        )
+        self._request(
+            "DELETE",
+            "modules_v2",
+            query={"programme_id": f"eq.{programme_id}"},
+            admin=True,
+            retries=1,
+        )
+
+        self._request(
+            "POST",
+            "programmes_v2",
+            payload={
+                "programme_id": programme_id,
+                "event_id": event_id,
+                "programme_name": str(programme_name or event_row.get("event_name", "") or event_id),
+                "programme_type": str(programme_type or event_row.get("programme_type", "STANDARD")),
+                "programme_schema_version": 1,
+                "module_count": len(module_records),
+                "is_active": True,
+                "published_at": str(event_row.get("published_at", "")) if event_row.get("published_at") else None,
+            },
+            query={"on_conflict": "programme_id"},
+            admin=True,
+            retries=1,
+        )
+
+        if module_records:
+            self._request(
+                "POST",
+                "modules_v2",
+                payload=module_records,
+                query={"on_conflict": "module_id"},
+                admin=True,
+                retries=1,
+            )
+
+        if activity_records:
+            self._request(
+                "POST",
+                "activities_v2",
+                payload=activity_records,
+                query={"on_conflict": "activity_id"},
+                admin=True,
+                retries=1,
+            )
+
+        return {
+            "ProgrammeID": programme_id,
+            "EventID": event_id,
+            "ModuleCount": len(module_records),
+            "ActivityCount": len(activity_records),
+            "ProgrammeType": str(programme_type or event_row.get("programme_type", "STANDARD")),
+        }
+
+    def duplicate_programme_configuration(self, source_event_id, destination_event_id):
+        if not self.can_publish:
+            raise RuntimeDatabaseError(
+                "Programme duplication requires SUPABASE_SECRET_KEY."
+            )
+        source_event_id = str(source_event_id).strip()
+        destination_event_id = str(destination_event_id).strip()
+        if source_event_id == destination_event_id:
+            raise RuntimeDatabaseError("Source and destination events must be different.")
+
+        source = self.get_programme_hierarchy(source_event_id)
+        if not source:
+            raise RuntimeDatabaseError("Source event has no canonical programme configuration.")
+        result = self.save_event_duplicate_programme(destination_event_id, source)
+        return result
+
+    def import_programme_configuration(self, event_id, payload):
+        payload_modules = payload.get("modules", []) if isinstance(payload, dict) else payload
+        if not isinstance(payload_modules, list):
+            raise RuntimeDatabaseError("Import format must include a modules list.")
+
+        modules = []
+        for module_position, module in enumerate(payload_modules, start=1):
+            if not isinstance(module, dict):
+                continue
+            module_name = str(module.get("module_name", module.get("ModuleName", "Module"))).strip()
+            activities = module.get("activities", module.get("Activities", []))
+            modules.append({
+                "ModuleID": str(module.get("module_id", f"{event_id}-MOD-IMP-{module_position:03d}")).strip(),
+                "ModuleName": module_name,
+                "Day": int(module.get("day", module.get("Day", 1)) or 1),
+                "StartTime": str(module.get("start_time", "09:00")),
+                "ModuleOrder": module_position,
+                "DurationMinutes": int(module.get("duration_minutes", 0) or 0),
+                "ParticipantTitle": str(module.get("participant_title", "")),
+                "Activities": [
+                    {
+                        "ActivityID": str(activity.get("activity_id", f"{event_id}-ACT-IMP-{module_position:03d}-{position:02d}")),
+                        "StageName": str(activity.get("name", activity.get("StageName", "Activity"))).strip(),
+                        "DurationMinutes": int(activity.get("duration_minutes", activity.get("DurationMinutes", 15)) or 15),
+                        "DurationSeconds": int(activity.get("duration_seconds", 0) or 0),
+                        "DisplayMode": str(activity.get("projector_behaviour", activity.get("DisplayMode", "Collaboration"))),
+                        "IsActive": "No" if str(activity.get("active", activity.get("IsActive", "Yes"))).strip().casefold() in {"no", "false"} else "Yes",
+                        "ParticipantMessage": str(activity.get("participant_task", activity.get("participant_message", ""))),
+                        "FacilitatorInstruction": "",
+                        "ActivityOrder": position,
+                    }
+                    for position, activity in enumerate(activities or [], start=1)
+                ],
+            })
+        return self.upsert_programme_configuration(event_id, modules, programme_name=payload.get("programme_name", ""))
+
+    def save_event_duplicate_programme(self, destination_event_id, flattened_stages):
+        from engines.programme_hierarchy import build_programme_hierarchy
+
+        destination_event_id = str(destination_event_id).strip()
+        if not destination_event_id:
+            raise RuntimeDatabaseError("Destination event is required.")
+        modules = build_programme_hierarchy(flattened_stages)
+        if not modules:
+            raise RuntimeDatabaseError("Source programme is empty.")
+        return self.upsert_programme_configuration(
+            destination_event_id,
+            modules,
+            programme_name=f"{destination_event_id}-programme",
+        )
+
     def set_event_stage(self, event_id, stage):
         require_control_centre("Live stage mutation")
         if not self.can_publish:

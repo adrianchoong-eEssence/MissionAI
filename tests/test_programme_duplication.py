@@ -69,9 +69,15 @@ def test_product_specific_template_filtering():
     assert programme_family({"ProgrammeType": "Enterprise AGILE"}) == "AGILE"
     assert programme_family({"ProgrammeType": "Formula R.A.C.E."}) == "RACE"
     assert programme_family({"ProgrammeType": "Mission AI"}) == "MISSION_AI"
+    assert programme_family({"ProgrammeType": "Walk Hunt"}) == "WALK_HUNT"
+    assert programme_family({"ProgrammeType": "Road Rally"}) == "ROAD_RALLY"
+    assert programme_family({"ProgrammeType": "F1 Circuit"}) == "F1_CIRCUIT"
     assert any(row[1] == "Pipeline" for row in templates_for_event({"ProgrammeType": "AGILE"}, mission, race))
     assert any(row[1] == "RACE Checkpoints" for row in templates_for_event({"ProgrammeType": "Formula R.A.C.E."}, mission, race))
     assert not any(row[1] == "Mission AI" for row in templates_for_event({"ProgrammeType": "Corporate Training"}, mission, race))
+    assert any(row[1] == "Clue Trail" for row in templates_for_event({"ProgrammeType": "Walk Hunt"}, mission, race))
+    assert any(row[1] == "Rally Start" for row in templates_for_event({"ProgrammeType": "Road Rally"}, mission, race))
+    assert any(row[1] == "Circuit Briefing" for row in templates_for_event({"ProgrammeType": "F1 Circuit"}, mission, race))
 
 
 def test_legacy_rows_remain_in_one_programme_module():

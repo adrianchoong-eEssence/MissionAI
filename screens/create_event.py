@@ -12,6 +12,8 @@ PROGRAMME_TYPES = [
     "AGILE",
     "Enterprise AGILE",
     "Road Rally",
+    "Walk Hunt",
+    "F1 Circuit",
     "Catalyst",
     "CSR",
     "Team Building",
