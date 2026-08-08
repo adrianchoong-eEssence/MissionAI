@@ -1,0 +1,197 @@
+{
+  "mode": "local-infra-recovery-harness",
+  "environment": "unit-scope stubs (non-production)",
+  "operations": {
+    "participant_recovery": true,
+    "participant_device_recovery": true,
+    "team_correction_call": true,
+    "activity_reset_call": true,
+    "event_reset_call": true,
+    "marketplace_correction_call": true,
+    "score_correction_call": true,
+    "credit_correction_call": true,
+    "projector_reconnect": true,
+    "race_results_locked": true
+  },
+  "calls": [
+    {
+      "method": "POST",
+      "path": "rpc/exos_admin_move_participant",
+      "payload": {
+        "p_participant_id": "P-001",
+        "p_team_id": "T-02",
+        "p_actor": "facilitator",
+        "p_reason": "test correction"
+      },
+      "query": null,
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_marketplace_purchases",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_credit_transactions",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_team_wallets",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_ai_messages",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_ai_hint_state",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_team_trackers",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_team_locations",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_location_history",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_geofence_arrivals",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_submissions",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "PATCH",
+      "path": "runtime_participants",
+      "payload": {
+        "points": 0,
+        "status": "Waiting"
+      },
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "PATCH",
+      "path": "runtime_events",
+      "payload": {
+        "updated_at": "2026-08-08T15:58:49.851314+00:00",
+        "current_stage_no": 0,
+        "stage_state": "",
+        "stage_name": "",
+        "current_mission_id": "",
+        "display_mode": "Registration",
+        "stage_payload": {},
+        "state_version": 0,
+        "credit_earning_frozen": false,
+        "credit_leaderboard_frozen_at": null
+      },
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_marketplace_purchases",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_credit_transactions",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_team_wallets",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_ai_messages",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    },
+    {
+      "method": "DELETE",
+      "path": "runtime_ai_hint_state",
+      "payload": null,
+      "query": {
+        "event_id": "eq.EVT-QUE14"
+      },
+      "admin": true
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "mode": "network_interrupt_probe",
+  "environment": "local stubbed",
+  "interrupted_success": true,
+  "interrupted_attempts": 3,
+  "temporary_failure_ok": true,
+  "temporary_failure_message": "Runtime request could not connect: <urlopen error temporary database outage>",
+  "temporary_failure_attempts": 4
+}
