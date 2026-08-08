@@ -182,6 +182,60 @@ def test_100_concurrent_join_attempts_create_zero_duplicates():
     assert result["duplicate_identity_mismatches"] == 0
 
 
+def test_near_simultaneous_same_device_duplicate_join_stays_idempotent():
+    runtime = RuntimeModel()
+    runtime.join("EVT-1", "Ada Lovelace", "device-1")
+    same_device = RuntimeModel()
+    same_device.participants = runtime.participants
+    same_device.tokens = runtime.tokens
+
+    def request_once():
+        return same_device.join("EVT-1", "ADA  LOVELACE", "device-1")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = list(pool.map(lambda _: request_once(), range(2)))
+
+    assert first["ParticipantID"] == second["ParticipantID"]
+    assert first["TeamID"] == second["TeamID"]
+
+
+def test_same_name_existing_on_multiple_devices_returns_explicit_ambiguity():
+    runtime = SupabaseRuntimeDB.__new__(SupabaseRuntimeDB)
+    calls = []
+
+    def request(method, path, payload=None, **_):
+        calls.append((method, path, payload))
+        if path != "rpc/exos_join_event_v2":
+            return {}
+        if calls[-1][2]["p_device_id"] == "DEVICE-A":
+            return {
+                "RecoveryRequired": False,
+                "ParticipantID": "P-ALPHA",
+                "EventID": "EVT-1",
+                "TeamID": "TEAM-01",
+                "Team": "Team One",
+            }
+        return {
+            "RecoveryRequired": True,
+            "Ambiguous": True,
+            "EventID": "EVT-1",
+            "Name": "Ada Lovelace",
+            "Message": "More than one expedition record matches. Ask a facilitator to choose the correct record.",
+        }
+
+    runtime._request = request
+
+    first = runtime.join_player("join-1", "Ada Lovelace", "DEVICE-A")
+    second = runtime.join_player("join-1", "Ada   Lovelace", "DEVICE-B")
+
+    assert first["RecoveryRequired"] is False
+    assert second["Ambiguous"] is True
+    assert second["RecoveryRequired"] is True
+    assert first["ParticipantID"] == "P-ALPHA"
+    assert calls[0][1] == "rpc/exos_join_event_v2"
+    assert calls[1][1] == "rpc/exos_join_event_v2"
+
+
 def test_concurrent_recovery_returns_same_full_identity():
     runtime = RuntimeModel()
     player = runtime.join("EVT-1", "Participant 00000", "DEVICE-1")
