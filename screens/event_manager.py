@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import logging
 
 from data.google_sheets import GoogleSheetsDB
 from screens.app_state import active_event_index
@@ -15,7 +16,7 @@ def _runtime_publish_read_only(*_args, **_kwargs):
     """Event Centre configures events; Control Centre publishes live state."""
     return {
         "ReadOnly": True,
-        "Message": "Runtime publication is available only in Control Centre.",
+        "Message": "Runtime publication is available only in Control Centre",
     }
 
 
@@ -55,6 +56,9 @@ def show_event_manager():
     st.title("🗓 Event Manager")
 
     db = GoogleSheetsDB()
+    if "pending_runtime_publish_event_id" not in st.session_state:
+        st.session_state["pending_runtime_publish_event_id"] = ""
+        st.session_state["pending_runtime_publish_join_code"] = ""
 
     st.subheader("Create Event")
 
@@ -91,6 +95,11 @@ def show_event_manager():
         else:
             event_id = db.generate_next_event_id()
             join_code = db.create_new_join_code()
+            if db.get_event_by_join_code(join_code):
+                st.error("That join code is already in use.")
+                return
+
+            runtime_ready = bool(db.runtime_status()["PublishReady"])
 
             db.create_event(
                 event_id,
@@ -110,14 +119,85 @@ def show_event_manager():
                 "Event configuration is saved. Activate the non-destructive "
                 "registration runtime from Control Centre before participants join."
             )
+            runtime_verified = False
+
+            if runtime_ready:
+                try:
+                    db.publish_event_to_runtime(
+                        event_id,
+                        reset_registration=True,
+                    )
+                    runtime_verified = True
+                    runtime_message = (
+                        "Runtime publication verified with exos_event_by_join_code."
+                    )
+                except Exception as error:
+                    runtime_message = (
+                        "Event Created / Runtime Publication Failed: "
+                        + str(error)
+                    )
+                    st.session_state["pending_runtime_publish_event_id"] = event_id
+                    st.session_state["pending_runtime_publish_join_code"] = join_code
+                    logging.getLogger(__name__).warning(
+                        "Runtime publication failed for event %s: %s",
+                        event_id,
+                        error,
+                    )
 
             st.success("Event Created Successfully!")
             col1, col2, col3 = st.columns(3)
             col1.metric("Event ID", event_id)
             col2.metric("Join Code", join_code)
             col3.metric("Teams Created", int(number_of_teams))
-            if runtime_message:
-                st.info(runtime_message)
+            if runtime_verified:
+                st.success(runtime_message)
+            elif runtime_ready:
+                st.warning("Event Created / Runtime Publication Failed")
+                st.error(runtime_message)
+
+    pending_event_id = st.session_state.get("pending_runtime_publish_event_id", "")
+    pending_join_code = st.session_state.get("pending_runtime_publish_join_code", "")
+    if pending_event_id and pending_join_code:
+        pending_event = db.get_event(pending_event_id)
+        if pending_event:
+            try:
+                is_verified = db._runtime_event_verification(
+                    pending_event,
+                    pending_event_id,
+                )
+            except Exception:
+                is_verified = False
+            if is_verified:
+                st.success(
+                    f"Runtime publication restored for {pending_event_id}."
+                )
+                st.session_state["pending_runtime_publish_event_id"] = ""
+                st.session_state["pending_runtime_publish_join_code"] = ""
+            else:
+                if st.button(
+                    "Retry Runtime Publication",
+                    key=f"retry_runtime_publication_{pending_event_id}",
+                ):
+                    try:
+                        db.publish_event_to_runtime(
+                            pending_event_id,
+                            reset_registration=False,
+                        )
+                    except Exception as error:
+                        st.error(f"Runtime Publication retry failed: {error}")
+                        logging.getLogger(__name__).warning(
+                            "Runtime publication retry failed for event %s: %s",
+                            pending_event_id,
+                            error,
+                        )
+                    else:
+                        st.success(
+                            "Retry Runtime Publication succeeded. "
+                            f"Event {pending_event_id} is now live."
+                        )
+                        st.session_state["pending_runtime_publish_event_id"] = ""
+                        st.session_state["pending_runtime_publish_join_code"] = ""
+                        st.rerun()
 
     st.divider()
     st.subheader("Duplicate Project")
@@ -255,7 +335,7 @@ def show_event_manager():
                     selected_race_event_id,
                     edited_race_teams.to_dict("records"),
                 )
-                runtime_result = _runtime_publish_read_only(
+                runtime_result = db.publish_event_to_runtime(
                     selected_race_event_id,
                     reset_registration=True,
                 )
@@ -368,7 +448,7 @@ def show_event_manager():
             key=f"publish_road_hunt_{selected_road_event_id}",
         ):
             try:
-                _runtime_publish_read_only(
+                db.publish_event_to_runtime(
                     selected_road_event_id,
                     reset_registration=False,
                 )
@@ -414,6 +494,46 @@ def show_event_manager():
                 key="runtime_publish_event",
             )
             selected_runtime_event = runtime_options[selected_runtime_label]
+            selected_runtime_event_id = str(
+                selected_runtime_event.get("EventID", "")
+            )
+            selected_runtime_join_code = str(
+                selected_runtime_event.get("JoinCode", "")
+            )
+            runtime_publication = db.get_runtime_event(selected_runtime_event_id)
+            if runtime_publication is None:
+                st.error("Runtime Not Published")
+                if st.button(
+                    "Publish to Runtime",
+                    key=f"publish_existing_event_runtime_{selected_runtime_event_id}",
+                    help="Publish this event to runtime registration without changing sheet data.",
+                ):
+                    try:
+                        publish_result = db.publish_event_to_runtime(
+                            selected_runtime_event_id,
+                            reset_registration=False,
+                        )
+                    except Exception as error:
+                        st.error(f"Runtime publication failed: {error}")
+                        logging.getLogger(__name__).warning(
+                            "Runtime publication failed for existing event %s: %s",
+                            selected_runtime_event_id,
+                            error,
+                        )
+                    else:
+                        st.success(
+                            "Runtime publication completed. "
+                            f"Join code: {publish_result.get('JoinCode', '')}"
+                        )
+                        st.rerun()
+            elif (
+                str(runtime_publication.get("JoinCode", "")).strip().upper()
+                != selected_runtime_join_code.strip().upper()
+            ):
+                st.warning(
+                    "Runtime mapping does not match sheet join code. "
+                    "Review join code changes before publishing."
+                )
 
             with st.form("runtime_publish_form"):
                 reset_registration = st.checkbox(
@@ -426,7 +546,7 @@ def show_event_manager():
 
             if runtime_submitted:
                 try:
-                    result = _runtime_publish_read_only(
+                    result = db.publish_event_to_runtime(
                         selected_runtime_event.get("EventID", ""),
                         reset_registration=reset_registration,
                     )

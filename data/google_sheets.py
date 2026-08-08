@@ -7,6 +7,7 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 import random
 import re
+import logging
 import string
 import threading
 import time
@@ -1128,6 +1129,24 @@ class GoogleSheetsDB:
             "Message": "Transactional runtime is ready.",
         }
 
+    def _runtime_event_verification(self, event, event_id):
+        clean_join_code = str(event.get("JoinCode", "")).strip().upper()
+        if not clean_join_code:
+            return False
+        resolved = self.runtime.get_event_by_join_code(clean_join_code)
+        if not resolved:
+            return False
+        return (
+            str(resolved.get("EventID", "")).strip() == str(event_id).strip()
+            and str(resolved.get("JoinCode", "")).strip().upper()
+            == clean_join_code
+        )
+
+    def get_runtime_event(self, event_id):
+        if not self.runtime.can_publish:
+            return None
+        return self.runtime.get_runtime_event(event_id)
+
     def publish_event_to_runtime(self, event_id, reset_registration=False):
         event = self.get_event(event_id)
         if not event:
@@ -1136,6 +1155,12 @@ class GoogleSheetsDB:
         teams = self.get_teams(event_id)
         if not teams:
             raise ValueError("Create at least one team before publishing the event.")
+
+        if self.get_runtime_event(event_id):
+            logging.getLogger(__name__).info(
+                "Re-publishing runtime registration for existing event %s",
+                event_id,
+            )
 
         result = self.runtime.publish_event(
             event=event,
@@ -1164,6 +1189,16 @@ class GoogleSheetsDB:
             )
             self.runtime.set_event_stage(event_id, current_stage)
 
+        if not self._runtime_event_verification(event, event_id):
+            raise RuntimeDatabaseError(
+                "Runtime publish verification failed. "
+                "Runtime event is missing or does not map this join code."
+            )
+
+        result["RuntimePublished"] = True
+        result["RuntimeVerified"] = True
+        result["VerifiedEventID"] = str(event_id).strip()
+        result["VerifiedJoinCode"] = str(event.get("JoinCode", "")).strip().upper()
         return result
 
     def sync_runtime_participants_to_sheet(self, event_id):

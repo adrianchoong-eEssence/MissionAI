@@ -835,6 +835,30 @@ class SupabaseRuntimeDB:
         )
         return self._normalise_result(result)
 
+    def get_runtime_event(self, event_id):
+        if not self.can_publish:
+            return None
+        rows = self._request(
+            "GET",
+            "runtime_events",
+            query={
+                "select": "event_id,join_code,event_name,status,current_stage_no",
+                "event_id": f"eq.{str(event_id).strip()}",
+                "limit": "1",
+            },
+            admin=True,
+        )
+        row = self._normalise_result(rows)
+        if not row:
+            return None
+        return {
+            "EventID": row.get("event_id", ""),
+            "JoinCode": row.get("join_code", ""),
+            "EventName": row.get("event_name", ""),
+            "Status": row.get("status", ""),
+            "CurrentStage": int(row.get("current_stage_no", 0) or 0),
+        }
+
     def get_players(self, event_id=None):
         if not self.can_publish:
             return []
