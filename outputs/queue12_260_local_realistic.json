@@ -1,0 +1,63 @@
+{
+  "mode": "local-realistic-ramp",
+  "generated_at_utc": "2026-08-08T15:56:13Z",
+  "participants": 260,
+  "per_event_counts": {
+    "EVT-STANDARD-260": 130,
+    "EVT-RACE-260": 130
+  },
+  "registration": {
+    "p50": 0.286,
+    "p95": 0.645,
+    "p99": 0.885,
+    "requested": 260,
+    "success": 260,
+    "errors": 0
+  },
+  "reconnect": {
+    "p50": 0.003,
+    "p95": 0.007,
+    "p99": 0.009,
+    "requested": 260,
+    "success": 260,
+    "errors": 0
+  },
+  "activity_read": {
+    "p50": 0.011,
+    "p95": 0.021,
+    "p99": 0.034,
+    "requested": 780,
+    "errors": 0
+  },
+  "submission": {
+    "requested": 780,
+    "success": 780,
+    "errors": 0,
+    "p50": 0.003,
+    "p95": 0.011,
+    "p99": 0.014
+  },
+  "facilitator_read": {
+    "p50": 0.026,
+    "p95": 0.072,
+    "p99": 0.081,
+    "errors": 0
+  },
+  "checks": {
+    "duplicate_participants": 0,
+    "duplicate_team_assignments": 0,
+    "cross_event_leakage": 0,
+    "team_spread_standard": 0,
+    "team_spread_race": 0
+  },
+  "error_counters": {},
+  "rates": {
+    "error_rate": 0.0,
+    "retry_rate": 0.0,
+    "timeouts": 0,
+    "db_connections": "not-applicable-local",
+    "locks": 0,
+    "rpc_errors": {},
+    "http_errors": {}
+  }
+}
