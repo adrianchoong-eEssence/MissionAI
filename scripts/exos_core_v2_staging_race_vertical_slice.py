@@ -128,7 +128,7 @@ class CoreV2RaceStagingRunner:
 
     @staticmethod
     def _runner_version() -> str:
-        return "exos-core-v2-race-vertical-slice-v4"
+        return "exos-core-v2-race-vertical-slice-v5"
 
     @staticmethod
     def _coerce_bool(value: object) -> bool:
@@ -143,6 +143,63 @@ class CoreV2RaceStagingRunner:
     def _is_expected_lock_rejection(self, error: Exception, expected_message: str) -> bool:
         text = str(error)
         return "P0001" in text and expected_message.lower() in text.lower()
+
+    @staticmethod
+    def _compute_team_rank_order(rows: list[dict]) -> tuple[list[str], list[tuple[str, float]], bool]:
+        seen_team_ids = set()
+        ordered_teams = []
+        computed_rows: list[tuple[str, float]] = []
+        ties_ok = True
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            team_id = row.get("team_id")
+            if not team_id:
+                continue
+            if team_id in seen_team_ids:
+                ties_ok = False
+                continue
+            seen_team_ids.add(team_id)
+
+            payload = row.get("result_payload") or {}
+            adjusted = float(payload.get("time_ms", 0) or 0) + float(payload.get("penalty_ms", 0) or 0)
+            ordered_teams.append(team_id)
+            computed_rows.append((team_id, adjusted))
+
+        ordered_by_metric = sorted(
+            computed_rows,
+            key=lambda item: (item[1], item[0]),
+        )
+        expected_order: list[str] = []
+        expected_rank = {}
+        current_position = 1
+        previous_metric = None
+        for idx, (team_id, adjusted) in enumerate(ordered_by_metric):
+            if previous_metric is None or adjusted != previous_metric:
+                current_position = idx + 1
+            expected_rank[team_id] = current_position
+            expected_order.append(team_id)
+            previous_metric = adjusted
+
+        tie_pairs = []
+        for idx in range(1, len(ordered_by_metric)):
+            if ordered_by_metric[idx][1] == ordered_by_metric[idx - 1][1]:
+                tie_pairs.append((ordered_by_metric[idx - 1][0], ordered_by_metric[idx][0]))
+
+        for left_team, right_team in tie_pairs:
+            if left_team > right_team:
+                ties_ok = False
+
+        expected_position_match = all(
+            int(row.get("ranking_position", 0)) == expected_rank.get(row.get("team_id"))
+            for row in rows
+            if isinstance(row, dict)
+            and row.get("team_id")
+            and row.get("ranking_position") is not None
+        )
+
+        return expected_order, list(ordered_by_metric), ties_ok and expected_position_match
 
     def _is_reconnect_contract_ok(self, login: object, restore: object, session_row: object) -> bool:
         if not isinstance(login, dict) or not isinstance(restore, dict):
@@ -1116,7 +1173,10 @@ class CoreV2RaceStagingRunner:
         bonus_ok = True
         for idx, scored_team_id in enumerate(self.team_ids[:10], start=1):
             base_time = 120000 + (idx - 1) * 500
-            penalty_ms = 5000 if idx == 1 else 2000
+            if idx in {1, 2}:
+                penalty_ms = 5000
+            else:
+                penalty_ms = 2000
             bonus_credits = 20 if idx == 1 else 5
 
             self._patch(
@@ -1221,53 +1281,29 @@ class CoreV2RaceStagingRunner:
         second_order = [row.get("team_id") for row in rerank_rows if isinstance(row, dict)]
         ranking_deterministic_order = first_order == second_order and len(first_order) == 10
 
-        computed = []
-        for row in ranking_rows:
-            if not isinstance(row, dict):
-                continue
-            payload = row.get("result_payload") or {}
-            computed.append((
-                row.get("team_id"),
-                float(payload.get("time_ms", 0) or 0),
-                float(payload.get("penalty_ms", 0) or 0),
-            ))
-
-        if len(computed) == 10:
-            self.ranking_metric = "time_ms + penalty_ms"
-            sorted_rows = sorted(computed, key=lambda item: (item[1] + item[2], item[0] or ""))
-            expected_rank = {}
+        if len(ranking_rows) == 10:
+            expected_order, sorted_rows_with_metric, ranking_payloads_ok = self._compute_team_rank_order(ranking_rows)
+            expected_positions = {}
             current_position = 1
-            previous_key = None
-            for idx, (team_id_value, metric_time, penalty_value) in enumerate(sorted_rows):
-                metric = metric_time + penalty_value
-                if idx and metric != previous_key:
+            previous_metric = None
+            for idx, (team_id, adjusted) in enumerate(sorted_rows_with_metric):
+                if previous_metric is None or adjusted != previous_metric:
                     current_position = idx + 1
-                expected_rank[team_id_value] = current_position
-                expected_metric_rank.append((team_id_value, current_position))
-                previous_key = metric
-            observed = [
-                (row.get("team_id"), row.get("ranking_position"))
+                expected_positions[team_id] = current_position
+                previous_metric = adjusted
+            observed_positions = {
+                row.get("team_id"): int(row.get("ranking_position", 0))
                 for row in ranking_rows
-                if isinstance(row, dict)
-            ]
-            self.gates["ranking_deterministic"] = bool(all(
-                expected_rank.get(team_id) == position for team_id, position in observed
-            ))
-            tie_metric_rows = sorted_rows
-            ties_present = False
-            for idx in range(1, len(tie_metric_rows)):
-                prev = tie_metric_rows[idx - 1]
-                curr = tie_metric_rows[idx]
-                if (prev[1] + prev[2]) == (curr[1] + curr[2]):
-                    ties_present = True
-            if ties_present:
-                self.gates["tie_rule_deterministic"] = bool(all(
-                    pair[0] <= pair_next[0]
-                    for pair, pair_next in zip(sorted_rows, sorted_rows[1:])
-                    if (pair[1] + pair[2]) == (pair_next[1] + pair_next[2])
-                ))
-            else:
-                self.gates["tie_rule_deterministic"] = True
+                if isinstance(row, dict) and row.get("team_id") is not None and row.get("ranking_position") is not None
+            }
+            self.gates["ranking_deterministic"] = (
+                ranking_payloads_ok
+                and len(set(first_order)) == 10
+                and len(ranking_rows) == 10
+                and expected_positions == observed_positions
+            )
+            self.gates["tie_rule_deterministic"] = ranking_payloads_ok
+            ranking_deterministic_order = ranking_deterministic_order and (first_order == expected_order)
         else:
             self.gates["tie_rule_deterministic"] = False
             ranking_deterministic_order = False
