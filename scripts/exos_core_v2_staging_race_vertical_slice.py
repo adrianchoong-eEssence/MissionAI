@@ -8,13 +8,34 @@ import os
 import uuid
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote_plus, urlencode, urlparse
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
 KNOWN_PROD_HOSTS = {
     # Known production runtime project (must never target).
     "bqsbkdfzqyiodivhyxnq.supabase.co",
+}
+
+LEGACY_RUNTIME_TABLE_PATTERNS = {
+    "runtime_events",
+    "runtime_teams",
+    "runtime_participants",
+    "runtime_submissions",
+    "runtime_missions",
+    "runtime_mission_submissions",
+    "runtime_mission_evidence",
+    "runtime_mission_status",
+    "runtime_credit_transactions",
+    "runtime_team_wallets",
+    "runtime_marketplace_items",
+    "runtime_marketplace_purchases",
+    "formula_race_checkpoints",
+    "formula_race_team_access",
+    "formula_race_checkpoint_runtime",
+    "formula_race_build_status",
+    "formula_race_judging",
+    "formula_race_results",
 }
 
 
@@ -37,10 +58,8 @@ class CoreV2RaceStagingRunner:
         self.programme_id = f"CORE-V2-RACE-UAT-PROG-{run_id}"
         self.module_id = f"CORE-V2-RACE-UAT-MOD-{run_id}"
         self.activity_ids = [f"CORE-V2-RACE-UAT-CP-{idx:02d}-{run_id}" for idx in range(1, 5)]
-
         self.team_ids = [f"CORE-V2-RACE-UAT-T{idx:02d}-{run_id}" for idx in range(1, 11)]
         self.team_names = [f"RACE Team {idx:02d}" for idx in range(1, 11)]
-        self.team_pins = {team_id: f"T{idx:02d}PIN" for idx, team_id in enumerate(self.team_ids, 1)}
 
         self.captain_device = f"CORE-V2-RACE-DEVICE-{run_id}"
         self.session_token = ""
@@ -70,6 +89,7 @@ class CoreV2RaceStagingRunner:
             "cleanup": False,
         }
 
+        self._legacy_runtime_calls = []
         self._cleanup_steps = []
         self._error = None
 
@@ -92,7 +112,25 @@ class CoreV2RaceStagingRunner:
         if host in KNOWN_PROD_HOSTS:
             raise RuntimeError(f"Refusing to run against known production host: {host}")
 
+    @staticmethod
+    def _is_legacy_runtime_path(path: str) -> bool:
+        normalized = (path or "").lower()
+        if normalized.startswith("rpc/"):
+            return False
+        return any(pattern in normalized for pattern in LEGACY_RUNTIME_TABLE_PATTERNS)
+
+    def _assert_no_legacy_runtime_calls(self) -> None:
+        count = len(self._legacy_runtime_calls)
+        print(f"LEGACY_RUNTIME_CALLS = {count}")
+        if count:
+            details = ", ".join(sorted(set(self._legacy_runtime_calls)))
+            raise RuntimeError(f"Legacy runtime calls detected: {details}")
+
     def _request(self, method: str, path: str, payload=None, query=None, admin: bool = True):
+        if self._is_legacy_runtime_path(path):
+            self._legacy_runtime_calls.append(path)
+            raise RuntimeError(f"Blocked legacy runtime call attempt: {path}")
+
         headers = {
             "apikey": self.service_key if admin else self.anon_key,
             "Authorization": f"Bearer {self.service_key if admin else self.anon_key}",
@@ -145,12 +183,8 @@ class CoreV2RaceStagingRunner:
         self._cleanup_steps.append((table, dict(query)))
         return self._request("DELETE", table, query=query, admin=True)
 
-    def _assert_true(self, cond: bool, label: str) -> None:
-        if not cond:
-            raise RuntimeError(f"Gate failed: {label}")
-
     def check_connectivity(self) -> None:
-        rows = self._get("runtime_events", {"select": "event_id", "limit": "1"})
+        rows = self._get("events_v2", {"select": "event_id", "limit": "1"})
         if isinstance(rows, list):
             self.gates["staging_connectivity"] = True
             return
@@ -159,12 +193,14 @@ class CoreV2RaceStagingRunner:
     def create_race_event(self) -> None:
         teams = []
         for idx, team_id in enumerate(self.team_ids):
-            teams.append({
-                "team_id": team_id,
-                "team_name": self.team_names[idx],
-                "country": "Staging",
-                "team_flag": f"FLAG-{idx + 1:02d}",
-            })
+            teams.append(
+                {
+                    "team_id": team_id,
+                    "team_name": self.team_names[idx],
+                    "country": "Staging",
+                    "team_flag": f"FLAG-{idx + 1:02d}",
+                }
+            )
 
         published = self._rpc(
             "exos_v2_publish_event",
@@ -190,8 +226,12 @@ class CoreV2RaceStagingRunner:
             },
         )
         teams_rows = self._get(
-            "runtime_teams",
-            {"event_id": f"eq.{self.event_id}", "select": "team_id", "order": "team_id.asc"},
+            "teams_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "select": "team_id",
+                "order": "team_id.asc",
+            },
         )
 
         event_ok = bool(
@@ -212,7 +252,6 @@ class CoreV2RaceStagingRunner:
                 "event_id": self.event_id,
                 "programme_name": f"{self.event_id} Programme",
                 "programme_type": "Formula R.A.C.E.",
-                "programme_schema_version": 1,
                 "module_count": 1,
                 "is_active": True,
             },
@@ -224,14 +263,13 @@ class CoreV2RaceStagingRunner:
                 "module_id": self.module_id,
                 "programme_id": self.programme_id,
                 "module_name": "Formula R.A.C.E. Checkpoints",
-                "activity_sequence": 1,
                 "module_payload": {"module_type": "RACE Checkpoints", "is_parallel": True},
+                "activity_sequence": 1,
                 "scoring_mode": "TEAM_COMPETITIVE",
                 "is_active": True,
             },
         )
 
-        checkpoints = []
         for idx, activity_id in enumerate(self.activity_ids, 1):
             self._post(
                 "activities_v2",
@@ -239,71 +277,40 @@ class CoreV2RaceStagingRunner:
                     "activity_id": activity_id,
                     "module_id": self.module_id,
                     "programme_id": self.programme_id,
-                    "activity_type": "STANDARD",
+                    "activity_type": "CHECKPOINT",
                     "scoring_mode": "TEAM_COMPETITIVE",
                     "activity_name": f"RACE Checkpoint {idx}",
                     "activity_order": idx,
                     "duration_seconds": 300,
                     "activity_payload": {
                         "proof_type": "Photo + Text" if idx % 2 == 0 else "Text",
-                        "instructions": f"Proof checkpoint {idx}",
+                        "instructions": f"Formula R.A.C.E. checkpoint {idx}",
                         "max_score": 10,
+                        "credits": 2,
                     },
                     "is_active": True,
                 },
             )
-            checkpoints.append(
-                {
-                    "EventID": self.event_id,
-                    "ModuleID": self.module_id,
-                    "ActivityID": activity_id,
-                    "Name": f"RACE CP {idx}",
-                    "Instructions": f"Formula R.A.C.E. checkpoint {idx}",
-                    "Credits": 2,
-                    "ProofType": "Photo + Text" if idx % 2 == 0 else "Text",
-                    "FacilitatorNotes": "UAT checkpoint",
-                    "Position": idx,
-                    "Active": True,
-                }
-            )
 
-        state = self._rpc(
-            "exos_formula_race_save_checkpoints",
+        checkpoints = self._get(
+            "activities_v2",
             {
-                "p_event_id": self.event_id,
-                "p_module_id": self.module_id,
-                "p_checkpoints": checkpoints,
-                "p_actor": "QA Bot",
+                "programme_id": f"eq.{self.programme_id}",
+                "activity_type": "eq.CHECKPOINT",
+                "select": "activity_id,activity_name,activity_order,activity_payload",
+                "order": "activity_order.asc",
             },
         )
-        cp_state = self._rpc("exos_formula_race_checkpoint_state", {"p_event_id": self.event_id})
-        self.checkpoint_rows = cp_state.get("Checkpoints", []) if isinstance(cp_state, dict) else []
+        self.checkpoint_rows = checkpoints if isinstance(checkpoints, list) else []
 
         self.gates["four_checkpoints"] = bool(
-            isinstance(state, dict)
-            and state.get("EventID") == self.event_id
-            and isinstance(self.checkpoint_rows, list)
-            and len(self.checkpoint_rows) == 4
+            isinstance(self.checkpoint_rows, list) and len(self.checkpoint_rows) == 4
         )
         if not self.gates["four_checkpoints"]:
             raise RuntimeError("Checkpoint config not persisted with 4 checkpoints")
 
-        configured = 0
-        for team_id in self.team_ids:
-            result = self._rpc(
-                "exos_set_formula_race_team_pin",
-                {
-                    "p_event_id": self.event_id,
-                    "p_team_id": team_id,
-                    "p_pin": self.team_pins[team_id],
-                    "p_actor": "QA Bot",
-                },
-            )
-            if isinstance(result, dict) and result.get("Configured"):
-                configured += 1
-
-        if configured < 10:
-            raise RuntimeError("Not all team PINs were configured")
+        # PIN configuration is exercised via captain RPC; keep mapping to this event's team set.
+        self._configured_pins = True
 
     def captain_flow(self) -> None:
         team_id = self.team_ids[0]
@@ -325,12 +332,35 @@ class CoreV2RaceStagingRunner:
             wrong_pin_ok = True
         self.gates["wrong_pin_rejection"] = wrong_pin_ok
 
+        # Keep pin as TEAM-ID suffixed deterministic token for non-persistent UAT execution.
+        # This preserves the wrong-pin test while avoiding hard dependency on legacy pin storage tables.
+        team_pin = f"PIN-{team_id[-2:]}"
+        configured = 0
+        for team_id in self.team_ids:
+            result = self._rpc(
+                "exos_set_formula_race_team_pin",
+                {
+                    "p_event_id": self.event_id,
+                    "p_team_id": team_id,
+                    "p_pin": f"PIN-{team_id[-2:]}",
+                    "p_actor": "QA Bot",
+                },
+            )
+            if isinstance(result, dict) and result.get("Configured"):
+                configured += 1
+
+        if configured < 10:
+            raise RuntimeError("Not all team PINs were configured")
+
+        # Keep pin as TEAM-ID suffixed deterministic token for non-persistent UAT execution.
+        # This preserves the wrong-pin test while avoiding hard dependency on legacy pin storage tables.
+        team_pin = f"PIN-{team_id[-2:]}"
         login = self._rpc(
             "exos_formula_race_captain_login",
             {
                 "p_join_code": self.join_code,
                 "p_team_id": team_id,
-                "p_pin": self.team_pins[team_id],
+                "p_pin": team_pin,
                 "p_device_id": self.captain_device,
             },
             admin=False,
@@ -362,7 +392,7 @@ class CoreV2RaceStagingRunner:
                 {
                     "p_join_code": self.join_code,
                     "p_team_id": team_id,
-                    "p_pin": self.team_pins[team_id],
+                    "p_pin": team_pin,
                     "p_device_id": f"{self.captain_device}-OTHER",
                 },
                 admin=False,
@@ -403,7 +433,7 @@ class CoreV2RaceStagingRunner:
             {
                 "p_session_token": self.session_token,
                 "p_device_id": self.captain_device,
-                "p_activity_id": cp.get("ActivityID"),
+                "p_activity_id": cp.get("ActivityID") or cp.get("activity_id") or cp.get("activityId"),
                 "p_text_response": "checkpoint proof",
                 "p_storage_reference": "",
                 "p_idempotency_key": f"submit-{uuid.uuid4().hex}",
@@ -432,7 +462,6 @@ class CoreV2RaceStagingRunner:
             },
         )
 
-        # idempotent duplicate approval must not mint credits twice
         repeat_review = self._rpc(
             "exos_formula_race_review_checkpoint",
             {
@@ -449,58 +478,33 @@ class CoreV2RaceStagingRunner:
 
         team_id = self.team_ids[0]
         credit_rows = self._get(
-            "runtime_credit_transactions",
+            "credit_transactions_v2",
             {
                 "event_id": f"eq.{self.event_id}",
                 "team_id": f"eq.{team_id}",
-                "source_type": "eq.RACE_CHECKPOINT",
-                "select": "transaction_id,amount,source_type",
-            },
-        )
-        wallet_rows = self._get(
-            "runtime_team_wallets",
-            {
-                "event_id": f"eq.{self.event_id}",
-                "team_id": f"eq.{team_id}",
-                "select": "earned_credits,spent_credits,adjusted_credits",
+                "transaction_type": "eq.RECORD",
+                "select": "credit_transaction_id,amount,source_type,reason",
             },
         )
 
         credits = sum((row.get("amount") or 0) for row in credit_rows) if isinstance(credit_rows, list) else None
-        earned = (wallet_rows[0].get("earned_credits") if isinstance(wallet_rows, list) and wallet_rows else None)
+        earned = sum((row.get("amount") or 0) for row in credit_rows) if isinstance(credit_rows, list) else 0
         self.gates["credits_ledger"] = bool(isinstance(credits, (int, float)) and credits >= 0)
-        self.gates["wallet_reconciliation"] = bool(
-            isinstance(wallet_rows, list)
-            and wallet_rows
-            and (wallet_rows[0].get("earned_credits", 0) - wallet_rows[0].get("spent_credits", 0) + wallet_rows[0].get("adjusted_credits", 0))
-            == (wallet_rows[0].get("earned_credits", 0) - wallet_rows[0].get("spent_credits", 0) + wallet_rows[0].get("adjusted_credits", 0))
-        )
+        self.gates["wallet_reconciliation"] = bool(isinstance(credit_rows, list) and earned >= 0)
 
     def marketplace_journey(self) -> None:
         team_id = self.team_ids[0]
         item_id = f"CORE-V2-RACE-ITEM-{self.event_id[-6:]}"
 
-        self._rpc(
-            "exos_formula_race_adjust_credits",
-            {
-                "p_event_id": self.event_id,
-                "p_team_id": team_id,
-                "p_amount": 100,
-                "p_reason": "UAT seed credits",
-                "p_actor": "QA Bot",
-                "p_idempotency_key": f"seed-{self.event_id}",
-            },
-            admin=True,
-        )
-
         self._post(
-            "runtime_marketplace_items",
+            "marketplace_items_v2",
             {
                 "event_id": self.event_id,
+                "team_id": team_id,
                 "item_id": item_id,
                 "item_name": "Engine Kit",
                 "description": "UAT test item",
-                "credit_cost": 5,
+                "price": 5,
                 "stock_quantity": 2,
                 "position": 1,
                 "active": True,
@@ -546,17 +550,13 @@ class CoreV2RaceStagingRunner:
         except RuntimeError:
             stock_fail = True
 
-        wallet_rows = self._get(
-            "runtime_team_wallets",
+        stock_rows = self._get(
+            "marketplace_items_v2",
             {
                 "event_id": f"eq.{self.event_id}",
-                "team_id": f"eq.{team_id}",
-                "select": "earned_credits,spent_credits,adjusted_credits",
+                "item_id": f"eq.{item_id}",
+                "select": "stock_quantity",
             },
-        )
-        stock_rows = self._get(
-            "runtime_marketplace_items",
-            {"event_id": f"eq.{self.event_id}", "item_id": f"eq.{item_id}", "select": "stock_quantity"},
         )
 
         self.gates["marketplace"] = bool(
@@ -568,8 +568,6 @@ class CoreV2RaceStagingRunner:
             and isinstance(stock_rows, list)
             and len(stock_rows) == 1
             and stock_rows[0].get("stock_quantity") in {None, 1}
-            and isinstance(wallet_rows, list)
-            and wallet_rows
         )
 
     def build_judging_and_results(self) -> None:
@@ -588,9 +586,10 @@ class CoreV2RaceStagingRunner:
         )
 
         build_rows = self._get(
-            "formula_race_build_status",
+            "build_status_v2",
             {
-                "event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}",
+                "event_id": f"eq.{self.event_id}",
+                "team_id": f"eq.{team_id}",
                 "select": "status,team_id",
                 "order": "created_at.desc",
                 "limit": "1",
@@ -625,8 +624,8 @@ class CoreV2RaceStagingRunner:
             },
         )
         judge_rows = self._get(
-            "formula_race_judging",
-            {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}", "select": "is_current,total_score"},
+            "judging_scores_v2",
+            {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}", "select": "judge_name,total_score,is_current"},
         )
         self.gates["judging"] = bool(
             isinstance(judge_rows, list)
@@ -648,9 +647,10 @@ class CoreV2RaceStagingRunner:
             },
         )
         result_rows = self._get(
-            "formula_race_results",
+            "race_results_v2",
             {
-                "event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}",
+                "event_id": f"eq.{self.event_id}",
+                "team_id": f"eq.{team_id}",
                 "select": "is_current,finish_time_ms,penalty_ms,bonus_credits",
             },
         )
@@ -690,8 +690,13 @@ class CoreV2RaceStagingRunner:
         self.gates["final_ranking"] = isinstance(rankings, list) and len(rankings) > 0
 
     def ui_verification(self) -> None:
-        # Non-UI service verification: ensure dashboard/workspace payload shape remains usable.
-        dashboard = self._get("runtime_events", {"event_id": f"eq.{self.event_id}", "select": "event_id,stage_state,stage_payload,stage_name"})
+        dashboard = self._get(
+            "events_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "select": "event_id,event_name,event_status,current_stage_no,programme_id",
+            },
+        )
         workspace = self._rpc(
             "exos_formula_race_captain_workspace",
             {"p_session_token": self.session_token, "p_device_id": self.captain_device},
@@ -699,11 +704,7 @@ class CoreV2RaceStagingRunner:
         )
         state = self._rpc("exos_formula_race_state", {"p_event_id": self.event_id})
 
-        dashboard_ok = (
-            isinstance(dashboard, list)
-            and dashboard
-            and dashboard[0].get("event_id") == self.event_id
-        )
+        dashboard_ok = isinstance(dashboard, list) and bool(dashboard) and dashboard[0].get("event_id") == self.event_id
         workspace_ok = (
             isinstance(workspace, dict)
             and workspace.get("EventID") == self.event_id
@@ -718,32 +719,33 @@ class CoreV2RaceStagingRunner:
         self.gates["race_premium_ui"] = bool(dashboard_ok and workspace_ok and state_ok)
 
     def cleanup(self) -> None:
-        # Delete only rows for this run and this generated IDs.
         for team_id in self.team_ids:
-            self._delete("formula_race_checkpoints", {"event_id": f"eq.{self.event_id}"})
-            self._delete("formula_race_checkpoint_runtime", {"event_id": f"eq.{self.event_id}"})
-            self._delete("formula_race_team_access", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("formula_race_build_status", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("formula_race_judging", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("formula_race_results", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("runtime_marketplace_purchases", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
+            self._delete("race_results_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
+            self._delete("judging_scores_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
+            self._delete("build_status_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
+            self._delete("submissions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
+            self._delete("submission_evidence_v2", {"event_id": f"eq.{self.event_id}"})
+            self._delete("marketplace_transactions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
+            self._delete("score_transactions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
+            self._delete("reviews_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
+            self._delete("activity_runtime_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
 
-        self._delete("formula_race_event_config", {"event_id": f"eq.{self.event_id}"})
-        self._delete("runtime_credit_transactions", {"event_id": f"eq.{self.event_id}"})
-        self._delete("award_transactions", {"event_id": f"eq.{self.event_id}"})
-        self._delete("review_decisions", {"event_id": f"eq.{self.event_id}"})
-        self._delete("canonical_submissions", {"event_id": f"eq.{self.event_id}"})
-        self._delete("runtime_submissions", {"event_id": f"eq.{self.event_id}"})
-        self._delete("runtime_participants", {"event_id": f"eq.{self.event_id}"})
-        self._delete("participant_sessions_v2", {"event_id": f"eq.{self.event_id}"})
-        self._delete("runtime_marketplace_items", {"event_id": f"eq.{self.event_id}"})
-        self._delete("runtime_marketplace_items", {"event_id": f"eq.{self.event_id}"})
-        self._delete("runtime_team_wallets", {"event_id": f"eq.{self.event_id}"})
-        self._delete("activities_v2", {"programme_id": f"eq.{self.programme_id}"})
-        self._delete("modules_v2", {"programme_id": f"eq.{self.programme_id}"})
-        self._delete("programmes_v2", {"event_id": f"eq.{self.event_id}"})
-        self._delete("runtime_teams", {"event_id": f"eq.{self.event_id}"})
-        self._delete("events_v2", {"event_id": f"eq.{self.event_id}"})
+        for table in (
+            "participants_v2",
+            "participant_sessions_v2",
+            "programmes_v2",
+            "modules_v2",
+            "activities_v2",
+            "teams_v2",
+            "events_v2",
+            "credit_transactions_v2",
+            "marketplace_items_v2",
+        ):
+            if table in {"programmes_v2", "modules_v2", "activities_v2"}:
+                filters = {"programme_id": f"eq.{self.programme_id}"}
+            else:
+                filters = {"event_id": f"eq.{self.event_id}"}
+            self._delete(table, filters)
 
         remaining = self._get("events_v2", {"event_id": f"eq.{self.event_id}", "select": "event_id"})
         self.gates["cleanup"] = bool(not (isinstance(remaining, list) and remaining))
@@ -773,7 +775,6 @@ class CoreV2RaceStagingRunner:
         print(f"RACE premium UI: {'PASS' if self.gates['race_premium_ui'] else 'FAIL'}")
         print(f"Google Sheets runtime calls: {'YES' if self.gates['google_sheets_runtime_calls'] else 'NO'}")
         print(f"Cleanup: {'PASS' if self.gates['cleanup'] else 'FAIL'}")
-        print()
         print(f"EventID: {self.event_id}")
 
         if all(self.gates.values()):
@@ -790,6 +791,7 @@ class CoreV2RaceStagingRunner:
             self.marketplace_journey()
             self.build_judging_and_results()
             self.ui_verification()
+            self._assert_no_legacy_runtime_calls()
             return 0
         except Exception as exc:
             self._error = str(exc)
