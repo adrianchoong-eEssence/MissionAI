@@ -39,9 +39,9 @@ begin
             create or replace function extensions.digest(data text, typ text)
             returns bytea
             language sql
-            as $_digest$_
+            as $$
                 select public.digest(data, typ);
-            $_digest$_;
+            $$;
         else
             raise exception 'pgcrypto digest() unavailable in extensions or public schema';
         end if;
@@ -58,9 +58,9 @@ begin
             create or replace function extensions.gen_random_uuid()
             returns uuid
             language sql
-            as $_uuid$_
+            as $$
                 select public.gen_random_uuid();
-            $_uuid$_;
+            $$;
         else
             raise exception 'pgcrypto gen_random_uuid() unavailable in extensions or public schema';
         end if;

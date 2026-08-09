@@ -114,6 +114,24 @@ def test_core_v2_schema_has_postgres_safe_type_creation():
     assert re.search(r"create\s+policy\s+if\s+not\s+exists", lowered) is None
 
 
+def test_core_v2_sql_artifacts_do_not_contain_bad_dollar_quotes():
+    bad_patterns = [
+        re.compile(r"\$\*.*\$\*"),
+        re.compile(r"\*\$\$"),
+        re.compile(r"`"),
+    ]
+
+    for path in (
+        Path("supabase/020_exos_core_v2_schema.sql"),
+        Path("supabase/021_exos_core_v2_pgcrypto_fix.sql"),
+    ):
+        text = path.read_text().lower()
+        for pattern in bad_patterns:
+            assert pattern.search(text) is None, (
+                f"found malformed SQL artifact in {path}: pattern {pattern.pattern}"
+            )
+
+
 def test_core_v2_join_event_v2_session_insert_sql_shape():
     pattern = re.compile(
         r"create or replace function public\.exos_v2_join_event_v2[\s\S]*?"
