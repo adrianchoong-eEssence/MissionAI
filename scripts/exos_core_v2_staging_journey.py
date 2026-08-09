@@ -227,9 +227,18 @@ class CoreV2JourneyRunner:
         except Exception as exc:
             raise RuntimeError(f"delete failed for {label or table}: {exc}")
 
+    def _ids_filter(self, ids, column: str):
+        if not ids:
+            return None
+        in_clause = self._to_in_list(ids)
+        if not in_clause:
+            return None
+        return {column: in_clause}
+
     def _delete_by_ids(self, table: str, ids, id_column: str, label: str = ""):
         in_clause = self._to_in_list(ids)
         if not in_clause:
+            print(f"CLEANUP STEP SKIPPED — NO IDS | {label or table}")
             return
         self._delete_rows(table, {id_column: in_clause}, label=label or f"{table}.{id_column}")
 
@@ -244,6 +253,23 @@ class CoreV2JourneyRunner:
 
     def _delete_step(self, table: str, query: dict, label: str = "") -> tuple[dict, bool]:
         step_label = label or table
+        if query is None:
+            result = {
+                "table": table,
+                "label": step_label,
+                "filter": "SKIPPED — NO IDS",
+                "rows_matched_before_delete": 0,
+                "delete_result": "SKIPPED — NO IDS",
+                "rows_remaining_after_delete": 0,
+                "http_status": 0,
+                "error_body": "",
+            }
+            print(
+                "CLEANUP STEP | "
+                f"{step_label} | {result['filter']} | before=0 | result=SKIPPED — NO IDS | after=0 | status=0"
+            )
+            return result, False
+
         query_filter = dict(query or {})
         query_filter_repr = self._fmt_filter(query_filter)
         matched_before = self._count(table, query_filter)
@@ -710,16 +736,24 @@ class CoreV2JourneyRunner:
                 "participant_id",
                 {"event_id": f"eq.{self.event_id}", "select": "participant_id"},
             )
+            programme_filter = self._ids_filter(programme_ids, "programme_id")
             module_ids = self._pluck(
                 "modules_v2",
                 "module_id",
-                {"programme_id": self._to_in_list(programme_ids) or "eq.none", "select": "module_id"},
-            )
+                {
+                    **(programme_filter or {}),
+                    "select": "module_id",
+                },
+            ) if programme_ids else []
+            module_filter = self._ids_filter(module_ids, "module_id")
             activity_ids = self._pluck(
                 "activities_v2",
                 "activity_id",
-                {"module_id": self._to_in_list(module_ids) or "eq.none", "select": "activity_id"},
-            )
+                {
+                    **(module_filter or {}),
+                    "select": "activity_id",
+                },
+            ) if module_ids else []
             session_ids = self._pluck(
                 "participant_sessions_v2",
                 "participant_session_id",
@@ -727,6 +761,12 @@ class CoreV2JourneyRunner:
             )
             submission_ids = self._pluck("submissions_v2", "submission_id", {"event_id": f"eq.{self.event_id}", "select": "submission_id"})
             ai_job_ids = self._pluck("ai_jobs_v2", "ai_job_id", {"event_id": f"eq.{self.event_id}", "select": "ai_job_id"})
+            session_filter = self._ids_filter(session_ids, "participant_session_id")
+            submission_filter = self._ids_filter(submission_ids, "submission_id")
+            ai_job_filter = self._ids_filter(ai_job_ids, "ai_job_id")
+            activity_filter = self._ids_filter(activity_ids, "activity_id")
+            module_filter_for_cleanup = self._ids_filter(module_ids, "module_id")
+            programme_filter_for_cleanup = self._ids_filter(programme_ids, "programme_id")
 
             print("CLEANUP TARGET UAT IDs")
             print(f"EventID: {self.event_id}")
@@ -739,10 +779,10 @@ class CoreV2JourneyRunner:
             print(f"AIJobIDs: {ai_job_ids}")
 
             cleanup_sequence = [
-                ("submission_evidence_v2", {"submission_id": self._to_in_list(submission_ids) or "eq.none"}, "submission_evidence_v2"),
-                ("location_evidence_v2", {"submission_id": self._to_in_list(submission_ids) or "eq.none"}, "location_evidence_v2 by submission_id"),
-                ("location_evidence_v2", {"participant_session_id": self._to_in_list(session_ids) or "eq.none"}, "location_evidence_v2 by participant_session_id"),
-                ("ai_results_v2", {"ai_job_id": self._to_in_list(ai_job_ids) or "eq.none"}, "ai_results_v2"),
+                ("submission_evidence_v2", submission_filter, "submission_evidence_v2"),
+                ("location_evidence_v2", submission_filter, "location_evidence_v2 by submission_id"),
+                ("location_evidence_v2", session_filter, "location_evidence_v2 by participant_session_id"),
+                ("ai_results_v2", ai_job_filter, "ai_results_v2"),
                 ("reviews_v2", {"event_id": f"eq.{event_id}"}, "reviews_v2"),
                 ("score_transactions_v2", {"event_id": f"eq.{event_id}"}, "score_transactions_v2"),
                 ("credit_transactions_v2", {"event_id": f"eq.{event_id}"}, "credit_transactions_v2"),
@@ -752,14 +792,14 @@ class CoreV2JourneyRunner:
                 ("race_results_v2", {"event_id": f"eq.{event_id}"}, "race_results_v2"),
                 ("projector_state_v2", {"event_id": f"eq.{event_id}"}, "projector_state_v2"),
                 ("location_checkpoints_v2", {"event_id": f"eq.{event_id}"}, "location_checkpoints_v2"),
-                ("submissions_v2", {"submission_id": self._to_in_list(submission_ids) or "eq.none"}, "submissions_v2"),
+                ("submissions_v2", submission_filter, "submissions_v2"),
                 ("activity_runtime_v2", {"event_id": f"eq.{event_id}"}, "activity_runtime_v2"),
                 ("participant_sessions_v2", {"event_id": f"eq.{event_id}"}, "participant_sessions_v2"),
                 ("participants_v2", {"event_id": f"eq.{event_id}"}, "participants_v2"),
                 ("teams_v2", {"event_id": f"eq.{event_id}"}, "teams_v2"),
-                ("activities_v2", {"activity_id": self._to_in_list(activity_ids) or "eq.none"}, "activities_v2"),
-                ("modules_v2", {"module_id": self._to_in_list(module_ids) or "eq.none"}, "modules_v2"),
-                ("programmes_v2", {"programme_id": self._to_in_list(programme_ids) or "eq.none"}, "programmes_v2"),
+                ("activities_v2", activity_filter, "activities_v2"),
+                ("modules_v2", module_filter_for_cleanup, "modules_v2"),
+                ("programmes_v2", programme_filter_for_cleanup, "programmes_v2"),
                 ("marketplace_items_v2", {"event_id": f"eq.{event_id}"}, "marketplace_items_v2"),
                 ("ai_jobs_v2", {"event_id": f"eq.{event_id}"}, "ai_jobs_v2"),
                 ("audit_log_v2", {"event_id": f"eq.{event_id}"}, "audit_log_v2"),
@@ -825,24 +865,60 @@ class CoreV2JourneyRunner:
             )
 
         # eventless children that depend on known child ids
-        submission_ids = self._pluck("submissions_v2", "submission_id", {"event_id": f"eq.{event_filter}", "select": "submission_id"})
-        session_ids = self._pluck("participant_sessions_v2", "participant_session_id", {"event_id": f"eq.{event_filter}", "select": "participant_session_id"})
-
-        remaining["submission_evidence_v2_submission"] = self._count(
-            "submission_evidence_v2", {"submission_id": self._to_in_list(submission_ids) or "eq.none", "select": "evidence_id"}
+        submission_ids = self._pluck(
+            "submissions_v2",
+            "submission_id",
+            {"event_id": f"eq.{event_filter}", "select": "submission_id"},
         )
-        remaining["location_evidence_v2_reference"] = self._count(
-            "location_evidence_v2",
-            {"submission_id": self._to_in_list(submission_ids) or "eq.none", "select": "location_evidence_id"}
-        )
-        remaining["location_evidence_v2_sessions"] = self._count(
-            "location_evidence_v2",
-            {"participant_session_id": self._to_in_list(session_ids) or "eq.none", "select": "location_evidence_id"}
+        session_ids = self._pluck(
+            "participant_sessions_v2",
+            "participant_session_id",
+            {"event_id": f"eq.{event_filter}", "select": "participant_session_id"},
         )
 
-        programme_ids = self._pluck("programmes_v2", "programme_id", {"event_id": f"eq.{event_filter}", "select": "programme_id"})
-        module_ids = self._pluck("modules_v2", "module_id", {"programme_id": self._to_in_list(programme_ids) or "eq.none", "select": "module_id"})
-        activity_ids = self._pluck("activities_v2", "activity_id", {"module_id": self._to_in_list(module_ids) or "eq.none", "select": "activity_id"})
+        submission_filter = self._ids_filter(submission_ids, "submission_id")
+        session_filter = self._ids_filter(session_ids, "participant_session_id")
+        if submission_filter is None:
+            remaining["submission_evidence_v2_submission"] = 0
+            remaining["location_evidence_v2_reference"] = 0
+        else:
+            remaining["submission_evidence_v2_submission"] = self._count(
+                "submission_evidence_v2", {**submission_filter, "select": "evidence_id"}
+            )
+            remaining["location_evidence_v2_reference"] = self._count(
+                "location_evidence_v2",
+                {**submission_filter, "select": "location_evidence_id"},
+            )
+
+        if session_filter is None:
+            remaining["location_evidence_v2_sessions"] = 0
+        else:
+            remaining["location_evidence_v2_sessions"] = self._count(
+                "location_evidence_v2",
+                {**session_filter, "select": "location_evidence_id"},
+            )
+
+        programme_ids = self._pluck(
+            "programmes_v2",
+            "programme_id",
+            {"event_id": f"eq.{event_filter}", "select": "programme_id"},
+        )
+        module_ids = self._pluck(
+            "modules_v2",
+            "module_id",
+            {
+                "programme_id": self._to_in_list(programme_ids) or None,
+                "select": "module_id",
+            },
+        ) if programme_ids else []
+        activity_ids = self._pluck(
+            "activities_v2",
+            "activity_id",
+            {
+                "module_id": self._to_in_list(module_ids) or None,
+                "select": "activity_id",
+            },
+        ) if module_ids else []
 
         remaining["modules_v2_for_event"] = len(module_ids)
         remaining["activities_v2_for_event"] = len(activity_ids)
