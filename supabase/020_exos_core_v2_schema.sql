@@ -344,6 +344,43 @@ create table if not exists public.marketplace_transactions_v2 (
     check (quantity > 0 and amount_paid >= 0)
 );
 
+create table if not exists public.team_access_credentials_v2 (
+    team_access_credential_id uuid primary key default extensions.gen_random_uuid(),
+    event_id text not null references public.events_v2(event_id) on delete cascade,
+    team_id text not null references public.teams_v2(team_id) on delete cascade,
+    credential_hash text not null,
+    credential_purpose text not null default 'TEAM_PIN',
+    is_active boolean not null default true,
+    created_by text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (event_id, team_id, credential_purpose)
+);
+
+create unique index if not exists team_access_credentials_v2_event_team_active_idx
+    on public.team_access_credentials_v2 (event_id, team_id)
+    where is_active = true;
+
+create table if not exists public.team_access_sessions_v2 (
+    team_access_session_id uuid primary key default extensions.gen_random_uuid(),
+    event_id text not null references public.events_v2(event_id) on delete cascade,
+    team_access_credential_id uuid not null references public.team_access_credentials_v2(team_access_credential_id) on delete cascade,
+    team_id text not null references public.teams_v2(team_id) on delete cascade,
+    device_id text not null,
+    session_token uuid not null unique default extensions.gen_random_uuid(),
+    is_active boolean not null default true,
+    recovery_required boolean not null default false,
+    takeover_by_session_id uuid references public.team_access_sessions_v2(team_access_session_id),
+    created_by text,
+    last_seen_at timestamptz not null default now(),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (event_id, team_id, device_id)
+);
+
+create index if not exists team_access_sessions_v2_event_team_idx
+    on public.team_access_sessions_v2 (event_id, team_id);
+
 create table if not exists public.build_status_v2 (
     event_id text not null references public.events_v2(event_id) on delete cascade,
     team_id text not null references public.teams_v2(team_id) on delete restrict,
@@ -479,6 +516,8 @@ alter table public.score_transactions_v2 enable row level security;
 alter table public.credit_transactions_v2 enable row level security;
 alter table public.marketplace_items_v2 enable row level security;
 alter table public.marketplace_transactions_v2 enable row level security;
+alter table public.team_access_credentials_v2 enable row level security;
+alter table public.team_access_sessions_v2 enable row level security;
 alter table public.build_status_v2 enable row level security;
 alter table public.judging_scores_v2 enable row level security;
 alter table public.race_results_v2 enable row level security;
@@ -495,7 +534,8 @@ declare
         'events_v2','programmes_v2','modules_v2','activities_v2','teams_v2',
         'participants_v2','participant_sessions_v2','activity_runtime_v2','submissions_v2',
         'submission_evidence_v2','reviews_v2','score_transactions_v2','credit_transactions_v2',
-        'marketplace_items_v2','marketplace_transactions_v2','build_status_v2','judging_scores_v2',
+        'marketplace_items_v2','marketplace_transactions_v2','team_access_credentials_v2',
+        'team_access_sessions_v2','build_status_v2','judging_scores_v2',
         'race_results_v2','projector_state_v2','location_checkpoints_v2','location_evidence_v2',
         'ai_jobs_v2','ai_results_v2','audit_log_v2'
     ];

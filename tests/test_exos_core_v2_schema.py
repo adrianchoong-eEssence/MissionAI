@@ -9,6 +9,7 @@ import pytest
 ROOT = Path("supabase")
 SUPPORT = ROOT / "verification"
 MIGRATION = (ROOT / "020_exos_core_v2_schema.sql").read_text()
+TEAM_ACCESS_PATCH = (ROOT / "022_exos_core_v2_team_access.sql").read_text()
 ROLLBACK = (ROOT / "020_exos_core_v2_schema_rollback.sql").read_text()
 PRECHECK = (SUPPORT / "exos_core_v2_preflight.sql").read_text()
 POSTCHECK = (SUPPORT / "exos_core_v2_postflight.sql").read_text()
@@ -124,6 +125,7 @@ def test_core_v2_sql_artifacts_do_not_contain_bad_dollar_quotes():
     for path in (
         Path("supabase/020_exos_core_v2_schema.sql"),
         Path("supabase/021_exos_core_v2_pgcrypto_fix.sql"),
+        Path("supabase/022_exos_core_v2_team_access.sql"),
     ):
         text = path.read_text().lower()
         for pattern in bad_patterns:
@@ -158,6 +160,20 @@ def test_core_v2_sql_no_wrapper_or_unqualified_pgcrypto_calls():
         for match in unqualified_calls.finditer(cleaned):
             token = match.group(0).lower()
             raise AssertionError(f"{path}: unqualified pgcrypto call detected: {token} at {match.start()}")
+
+
+def test_core_v2_team_access_contract_present():
+    lowered = TEAM_ACCESS_PATCH.lower()
+    for table in ("team_access_credentials_v2", "team_access_sessions_v2"):
+        assert f"create table if not exists public.{table}" in lowered
+    for rpc in (
+        "exos_v2_set_team_access_pin",
+        "exos_v2_team_access_login",
+        "exos_v2_restore_team_access",
+    ):
+        assert f"create or replace function public.{rpc}" in lowered
+        assert f"grant execute on function public.{rpc}" in TEAM_ACCESS_PATCH
+    assert "formula_race" not in lowered
 
 
 def test_core_v2_join_event_v2_session_insert_sql_shape():

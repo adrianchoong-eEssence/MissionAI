@@ -25,6 +25,11 @@ FORBIDDEN_LEGACY_RUNTIME_PATH_FRAGMENTS = {
     "formula_race_results",
 }
 
+FORBIDDEN_LEGACY_RPC_PREFIXES = (
+    "exos_formula_race_",
+    "exos_set_formula_race_",
+)
+
 
 class _LegacyRequestCollector(ast.NodeVisitor):
     def __init__(self) -> None:
@@ -45,6 +50,14 @@ class _LegacyRequestCollector(ast.NodeVisitor):
                 if any(fragment in path for fragment in FORBIDDEN_LEGACY_RUNTIME_PATH_FRAGMENTS):
                     self.legacy_calls.append((path, node.lineno))
 
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "_rpc":
+            if node.args:
+                first_arg = node.args[0]
+                if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
+                    rpc_name = first_arg.value.lower()
+                    if any(rpc_name.startswith(prefix) for prefix in FORBIDDEN_LEGACY_RPC_PREFIXES):
+                        self.legacy_calls.append((rpc_name, node.lineno))
+
         self.generic_visit(node)
 
 
@@ -59,3 +72,15 @@ def test_staging_race_runner_no_direct_legacy_runtime_table_paths():
     collector = _LegacyRequestCollector()
     collector.visit(tree)
     assert not collector.legacy_calls, f"Legacy runtime paths used in runner requests: {collector.legacy_calls}"
+
+
+def test_staging_race_runner_no_legacy_race_rpc_calls():
+    tree = ast.parse(RACE_RUNNER.read_text())
+    collector = _LegacyRequestCollector()
+    collector.visit(tree)
+    legacy_rpcs = [
+        (path, line)
+        for path, line in collector.legacy_calls
+        if path.startswith(("exos_formula_race_", "exos_set_formula_race_"))
+    ]
+    assert not legacy_rpcs, f"Legacy race RPC calls used: {legacy_rpcs}"

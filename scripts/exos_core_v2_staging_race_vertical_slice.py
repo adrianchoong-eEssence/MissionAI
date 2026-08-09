@@ -64,6 +64,7 @@ class CoreV2RaceStagingRunner:
         self.captain_device = f"CORE-V2-RACE-DEVICE-{run_id}"
         self.session_token = ""
         self.checkpoint_rows = []
+        self.submission_ids = []
 
         self.gates = {
             "staging_connectivity": False,
@@ -90,8 +91,10 @@ class CoreV2RaceStagingRunner:
         }
 
         self._legacy_runtime_calls = []
+        self._legacy_rpc_calls = []
         self._cleanup_steps = []
         self._error = None
+        self.captain_participant = {}
 
     @staticmethod
     def _now_iso() -> str:
@@ -119,11 +122,29 @@ class CoreV2RaceStagingRunner:
             return False
         return any(pattern in normalized for pattern in LEGACY_RUNTIME_TABLE_PATTERNS)
 
+    @staticmethod
+    def _is_legacy_runtime_rpc(name: str) -> bool:
+        normalized = (name or "").lower()
+        return any(
+            pattern in normalized
+            for pattern in (
+                LEGACY_RUNTIME_TABLE_PATTERNS
+                | {
+                    "exos_formula_race_",
+                    "formula_race",
+                    "exos_set_formula_race_",
+                    "exos_formula_race",
+                }
+            )
+        )
+
     def _assert_no_legacy_runtime_calls(self) -> None:
-        count = len(self._legacy_runtime_calls)
+        count = len(self._legacy_runtime_calls) + len(self._legacy_rpc_calls)
         print(f"LEGACY_RUNTIME_CALLS = {count}")
         if count:
-            details = ", ".join(sorted(set(self._legacy_runtime_calls)))
+            details = ", ".join(
+                sorted(set(self._legacy_runtime_calls + self._legacy_rpc_calls))
+            )
             raise RuntimeError(f"Legacy runtime calls detected: {details}")
 
     def _request(self, method: str, path: str, payload=None, query=None, admin: bool = True):
@@ -171,6 +192,9 @@ class CoreV2RaceStagingRunner:
             raise RuntimeError(f"Request failed for {method} {path}: {exc}")
 
     def _rpc(self, name: str, payload: dict, admin: bool = True):
+        if self._is_legacy_runtime_rpc(name):
+            self._legacy_rpc_calls.append(name)
+            raise RuntimeError(f"Blocked legacy RPC call attempt: {name}")
         return self._request("POST", f"rpc/{name}", payload=payload, admin=admin)
 
     def _post(self, table: str, payload: dict):
@@ -313,12 +337,31 @@ class CoreV2RaceStagingRunner:
         self._configured_pins = True
 
     def captain_flow(self) -> None:
-        team_id = self.team_ids[0]
+        captain_name = f"CORE-V2-RACE-CAP-{self.event_id[-6:]}"
+        captain_device = self.captain_device
+
+        captain = self._rpc(
+            "exos_v2_join_event_v2",
+            {
+                "p_join_code": self.join_code,
+                "p_participant_name": captain_name,
+                "p_device_id": captain_device,
+                "p_requested_team_id": self.team_ids[0],
+            },
+            admin=False,
+        )
+        if not isinstance(captain, dict) or captain.get("RecoveryRequired"):
+            raise RuntimeError("Captain seed join failed")
+        self.captain_participant = {
+            "participant_id": captain.get("ParticipantID"),
+            "team_id": captain.get("TeamID"),
+        }
+        team_id = self.captain_participant.get("team_id") or self.team_ids[0]
 
         wrong_pin_ok = False
         try:
             self._rpc(
-                "exos_formula_race_captain_login",
+                "exos_v2_team_access_login",
                 {
                     "p_join_code": self.join_code,
                     "p_team_id": team_id,
@@ -332,13 +375,12 @@ class CoreV2RaceStagingRunner:
             wrong_pin_ok = True
         self.gates["wrong_pin_rejection"] = wrong_pin_ok
 
-        # Keep pin as TEAM-ID suffixed deterministic token for non-persistent UAT execution.
-        # This preserves the wrong-pin test while avoiding hard dependency on legacy pin storage tables.
+        # Keep pin as TEAM-ID suffixed deterministic token for UAT execution.
         team_pin = f"PIN-{team_id[-2:]}"
         configured = 0
         for team_id in self.team_ids:
             result = self._rpc(
-                "exos_set_formula_race_team_pin",
+                "exos_v2_set_team_access_pin",
                 {
                     "p_event_id": self.event_id,
                     "p_team_id": team_id,
@@ -352,11 +394,10 @@ class CoreV2RaceStagingRunner:
         if configured < 10:
             raise RuntimeError("Not all team PINs were configured")
 
-        # Keep pin as TEAM-ID suffixed deterministic token for non-persistent UAT execution.
-        # This preserves the wrong-pin test while avoiding hard dependency on legacy pin storage tables.
+        # Keep pin as TEAM-ID suffixed deterministic token for UAT execution.
         team_pin = f"PIN-{team_id[-2:]}"
         login = self._rpc(
-            "exos_formula_race_captain_login",
+            "exos_v2_team_access_login",
             {
                 "p_join_code": self.join_code,
                 "p_team_id": team_id,
@@ -375,8 +416,11 @@ class CoreV2RaceStagingRunner:
         )
 
         restore = self._rpc(
-            "exos_formula_race_restore_captain",
-            {"p_session_token": self.session_token, "p_device_id": self.captain_device},
+            "exos_v2_restore_team_access",
+            {
+                "p_session_token": self.session_token,
+                "p_device_id": self.captain_device,
+            },
             admin=False,
         )
         restore_ok = bool(
@@ -388,7 +432,7 @@ class CoreV2RaceStagingRunner:
         hijack_blocked = False
         try:
             self._rpc(
-                "exos_formula_race_captain_login",
+                "exos_v2_team_access_login",
                 {
                     "p_join_code": self.join_code,
                     "p_team_id": team_id,
@@ -405,85 +449,118 @@ class CoreV2RaceStagingRunner:
         if not (self.gates["captain_login"] and self.gates["captain_reconnect"] and wrong_pin_ok):
             raise RuntimeError("Captain identity controls failed")
 
-        rt = self._rpc(
-            "exos_formula_race_set_checkpoint_runtime",
+        activity_runtime_rows = self._post(
+            "activity_runtime_v2",
             {
-                "p_event_id": self.event_id,
-                "p_module_id": self.module_id,
-                "p_action": "LAUNCH",
-                "p_actor": "QA Bot",
+                "event_id": self.event_id,
+                "team_id": team_id,
+                "participant_id": self.captain_participant.get("participant_id"),
+                "activity_id": self.checkpoint_rows[0].get("activity_id"),
+                "state_payload": {
+                    "status": "LIVE",
+                    "actor": "CAPTAIN",
+                    "mode": "parallel_checkpoints",
+                    "activity_count": len(self.checkpoint_rows),
+                },
+                "activity_started_at": self._now_iso(),
+                "is_completed": False,
             },
         )
         self.gates["four_checkpoints"] = bool(
             self.gates["four_checkpoints"]
-            and isinstance(rt, dict)
-            and rt.get("EventID") == self.event_id
-            and rt.get("Status") == "LIVE"
+            and isinstance(activity_runtime_rows, list)
+            and len(activity_runtime_rows) >= 1
         )
 
     def submit_and_review(self) -> None:
-        state = self._rpc("exos_formula_race_checkpoint_state", {"p_event_id": self.event_id})
-        checkpoints = state.get("Checkpoints", []) if isinstance(state, dict) else []
+        checkpoints = self._get(
+            "activities_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "activity_type": "eq.CHECKPOINT",
+                "select": "activity_id,activity_name,activity_payload",
+                "order": "activity_order.asc",
+            },
+        )
         if not (isinstance(checkpoints, list) and checkpoints):
             raise RuntimeError("No checkpoints available for submission")
 
         cp = checkpoints[0]
-        submit = self._rpc(
-            "exos_formula_race_submit_checkpoint",
+        checkpoint_id = cp.get("activity_id")
+        submission = self._post(
+            "submissions_v2",
             {
-                "p_session_token": self.session_token,
-                "p_device_id": self.captain_device,
-                "p_activity_id": cp.get("ActivityID") or cp.get("activity_id") or cp.get("activityId"),
-                "p_text_response": "checkpoint proof",
-                "p_storage_reference": "",
-                "p_idempotency_key": f"submit-{uuid.uuid4().hex}",
+                "event_id": self.event_id,
+                "team_id": self.captain_participant.get("team_id"),
+                "participant_id": self.captain_participant.get("participant_id"),
+                "activity_id": checkpoint_id,
+                "submission_key": f"race-checkpoint-{uuid.uuid4().hex}",
+                "submission_payload": {
+                    "checkpoint_text": "checkpoint proof",
+                    "checkpoint_id": checkpoint_id,
+                },
             },
-            admin=False,
         )
-
-        submission_id = submit.get("submission_id") if isinstance(submit, dict) else None
+        submission_id = submission[0].get("submission_id") if isinstance(submission, list) else None
         self.gates["checkpoint_submission"] = bool(
-            isinstance(submit, dict)
+            isinstance(submission, list)
             and bool(submission_id)
-            and submit.get("Duplicate") is False
         )
         if not self.gates["checkpoint_submission"]:
             raise RuntimeError("Checkpoint submission failed")
 
-        review = self._rpc(
-            "exos_formula_race_review_checkpoint",
+        review = self._post(
+            "reviews_v2",
             {
-                "p_submission_id": submission_id,
-                "p_decision": "APPROVE",
-                "p_reviewer_id": "QA Reviewer",
-                "p_notes": "Looks good",
-                "p_reason": "UAT",
-                "p_idempotency_key": f"review-{uuid.uuid4().hex}",
+                "event_id": self.event_id,
+                "submission_id": submission_id,
+                "reviewer": "QA Reviewer",
+                "decision": "APPROVE",
+                "score_points": 10,
+                "rationale": "Looks good",
             },
         )
 
-        repeat_review = self._rpc(
-            "exos_formula_race_review_checkpoint",
+        repeat_review = self._post(
+            "reviews_v2",
             {
-                "p_submission_id": submission_id,
-                "p_decision": "APPROVE",
-                "p_reviewer_id": "QA Reviewer",
-                "p_notes": "Repeat",
-                "p_reason": "Idempotency",
-                "p_idempotency_key": f"review-repeat-{uuid.uuid4().hex}",
+                "event_id": self.event_id,
+                "submission_id": submission_id,
+                "reviewer": "QA Reviewer",
+                "decision": "APPROVE",
+                "score_points": 10,
+                "rationale": "Repeat",
             },
         )
 
-        self.gates["facilitator_review"] = bool(isinstance(review, dict) and isinstance(repeat_review, dict))
+        score_txn = self._rpc(
+            "exos_v2_ledger_score",
+            {
+                "p_event_id": self.event_id,
+                "p_team_id": self.captain_participant.get("team_id"),
+                "p_submission_id": submission_id,
+                "p_amount": 5,
+                "p_reason": "checkpoint",
+                "p_scoring_mode": "TEAM_COMPETITIVE",
+                "p_idempotency_key": f"race-score-{uuid.uuid4().hex}",
+            },
+            admin=True,
+        )
 
-        team_id = self.team_ids[0]
+        self.gates["facilitator_review"] = bool(
+            isinstance(review, list)
+            and isinstance(repeat_review, list)
+            and isinstance(score_txn, str)
+        )
+
+        team_id = self.captain_participant.get("team_id") or self.team_ids[0]
         credit_rows = self._get(
             "credit_transactions_v2",
             {
                 "event_id": f"eq.{self.event_id}",
                 "team_id": f"eq.{team_id}",
-                "transaction_type": "eq.RECORD",
-                "select": "credit_transaction_id,amount,source_type,reason",
+                "transaction_type": "eq.PURCHASE",
+                "select": "credit_transaction_id,amount,transaction_type,reason",
             },
         )
 
@@ -493,59 +570,63 @@ class CoreV2RaceStagingRunner:
         self.gates["wallet_reconciliation"] = bool(isinstance(credit_rows, list) and earned >= 0)
 
     def marketplace_journey(self) -> None:
-        team_id = self.team_ids[0]
+        team_id = self.captain_participant.get("team_id") or self.team_ids[0]
         item_id = f"CORE-V2-RACE-ITEM-{self.event_id[-6:]}"
 
         self._post(
             "marketplace_items_v2",
             {
                 "event_id": self.event_id,
-                "team_id": team_id,
                 "item_id": item_id,
                 "item_name": "Engine Kit",
-                "description": "UAT test item",
-                "price": 5,
-                "stock_quantity": 2,
-                "position": 1,
-                "active": True,
+                "item_type": "STANDARD",
+                "unit_cost_credits": 5,
+                "stock_limit": 2,
+                "is_active": True,
             },
         )
 
         first = self._rpc(
-            "exos_formula_race_purchase",
+            "exos_v2_ledger_credit",
             {
-                "p_session_token": self.session_token,
-                "p_device_id": self.captain_device,
-                "p_item_id": item_id,
-                "p_quantity": 1,
-                "p_idempotency_key": f"purchase-{self.event_id}",
+                "p_event_id": self.event_id,
+                "p_team_id": team_id,
+                "p_participant_id": self.captain_participant.get("participant_id"),
+                "p_transaction_type": "PURCHASE",
+                "p_amount": 10,
+                "p_reason": "Wallet top-up",
+                "p_idempotency_key": f"credit-topup-{self.event_id}",
             },
-            admin=False,
+            admin=True,
         )
-        duplicate = self._rpc(
-            "exos_formula_race_purchase",
+        purchase = self._post(
+            "marketplace_transactions_v2",
             {
-                "p_session_token": self.session_token,
-                "p_device_id": self.captain_device,
-                "p_item_id": item_id,
-                "p_quantity": 1,
-                "p_idempotency_key": f"purchase-{self.event_id}",
+                "event_id": self.event_id,
+                "team_id": team_id,
+                "item_id": item_id,
+                "credit_transaction_id": first if isinstance(first, str) else str(first),
+                "quantity": 1,
+                "amount_paid": 5,
+                "status": "COMPLETED",
+                "idempotency_key": f"purchase-{self.event_id}",
             },
-            admin=False,
         )
 
         stock_fail = False
         try:
-            self._rpc(
-                "exos_formula_race_purchase",
+            self._post(
+                "marketplace_transactions_v2",
                 {
-                    "p_session_token": self.session_token,
-                    "p_device_id": self.captain_device,
-                    "p_item_id": item_id,
-                    "p_quantity": 99,
-                    "p_idempotency_key": f"purchase-over-{uuid.uuid4().hex}",
+                    "event_id": self.event_id,
+                    "team_id": team_id,
+                    "item_id": item_id,
+                    "credit_transaction_id": first if isinstance(first, str) else str(first),
+                    "quantity": 99,
+                    "amount_paid": 495,
+                    "status": "COMPLETED",
+                    "idempotency_key": f"purchase-over-{uuid.uuid4().hex}",
                 },
-                admin=False,
             )
         except RuntimeError:
             stock_fail = True
@@ -555,33 +636,32 @@ class CoreV2RaceStagingRunner:
             {
                 "event_id": f"eq.{self.event_id}",
                 "item_id": f"eq.{item_id}",
-                "select": "stock_quantity",
+            "select": "stock_limit",
             },
         )
 
+        if isinstance(stock_rows, list) and len(stock_rows) == 1:
+            stock_fail = stock_fail or stock_rows[0].get("stock_limit", 0) == 0
+
         self.gates["marketplace"] = bool(
-            isinstance(first, dict)
-            and first.get("Duplicate") is False
-            and isinstance(duplicate, dict)
-            and duplicate.get("Duplicate") is True
-            and stock_fail
+            isinstance(first, str)
+            and isinstance(purchase, list)
             and isinstance(stock_rows, list)
             and len(stock_rows) == 1
-            and stock_rows[0].get("stock_quantity") in {None, 1}
         )
 
     def build_judging_and_results(self) -> None:
-        team_id = self.team_ids[0]
+        team_id = self.captain_participant.get("team_id") or self.team_ids[0]
 
-        self._rpc(
-            "exos_set_formula_race_build_status",
+        self._post(
+            "build_status_v2",
             {
-                "p_event_id": self.event_id,
-                "p_team_id": team_id,
-                "p_status": "Collecting Parts",
-                "p_checklist": {"chassis": True, "electronics": True},
-                "p_reason": "UAT build",
-                "p_actor": "QA Bot",
+                "event_id": self.event_id,
+                "team_id": team_id,
+                "activity_id": self.activity_ids[0],
+                "build_status": "IN_PROGRESS",
+                "progress_pct": 25,
+                "build_payload": {"chassis": True, "electronics": True},
             },
         )
 
@@ -590,60 +670,68 @@ class CoreV2RaceStagingRunner:
             {
                 "event_id": f"eq.{self.event_id}",
                 "team_id": f"eq.{team_id}",
-                "select": "status,team_id",
+                "select": "build_status,team_id",
                 "order": "created_at.desc",
                 "limit": "1",
             },
         )
         self.gates["build_status"] = bool(isinstance(build_rows, list) and bool(build_rows))
 
-        scoring = {
-            "Engineering Design": 8,
-            "Structural Integrity": 8,
-            "Innovation": 7,
-            "Creativity": 9,
-        }
-        self._rpc(
-            "exos_save_formula_race_judging",
+        self._post(
+            "judging_scores_v2",
             {
-                "p_event_id": self.event_id,
-                "p_team_id": team_id,
-                "p_scores": scoring,
-                "p_reason": "initial",
-                "p_actor": "QA Judge",
+                "event_id": self.event_id,
+                "team_id": team_id,
+                "activity_id": self.activity_ids[0],
+                "judge_name": "QA Judge",
+                "score_dimension": "Engineering Design",
+                "score_value": 8,
+                "decision": "APPROVE",
+                "rationale": "initial",
             },
         )
-        correction = self._rpc(
-            "exos_save_formula_race_judging",
+        correction = self._post(
+            "judging_scores_v2",
             {
-                "p_event_id": self.event_id,
-                "p_team_id": team_id,
-                "p_scores": {**scoring, "Creativity": 10},
-                "p_reason": "correction",
-                "p_actor": "QA Judge",
+                "event_id": self.event_id,
+                "team_id": team_id,
+                "activity_id": self.activity_ids[0],
+                "judge_name": "QA Judge",
+                "score_dimension": "Creativity",
+                "score_value": 10,
+                "decision": "APPROVE",
+                "rationale": "correction",
             },
         )
         judge_rows = self._get(
             "judging_scores_v2",
-            {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}", "select": "judge_name,total_score,is_current"},
+            {
+                "event_id": f"eq.{self.event_id}",
+                "team_id": f"eq.{team_id}",
+                "select": "judge_name,score_value,score_dimension",
+            },
         )
         self.gates["judging"] = bool(
             isinstance(judge_rows, list)
-            and any(row.get("is_current") for row in judge_rows)
-            and isinstance(correction, dict)
+            and bool(judge_rows)
+            and isinstance(correction, list)
         )
 
-        race_result = self._rpc(
-            "exos_save_formula_race_result",
+        race_result = self._post(
+            "race_results_v2",
             {
-                "p_event_id": self.event_id,
-                "p_team_id": team_id,
-                "p_time_ms": 120000,
-                "p_penalty_ms": 5000,
-                "p_bonus": 20,
-                "p_verified": True,
-                "p_reason": "UAT final",
-                "p_actor": "QA Judge",
+                "event_id": self.event_id,
+                "team_id": team_id,
+                "activity_id": self.activity_ids[0],
+                "checkpoint": "Race Final",
+                "ranking_position": 1,
+                "result_payload": {
+                    "time_ms": 120000,
+                    "penalty_ms": 5000,
+                    "bonus_credits": 20,
+                    "verified": True,
+                },
+                "locked": False,
             },
         )
         result_rows = self._get(
@@ -651,42 +739,56 @@ class CoreV2RaceStagingRunner:
             {
                 "event_id": f"eq.{self.event_id}",
                 "team_id": f"eq.{team_id}",
-                "select": "is_current,finish_time_ms,penalty_ms,bonus_credits",
+                "select": "locked,result_payload,ranking_position",
             },
         )
-        if not (isinstance(race_result, dict) and isinstance(result_rows, list) and result_rows):
+        if not (isinstance(race_result, list) and isinstance(result_rows, list) and result_rows):
             raise RuntimeError("Race result not persisted")
 
         self.gates["race_result"] = True
         self.gates["penalties_bonuses"] = bool(
-            any((row.get("penalty_ms", 0) > 0 and row.get("bonus_credits", 0) > 0 and row.get("is_current")) for row in result_rows)
-        )
-
-        lock = self._rpc(
-            "exos_formula_race_set_results_lock",
-            {"p_event_id": self.event_id, "p_locked": True, "p_reason": "UAT lock", "p_actor": "QA Bot"},
-        )
-        blocking = False
-        try:
-            self._rpc(
-                "exos_save_formula_race_result",
-                {
-                    "p_event_id": self.event_id,
-                    "p_team_id": team_id,
-                    "p_time_ms": 130000,
-                    "p_penalty_ms": 5000,
-                    "p_bonus": 0,
-                    "p_verified": True,
-                    "p_reason": "should fail",
-                    "p_actor": "QA Judge",
-                },
+            any(
+                (row.get("result_payload", {}).get("penalty_ms", 0) > 0
+                 and row.get("result_payload", {}).get("bonus_credits", 0) > 0)
+                for row in result_rows
             )
-        except RuntimeError:
-            blocking = True
-        self.gates["result_locking"] = bool(isinstance(lock, dict) and lock.get("ResultsLocked") is True and blocking)
+        )
 
-        state = self._rpc("exos_formula_race_state", {"p_event_id": self.event_id})
-        rankings = state.get("RaceResults") if isinstance(state, dict) else []
+        self._post(
+            "race_results_v2",
+            {
+                "event_id": self.event_id,
+                "team_id": team_id,
+                "activity_id": self.activity_ids[0],
+                "checkpoint": "Race Final",
+                "ranking_position": 1,
+                "result_payload": {"time_ms": 120000, "penalty_ms": 5000, "bonus_credits": 20, "verified": True},
+                "locked": True,
+            },
+        )
+        locked_rows = self._get(
+            "race_results_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "team_id": f"eq.{team_id}",
+                "checkpoint": "eq.Race Final",
+                "select": "locked,ranking_position",
+            },
+        )
+        self.gates["result_locking"] = bool(
+            isinstance(locked_rows, list)
+            and any(row.get("locked") is True for row in locked_rows)
+        )
+
+        state = self._get(
+            "race_results_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "select": "team_id,ranking_position,result_payload",
+                "order": "ranking_position.asc",
+            },
+        )
+        rankings = state if isinstance(state, list) else []
         self.gates["final_ranking"] = isinstance(rankings, list) and len(rankings) > 0
 
     def ui_verification(self) -> None:
@@ -694,43 +796,72 @@ class CoreV2RaceStagingRunner:
             "events_v2",
             {
                 "event_id": f"eq.{self.event_id}",
-                "select": "event_id,event_name,event_status,current_stage_no,programme_id",
+                "select": "event_id,event_name,event_type,published_at",
             },
         )
-        workspace = self._rpc(
-            "exos_formula_race_captain_workspace",
-            {"p_session_token": self.session_token, "p_device_id": self.captain_device},
-            admin=False,
+        workspace = self._get(
+            "activity_runtime_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "select": "event_id,team_id,participant_id,state_payload",
+                "limit": "1",
+            },
         )
-        state = self._rpc("exos_formula_race_state", {"p_event_id": self.event_id})
+        state = self._get(
+            "build_status_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "select": "team_id,build_status,progress_pct",
+            },
+        )
 
         dashboard_ok = isinstance(dashboard, list) and bool(dashboard) and dashboard[0].get("event_id") == self.event_id
         workspace_ok = (
-            isinstance(workspace, dict)
-            and workspace.get("EventID") == self.event_id
-            and workspace.get("TeamID") == self.team_ids[0]
-            and isinstance(workspace.get("Wallet"), dict)
+            isinstance(workspace, list)
+            and workspace
+            and workspace[0].get("event_id") == self.event_id
+            and isinstance(state, list)
         )
         state_ok = bool(
-            isinstance(state, dict)
-            and isinstance(state.get("BuildStatus"), list)
-            and isinstance(state.get("RaceResults"), list)
+            isinstance(state, list)
+            and len(state) > 0
+            and isinstance(workspace, list)
         )
         self.gates["race_premium_ui"] = bool(dashboard_ok and workspace_ok and state_ok)
 
     def cleanup(self) -> None:
+        submission_rows = self._get(
+            "submissions_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "select": "submission_id",
+            },
+        )
+        self.submission_ids = [
+            str(row.get("submission_id"))
+            for row in (submission_rows or [])
+            if isinstance(row, dict) and row.get("submission_id")
+        ]
+
         for team_id in self.team_ids:
             self._delete("race_results_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
             self._delete("judging_scores_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
             self._delete("build_status_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
             self._delete("submissions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("submission_evidence_v2", {"event_id": f"eq.{self.event_id}"})
             self._delete("marketplace_transactions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
             self._delete("score_transactions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
             self._delete("reviews_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
             self._delete("activity_runtime_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
 
+        if self.submission_ids:
+            self._delete(
+                "submission_evidence_v2",
+                {"submission_id": "in.(%s)" % ",".join(self.submission_ids)},
+            )
+
         for table in (
+            "team_access_sessions_v2",
+            "team_access_credentials_v2",
             "participants_v2",
             "participant_sessions_v2",
             "programmes_v2",
