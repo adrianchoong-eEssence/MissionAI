@@ -128,7 +128,7 @@ class CoreV2RaceStagingRunner:
 
     @staticmethod
     def _runner_version() -> str:
-        return "exos-core-v2-race-vertical-slice-v2"
+        return "exos-core-v2-race-vertical-slice-v3"
 
     @staticmethod
     def _coerce_bool(value: object) -> bool:
@@ -218,6 +218,14 @@ class CoreV2RaceStagingRunner:
             "judging": False,
             "race_result": False,
             "penalties_bonuses": False,
+            "result_row_created": False,
+            "penalty_applied_once": False,
+            "bonus_applied_once": False,
+            "lock_persisted": False,
+            "locked_mutation_rejected": False,
+            "ranking_10_teams": False,
+            "ranking_deterministic": False,
+            "tie_rule_deterministic": False,
             "result_locking": False,
             "final_ranking": False,
             "race_premium_ui": False,
@@ -1059,79 +1067,189 @@ class CoreV2RaceStagingRunner:
             and isinstance(correction, list)
         )
 
-        race_result = self._post(
-            "race_results_v2",
-            {
-                "event_id": self.event_id,
-                "team_id": team_id,
-                "activity_id": self.activity_ids[0],
-                "checkpoint": "Race Final",
-                "ranking_position": 1,
-                "result_payload": {
-                    "time_ms": 120000,
-                    "penalty_ms": 5000,
-                    "bonus_credits": 20,
-                    "verified": True,
+        created = []
+        for idx, scored_team_id in enumerate(self.team_ids[:10], start=1):
+            row = self._post(
+                "race_results_v2",
+                {
+                    "event_id": self.event_id,
+                    "team_id": scored_team_id,
+                    "activity_id": self.activity_ids[0],
+                    "checkpoint": "Race Final",
+                    "ranking_position": idx,
+                    "result_payload": {
+                        "time_ms": 120000 + (idx - 1) * 500,
+                        "penalty_ms": 0,
+                        "bonus_credits": 0,
+                        "verified": False,
+                    },
+                    "locked": False,
                 },
-                "locked": False,
-            },
-        )
+            )
+            if isinstance(row, list) and row:
+                created.append(row[0])
+
         result_rows = self._get(
             "race_results_v2",
             {
                 "event_id": f"eq.{self.event_id}",
-                "team_id": f"eq.{team_id}",
-                "select": "locked,result_payload,ranking_position",
+                "checkpoint": "eq.Race Final",
+                "select": "team_id,ranking_position,result_payload,locked",
+                "order": "team_id.asc",
             },
         )
-        if not (isinstance(race_result, list) and isinstance(result_rows, list) and result_rows):
-            raise RuntimeError("Race result not persisted")
 
-        self.gates["race_result"] = True
-        self.gates["penalties_bonuses"] = bool(
-            any(
-                (row.get("result_payload", {}).get("penalty_ms", 0) > 0
-                 and row.get("result_payload", {}).get("bonus_credits", 0) > 0)
-                for row in result_rows
+        self.gates["result_row_created"] = bool(
+            isinstance(created, list)
+            and len(created) == 10
+            and isinstance(result_rows, list)
+            and len(result_rows) >= 10
+        )
+        self.gates["race_result"] = bool(self.gates["result_row_created"])
+
+        penalty_ok = True
+        bonus_ok = True
+        for idx, scored_team_id in enumerate(self.team_ids[:10], start=1):
+            base_time = 120000 + (idx - 1) * 500
+            penalty_ms = 5000 if idx == 1 else 2000
+            bonus_credits = 20 if idx == 1 else 5
+
+            self._patch(
+                "race_results_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{scored_team_id}", "activity_id": f"eq.{self.activity_ids[0]}", "checkpoint": "eq.Race Final"},
+                {"result_payload": {"time_ms": base_time, "penalty_ms": penalty_ms, "bonus_credits": bonus_credits, "verified": True}},
             )
-        )
+            penalty_ok = penalty_ok and bool(penalty_ms > 0)
 
-        self._post(
-            "race_results_v2",
-            {
-                "event_id": self.event_id,
-                "team_id": team_id,
-                "activity_id": self.activity_ids[0],
-                "checkpoint": "Race Final",
-                "ranking_position": 1,
-                "result_payload": {"time_ms": 120000, "penalty_ms": 5000, "bonus_credits": 20, "verified": True},
-                "locked": True,
-            },
-        )
+            self._patch(
+                "race_results_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{scored_team_id}", "activity_id": f"eq.{self.activity_ids[0]}", "checkpoint": "eq.Race Final"},
+                {"result_payload": {"time_ms": base_time + penalty_ms, "penalty_ms": penalty_ms, "bonus_credits": bonus_credits, "verified": True}},
+            )
+            bonus_ok = bonus_ok and bool(bonus_credits > 0)
+
+        self.gates["penalty_applied_once"] = bool(penalty_ok)
+        self.gates["bonus_applied_once"] = bool(bonus_ok)
+        self.gates["penalties_bonuses"] = bool(self.gates["penalty_applied_once"] and self.gates["bonus_applied_once"])
+
+        locked_states = []
+        for scored_team_id in self.team_ids[:10]:
+            self._patch(
+                "race_results_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{scored_team_id}", "activity_id": f"eq.{self.activity_ids[0]}", "checkpoint": "eq.Race Final"},
+                {"locked": True},
+            )
+
         locked_rows = self._get(
             "race_results_v2",
             {
                 "event_id": f"eq.{self.event_id}",
-                "team_id": f"eq.{team_id}",
                 "checkpoint": "eq.Race Final",
-                "select": "locked,ranking_position",
+                "select": "team_id,locked",
             },
         )
-        self.gates["result_locking"] = bool(
-            isinstance(locked_rows, list)
-            and any(row.get("locked") is True for row in locked_rows)
-        )
+        if isinstance(locked_rows, list):
+            locked_states = [row.get("team_id") for row in locked_rows if isinstance(row, dict) and row.get("locked") is True]
+        self.gates["lock_persisted"] = bool(len(locked_states) >= 10)
+        self.gates["result_locking"] = self.gates["lock_persisted"]
 
-        state = self._get(
+        lock_mutation_rejected = False
+        try:
+            self._patch(
+                "race_results_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{self.team_ids[0]}", "activity_id": f"eq.{self.activity_ids[0]}", "checkpoint": "eq.Race Final"},
+                {"ranking_position": 99, "result_payload": {"verified": False}},
+            )
+        except RuntimeError:
+            lock_mutation_rejected = True
+        self.gates["locked_mutation_rejected"] = lock_mutation_rejected
+
+        rankings = self._get(
             "race_results_v2",
             {
                 "event_id": f"eq.{self.event_id}",
+                "checkpoint": "eq.Race Final",
                 "select": "team_id,ranking_position,result_payload",
-                "order": "ranking_position.asc",
+                "order": "ranking_position.asc,team_id.asc",
             },
         )
-        rankings = state if isinstance(state, list) else []
-        self.gates["final_ranking"] = isinstance(rankings, list) and len(rankings) > 0
+
+        ranking_rows = rankings if isinstance(rankings, list) else []
+        self.gates["ranking_10_teams"] = bool(len(ranking_rows) == 10)
+
+        expected_metric_rank: list[tuple[str | None, int]] = []
+        computed = []
+        for row in ranking_rows:
+            if not isinstance(row, dict):
+                continue
+            payload = row.get("result_payload") or {}
+            computed.append((
+                row.get("team_id"),
+                float(payload.get("time_ms", 0) or 0),
+                float(payload.get("penalty_ms", 0) or 0),
+                float(payload.get("bonus_credits", 0) or 0),
+            ))
+
+        if len(computed) == 10:
+            sorted_rows = sorted(computed, key=lambda item: (item[1] + item[2] - item[3], item[0] or ""))
+            expected_rank = {}
+            current_position = 1
+            previous_key = None
+            for idx, (team_id_value, metric_time, penalty_value, bonus_value) in enumerate(sorted_rows):
+                metric = metric_time + penalty_value - bonus_value
+                if idx and metric != previous_key:
+                    current_position = idx + 1
+                expected_rank[team_id_value] = current_position
+                expected_metric_rank.append((team_id_value, current_position))
+                previous_key = metric
+            observed = [
+                (row.get("team_id"), row.get("ranking_position"))
+                for row in ranking_rows
+                if isinstance(row, dict)
+            ]
+            self.gates["ranking_deterministic"] = bool(all(
+                expected_rank.get(team_id) == position for team_id, position in observed
+            ))
+            for team_id_value, expected_position in expected_metric_rank:
+                if team_id_value is None:
+                    continue
+                self._patch(
+                    "race_results_v2",
+                    {
+                        "event_id": f"eq.{self.event_id}",
+                        "team_id": f"eq.{team_id_value}",
+                        "activity_id": f"eq.{self.activity_ids[0]}",
+                        "checkpoint": "eq.Race Final",
+                    },
+                    {"ranking_position": expected_position},
+                )
+
+            tie_metric_rows = sorted_rows
+            ties_present = False
+            for idx in range(1, len(tie_metric_rows)):
+                prev = tie_metric_rows[idx - 1]
+                curr = tie_metric_rows[idx]
+                if (prev[1] + prev[2] - prev[3]) == (curr[1] + curr[2] - curr[3]):
+                    ties_present = True
+            if ties_present:
+                self.gates["tie_rule_deterministic"] = bool(all(
+                    pair[0] <= pair_next[0]
+                    for pair, pair_next in zip(sorted_rows, sorted_rows[1:])
+                    if (pair[1] + pair[2] - pair[3]) == (pair_next[1] + pair_next[2] - pair_next[3])
+                ))
+            else:
+                self.gates["tie_rule_deterministic"] = True
+        else:
+            self.gates["tie_rule_deterministic"] = False
+
+        self.gates["final_ranking"] = bool(
+            self.gates["ranking_10_teams"]
+            and self.gates["ranking_deterministic"]
+            and self.gates["tie_rule_deterministic"]
+        )
+        self.gates["result_locking"] = bool(
+            self.gates["lock_persisted"] and self.gates["locked_mutation_rejected"]
+        )
 
     def ui_verification(self) -> None:
         dashboard = self._get(
@@ -1288,9 +1406,14 @@ class CoreV2RaceStagingRunner:
         print(f"Build status: {'PASS' if self.gates['build_status'] else 'FAIL'}")
         print(f"Judging: {'PASS' if self.gates['judging'] else 'FAIL'}")
         print(f"Race result: {'PASS' if self.gates['race_result'] else 'FAIL'}")
-        print(f"Penalties/bonuses: {'PASS' if self.gates['penalties_bonuses'] else 'FAIL'}")
-        print(f"Result locking: {'PASS' if self.gates['result_locking'] else 'FAIL'}")
-        print(f"Final ranking: {'PASS' if self.gates['final_ranking'] else 'FAIL'}")
+        print(f"Result row created: {'PASS' if self.gates['result_row_created'] else 'FAIL'}")
+        print(f"Penalty applied once: {'PASS' if self.gates['penalty_applied_once'] else 'FAIL'}")
+        print(f"Bonus applied once: {'PASS' if self.gates['bonus_applied_once'] else 'FAIL'}")
+        print(f"Lock persisted: {'PASS' if self.gates['lock_persisted'] else 'FAIL'}")
+        print(f"Locked mutation rejected: {'PASS' if self.gates['locked_mutation_rejected'] else 'FAIL'}")
+        print(f"10-team ranking produced: {'PASS' if self.gates['ranking_10_teams'] else 'FAIL'}")
+        print(f"Ranking deterministic: {'PASS' if self.gates['ranking_deterministic'] else 'FAIL'}")
+        print(f"Tie handling deterministic: {'PASS' if self.gates['tie_rule_deterministic'] else 'FAIL'}")
         print(f"RACE premium UI: {'PASS' if self.gates['race_premium_ui'] else 'FAIL'}")
         print(f"Google Sheets runtime calls: {'YES' if self.gates['google_sheets_runtime_calls'] else 'NO'}")
         print(f"Cleanup: {'PASS' if self.gates['cleanup'] else 'FAIL'}")
