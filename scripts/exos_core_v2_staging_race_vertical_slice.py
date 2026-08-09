@@ -39,6 +39,17 @@ LEGACY_RUNTIME_TABLE_PATTERNS = {
 }
 
 
+def _in_filter(values: list[str]) -> str:
+    sanitized = [str(value).replace('"', '""') for value in values]
+    if not sanitized:
+        return ""
+    if len(sanitized) == 1:
+        return f"eq.{sanitized[0]}"
+    return "in.({})".format(
+        ",".join('"{}"'.format(value) for value in sanitized)
+    )
+
+
 class CoreV2RaceStagingRunner:
     @staticmethod
     def _coerce_bool(value: object) -> bool:
@@ -154,9 +165,94 @@ class CoreV2RaceStagingRunner:
             "stored_session_row": None,
         }
 
+        # Canonical operation audit for this runner.
+        self.operation_audit = []
+
     @staticmethod
     def _now_iso() -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    def _record_operation(self, step: str, table_or_rpc: str, method: str, filters_or_payload: dict | None) -> None:
+        self.operation_audit.append(
+            {
+                "step": step,
+                "table_or_rpc": table_or_rpc,
+                "method": method,
+                "filters_or_payload": filters_or_payload or {},
+            }
+        )
+
+    def get_activity_ids_for_event(self, event_id: str) -> list[str]:
+        programmes = self._get(
+            "programmes_v2",
+            {
+                "event_id": f"eq.{event_id}",
+                "select": "programme_id",
+            },
+        )
+        programme_ids = [row.get("programme_id") for row in (programmes or []) if isinstance(row, dict) and row.get("programme_id")]
+        if not programme_ids:
+            return []
+
+        modules = self._get(
+            "modules_v2",
+            {
+                "programme_id": _in_filter(programme_ids),
+                "select": "module_id",
+            },
+        )
+        module_ids = [row.get("module_id") for row in (modules or []) if isinstance(row, dict) and row.get("module_id")]
+        if not module_ids:
+            return []
+
+        activities = self._get(
+            "activities_v2",
+            {
+                "module_id": _in_filter(module_ids),
+                "select": "activity_id",
+            },
+        )
+        return [
+            row.get("activity_id")
+            for row in (activities or [])
+            if isinstance(row, dict) and row.get("activity_id")
+        ]
+
+    def get_submission_ids_for_event(self, event_id: str) -> list[str]:
+        submissions = self._get(
+            "submissions_v2",
+            {
+                "event_id": f"eq.{event_id}",
+                "select": "submission_id",
+            },
+        )
+        return [
+            str(row.get("submission_id"))
+            for row in (submissions or [])
+            if isinstance(row, dict) and row.get("submission_id")
+        ]
+
+    def get_review_ids_for_event(self, event_id: str) -> list[str]:
+        submission_ids = self.get_submission_ids_for_event(event_id)
+        if not submission_ids:
+            return []
+
+        submission_filter = _in_filter(submission_ids)
+        if not submission_filter:
+            return []
+
+        reviews = self._get(
+            "reviews_v2",
+            {
+                "submission_id": submission_filter,
+                "select": "review_id",
+            },
+        )
+        return [
+            str(row.get("review_id"))
+            for row in (reviews or [])
+            if isinstance(row, dict) and row.get("review_id")
+        ]
 
     def _require_env(self) -> None:
         if self.env != "staging":
@@ -253,16 +349,20 @@ class CoreV2RaceStagingRunner:
         if self._is_legacy_runtime_rpc(name):
             self._legacy_rpc_calls.append(name)
             raise RuntimeError(f"Blocked legacy RPC call attempt: {name}")
+        self._record_operation("rpc", name, "POST", payload)
         return self._request("POST", f"rpc/{name}", payload=payload, admin=admin)
 
     def _post(self, table: str, payload: dict):
+        self._record_operation("insert", table, "POST", payload)
         return self._request("POST", table, payload=payload, admin=True)
 
     def _get(self, table: str, query: dict):
+        self._record_operation("query", table, "GET", query)
         return self._request("GET", table, query=query, admin=True)
 
     def _delete(self, table: str, query: dict):
         self._cleanup_steps.append((table, dict(query)))
+        self._record_operation("delete", table, "DELETE", query)
         return self._request("DELETE", table, query=query, admin=True)
 
     def check_connectivity(self) -> None:
@@ -595,7 +695,7 @@ class CoreV2RaceStagingRunner:
         checkpoints = self._get(
             "activities_v2",
             {
-                "event_id": f"eq.{self.event_id}",
+                "programme_id": f"eq.{self.programme_id}",
                 "activity_type": "eq.CHECKPOINT",
                 "select": "activity_id,activity_name,activity_payload",
                 "order": "activity_order.asc",
@@ -962,43 +1062,86 @@ class CoreV2RaceStagingRunner:
             if isinstance(row, dict) and row.get("submission_id")
         ]
 
-        for team_id in self.team_ids:
-            self._delete("race_results_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("judging_scores_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("build_status_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("submissions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("marketplace_transactions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("score_transactions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("activity_runtime_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
+        review_ids = self.get_review_ids_for_event(self.event_id)
 
-        if self.submission_ids:
+        # Reverse dependency cleanup: child-first by team and submission scope.
+        for team_id in self.team_ids:
+            self._delete(
+                "score_transactions_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"},
+            )
+            self._delete(
+                "marketplace_transactions_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"},
+            )
+            self._delete(
+                "build_status_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"},
+            )
+            self._delete(
+                "judging_scores_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"},
+            )
+            self._delete(
+                "race_results_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"},
+            )
+            self._delete(
+                "activity_runtime_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"},
+            )
+            self._delete(
+                "submissions_v2",
+                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"},
+            )
+
+        submission_filter = _in_filter(self.submission_ids)
+        if submission_filter:
             self._delete(
                 "submission_evidence_v2",
-                {"submission_id": "in.(%s)" % ",".join(self.submission_ids)},
+                {"submission_id": submission_filter},
             )
+        if review_ids:
             self._delete(
                 "reviews_v2",
-                {"submission_id": "in.(%s)" % ",".join(self.submission_ids)},
+                {"submission_id": _in_filter(review_ids)},
             )
 
-        for table in (
-            "team_access_sessions_v2",
-            "team_access_credentials_v2",
-            "participants_v2",
-            "participant_sessions_v2",
-            "programmes_v2",
-            "modules_v2",
-            "activities_v2",
-            "teams_v2",
-            "events_v2",
-            "credit_transactions_v2",
-            "marketplace_items_v2",
-        ):
-            if table in {"programmes_v2", "modules_v2", "activities_v2"}:
-                filters = {"programme_id": f"eq.{self.programme_id}"}
-            else:
-                filters = {"event_id": f"eq.{self.event_id}"}
-            self._delete(table, filters)
+        self._delete("team_access_sessions_v2", {"event_id": f"eq.{self.event_id}"})
+        self._delete("team_access_credentials_v2", {"event_id": f"eq.{self.event_id}"})
+
+        self._delete("participants_v2", {"event_id": f"eq.{self.event_id}"})
+        self._delete("participant_sessions_v2", {"event_id": f"eq.{self.event_id}"})
+
+        # Programme hierarchy delete via canonical FK path.
+        activity_ids = self.get_activity_ids_for_event(self.event_id)
+        if activity_ids:
+            activity_filter = _in_filter(activity_ids)
+            if activity_filter:
+                self._delete("activity_runtime_v2", {"activity_id": activity_filter})
+
+        module_ids = [
+            row.get("module_id")
+            for row in (self._get("modules_v2", {
+                "programme_id": f"eq.{self.programme_id}",
+                "select": "module_id",
+            }) or [])
+            if isinstance(row, dict) and row.get("module_id")
+        ]
+        if module_ids:
+            module_filter = _in_filter(module_ids)
+            if module_filter:
+                self._delete("activities_v2", {"module_id": module_filter})
+        self._delete("modules_v2", {"programme_id": f"eq.{self.programme_id}"})
+
+        # Event-scoped references.
+        self._delete("projector_state_v2", {"event_id": f"eq.{self.event_id}"})
+        self._delete("marketplace_items_v2", {"event_id": f"eq.{self.event_id}"})
+        self._delete("credit_transactions_v2", {"event_id": f"eq.{self.event_id}"})
+
+        self._delete("programmes_v2", {"event_id": f"eq.{self.event_id}"})
+        self._delete("teams_v2", {"event_id": f"eq.{self.event_id}"})
+        self._delete("events_v2", {"event_id": f"eq.{self.event_id}"})
 
         remaining = self._get("events_v2", {"event_id": f"eq.{self.event_id}", "select": "event_id"})
         self.gates["cleanup"] = bool(not (isinstance(remaining, list) and remaining))
