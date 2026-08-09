@@ -40,6 +40,51 @@ LEGACY_RUNTIME_TABLE_PATTERNS = {
 
 
 class CoreV2RaceStagingRunner:
+    @staticmethod
+    def _coerce_bool(value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return value.lower() in {"true", "1", "yes", "y", "on"}
+        return bool(value)
+
+    def _is_reconnect_contract_ok(self, login: object, restore: object, session_row: object) -> bool:
+        if not isinstance(login, dict) or not isinstance(restore, dict):
+            return False
+
+        expected_event_id = self._team_access_diagnostics.get("event_id")
+        expected_team_id = self._team_access_diagnostics.get("team_id")
+        expected_device_id = self._team_access_diagnostics.get("device_id")
+
+        if login.get("EventID") != expected_event_id:
+            return False
+        if login.get("TeamID") != expected_team_id:
+            return False
+
+        if not isinstance(session_row, dict):
+            return False
+        if session_row.get("event_id") != expected_event_id:
+            return False
+        if session_row.get("team_id") != expected_team_id:
+            return False
+        if session_row.get("device_id") != expected_device_id:
+            return False
+        if not session_row.get("is_active"):
+            return False
+
+        if restore.get("EventID") != expected_event_id:
+            return False
+        if restore.get("TeamID") != expected_team_id:
+            return False
+        if self._coerce_bool(restore.get("Ambiguous")):
+            return False
+        if self._coerce_bool(restore.get("RecoveryRequired")):
+            return False
+
+        return True
+
     def __init__(self) -> None:
         self.supabase_url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
         self.anon_key = (
@@ -463,12 +508,6 @@ class CoreV2RaceStagingRunner:
         )
         self._team_access_diagnostics["restore_rpc_response"] = restore
 
-        restore_ok = bool(
-            isinstance(restore, dict)
-            and restore.get("EventID") == self.event_id
-            and restore.get("TeamID") == self._team_access_diagnostics.get("team_id")
-        )
-
         credential_rows = self._get(
             "team_access_credentials_v2",
             {
@@ -486,33 +525,46 @@ class CoreV2RaceStagingRunner:
                 "order": "updated_at.desc",
             },
         )
-        self._team_access_diagnostics["stored_credential_row"] = credential_rows[0] if isinstance(credential_rows, list) and credential_rows else None
-        self._team_access_diagnostics["stored_session_row"] = session_rows[0] if isinstance(session_rows, list) and session_rows else None
-        if isinstance(session_rows, list) and session_rows and session_rows[0].get("team_access_session_id"):
-            self._team_access_diagnostics["team_access_session_id"] = session_rows[0].get("team_access_session_id")
-            self._team_access_diagnostics["team_id"] = session_rows[0].get("team_id") or self._team_access_diagnostics.get("team_id")
+        stored_session_row = session_rows[0] if isinstance(session_rows, list) and session_rows else None
+        self._team_access_diagnostics["stored_session_row"] = stored_session_row
+        stored_credential_row = credential_rows[0] if isinstance(credential_rows, list) and credential_rows else None
+        self._team_access_diagnostics["stored_credential_row"] = stored_credential_row
+
+        if stored_session_row and stored_session_row.get("team_access_session_id"):
+            self._team_access_diagnostics["team_access_session_id"] = stored_session_row.get("team_access_session_id")
+            self._team_access_diagnostics["team_id"] = stored_session_row.get("team_id") or self._team_access_diagnostics.get("team_id")
         self._team_access_diagnostics["captain_participant"] = dict(self.captain_participant)
 
         print("TEAM ACCESS DIAGNOSTICS:")
         print(json.dumps(self._team_access_diagnostics, sort_keys=True))
 
-        hijack_blocked = False
+        wrong_device_login_blocked = False
         try:
             self._rpc(
                 "exos_v2_team_access_login",
                 {
                     "p_join_code": self.join_code,
-                    "p_team_id": team_id,
+                    "p_team_id": selected_team_id,
                     "p_pin": team_pin,
                     "p_device_id": f"{self.captain_device}-OTHER",
                 },
                 admin=False,
             )
         except RuntimeError:
-            hijack_blocked = True
+            wrong_device_login_blocked = True
 
+        # Keep wrong-device guard for hardening, but do not couple reconnect gate to it.
         self.gates["captain_login"] = bool(login_ok)
-        self.gates["captain_reconnect"] = bool(restore_ok and hijack_blocked)
+        self.gates["captain_reconnect"] = bool(
+            login_ok
+            and self._is_reconnect_contract_ok(login, restore, stored_session_row)
+        )
+
+        if wrong_device_login_blocked:
+            self._team_access_diagnostics["wrong_device_reject_reason"] = "blocked"
+        else:
+            self._team_access_diagnostics["wrong_device_reject_reason"] = "allowed"
+
         if not (self.gates["captain_login"] and self.gates["captain_reconnect"] and wrong_pin_ok):
             raise RuntimeError("Captain identity controls failed")
 
