@@ -1,5 +1,34 @@
 -- EXOS Core v2: canonical runtime foundation schema.
 -- Intent: introduce v2 runtime entities without modifying existing v1 structures.
+do $$
+declare
+    legacy_table_names text[] := array[
+        'runtime_events', 'runtime_participants', 'runtime_submissions', 'runtime_teams',
+        'runtime_missions', 'runtime_teams_v2', 'runtime_participants_v2',
+        'runtime_submissions_v2', 'formula_race_team_access', 'formula_race_team_checkpoints',
+        'runtime_mission_submissions', 'runtime_mission_evidence', 'runtime_mission_status',
+        'formula_race_results', 'formula_race_checkpoint_runtime'
+    ];
+begin
+    if exists(
+        select 1
+          from information_schema.tables t
+         where t.table_schema = 'public'
+           and t.table_name = any(legacy_table_names)
+    ) then
+        raise exception 'Legacy EXOS runtime tables detected. Do not run 020 on a project containing legacy runtime objects.';
+    end if;
+
+    if exists(
+        select 1
+          from information_schema.routines r
+         where r.routine_schema = 'public'
+           and r.routine_name in ('exos_join_event','exos_publish_event','join_player_by_code')
+    ) then
+        raise exception 'Legacy EXOS RPCs detected in this project. Use the clean-room migration only on an empty schema.';
+    end if;
+end $$;
+
 create extension if not exists pgcrypto;
 
 create extension if not exists pg_trgm;
@@ -427,6 +456,26 @@ alter table public.location_evidence_v2 enable row level security;
 alter table public.ai_jobs_v2 enable row level security;
 alter table public.ai_results_v2 enable row level security;
 alter table public.audit_log_v2 enable row level security;
+
+do $$
+declare
+    table_names text[] := array[
+        'events_v2','programmes_v2','modules_v2','activities_v2','teams_v2',
+        'participants_v2','participant_sessions_v2','activity_runtime_v2','submissions_v2',
+        'submission_evidence_v2','reviews_v2','score_transactions_v2','credit_transactions_v2',
+        'marketplace_items_v2','marketplace_transactions_v2','build_status_v2','judging_scores_v2',
+        'race_results_v2','projector_state_v2','location_checkpoints_v2','location_evidence_v2',
+        'ai_jobs_v2','ai_results_v2','audit_log_v2'
+    ];
+    t text;
+begin
+    foreach t in array table_names loop
+        execute format(
+            'create policy if not exists %I on public.%I for all to service_role using (true) with check (true);',
+            t || '_sr_all_policy', t
+        );
+    end loop;
+end $$;
 
 create or replace function public.exos_v2_normalize_participant_name(p_name text)
 returns text language sql immutable as $$
@@ -990,4 +1039,3 @@ grant execute on function public.exos_v2_admin_merge_participants(text,uuid,uuid
 grant execute on function public.exos_v2_publish_event(text,text,text,jsonb,public.exos_v2_scoring_mode,text) to service_role;
 grant execute on function public.exos_v2_ledger_score(text,text,uuid,numeric,text,public.exos_v2_scoring_mode,text) to service_role;
 grant execute on function public.exos_v2_ledger_credit(text,text,uuid,text,integer,text,text) to service_role;
-*** End Patch
