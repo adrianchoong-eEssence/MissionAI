@@ -32,7 +32,7 @@ begin
     end if;
 end $$;
 
-create extension if not exists pgcrypto;
+create extension if not exists pgcrypto with schema extensions;
 
 create extension if not exists pg_trgm;
 
@@ -179,7 +179,7 @@ create table if not exists public.teams_v2 (
 create index if not exists teams_v2_event_idx on public.teams_v2(event_id);
 
 create table if not exists public.participants_v2 (
-    participant_id uuid primary key default gen_random_uuid(),
+    participant_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     team_id text not null references public.teams_v2(team_id) on delete restrict,
     normalized_name text not null,
@@ -199,11 +199,11 @@ create table if not exists public.participants_v2 (
 );
 
 create table if not exists public.participant_sessions_v2 (
-    participant_session_id uuid primary key default gen_random_uuid(),
+    participant_session_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     participant_id uuid not null references public.participants_v2(participant_id) on delete cascade,
     device_id text not null,
-    session_token uuid not null unique default gen_random_uuid(),
+    session_token uuid not null unique default extensions.gen_random_uuid(),
     idempotency_key text not null,
     joined_from_client text,
     last_seen_at timestamptz not null default now(),
@@ -216,7 +216,7 @@ create table if not exists public.participant_sessions_v2 (
 create index if not exists participant_sessions_v2_event_idx on public.participant_sessions_v2(event_id);
 
 create table if not exists public.activity_runtime_v2 (
-    runtime_id uuid primary key default gen_random_uuid(),
+    runtime_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     team_id text not null references public.teams_v2(team_id) on delete restrict,
     participant_id uuid not null references public.participants_v2(participant_id) on delete cascade,
@@ -233,7 +233,7 @@ create table if not exists public.activity_runtime_v2 (
 );
 
 create table if not exists public.submissions_v2 (
-    submission_id uuid primary key default gen_random_uuid(),
+    submission_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     team_id text not null references public.teams_v2(team_id) on delete restrict,
     participant_id uuid not null references public.participants_v2(participant_id) on delete cascade,
@@ -256,7 +256,7 @@ create index if not exists submissions_v2_event_idx on public.submissions_v2(eve
 create index if not exists submissions_v2_team_idx on public.submissions_v2(team_id);
 
 create table if not exists public.submission_evidence_v2 (
-    evidence_id uuid primary key default gen_random_uuid(),
+    evidence_id uuid primary key default extensions.gen_random_uuid(),
     submission_id uuid not null references public.submissions_v2(submission_id) on delete cascade,
     evidence_type text not null,
     evidence_uri text,
@@ -266,7 +266,7 @@ create table if not exists public.submission_evidence_v2 (
 );
 
 create table if not exists public.reviews_v2 (
-    review_id uuid primary key default gen_random_uuid(),
+    review_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     submission_id uuid not null references public.submissions_v2(submission_id) on delete cascade,
     reviewer text not null,
@@ -279,7 +279,7 @@ create table if not exists public.reviews_v2 (
 );
 
 create table if not exists public.score_transactions_v2 (
-    score_transaction_id uuid primary key default gen_random_uuid(),
+    score_transaction_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     team_id text not null references public.teams_v2(team_id) on delete restrict,
     submission_id uuid references public.submissions_v2(submission_id) on delete set null,
@@ -300,7 +300,7 @@ create table if not exists public.score_transactions_v2 (
 create index if not exists score_transactions_v2_event_team_idx on public.score_transactions_v2(event_id, team_id);
 
 create table if not exists public.credit_transactions_v2 (
-    credit_transaction_id uuid primary key default gen_random_uuid(),
+    credit_transaction_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     team_id text not null references public.teams_v2(team_id) on delete restrict,
     participant_id uuid references public.participants_v2(participant_id) on delete set null,
@@ -330,7 +330,7 @@ create table if not exists public.marketplace_items_v2 (
 );
 
 create table if not exists public.marketplace_transactions_v2 (
-    marketplace_transaction_id uuid primary key default gen_random_uuid(),
+    marketplace_transaction_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     team_id text not null references public.teams_v2(team_id) on delete restrict,
     item_id text not null references public.marketplace_items_v2(item_id) on delete restrict,
@@ -358,7 +358,7 @@ create table if not exists public.build_status_v2 (
 );
 
 create table if not exists public.judging_scores_v2 (
-    judging_score_id uuid primary key default gen_random_uuid(),
+    judging_score_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     team_id text not null references public.teams_v2(team_id) on delete restrict,
     activity_id text not null references public.activities_v2(activity_id) on delete cascade,
@@ -372,7 +372,7 @@ create table if not exists public.judging_scores_v2 (
 );
 
 create table if not exists public.race_results_v2 (
-    race_result_id uuid primary key default gen_random_uuid(),
+    race_result_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     team_id text not null references public.teams_v2(team_id) on delete restrict,
     activity_id text not null references public.activities_v2(activity_id) on delete cascade,
@@ -411,7 +411,7 @@ create table if not exists public.location_checkpoints_v2 (
 );
 
 create table if not exists public.location_evidence_v2 (
-    location_evidence_id uuid primary key default gen_random_uuid(),
+    location_evidence_id uuid primary key default extensions.gen_random_uuid(),
     checkpoint_id text not null references public.location_checkpoints_v2(checkpoint_id) on delete cascade,
     submission_id uuid references public.submissions_v2(submission_id) on delete set null,
     participant_session_id uuid references public.participant_sessions_v2(participant_session_id) on delete set null,
@@ -425,7 +425,7 @@ create table if not exists public.location_evidence_v2 (
 );
 
 create table if not exists public.ai_jobs_v2 (
-    ai_job_id uuid primary key default gen_random_uuid(),
+    ai_job_id uuid primary key default extensions.gen_random_uuid(),
     event_id text not null references public.events_v2(event_id) on delete cascade,
     job_type text not null,
     target_entity text not null,
@@ -440,7 +440,7 @@ create table if not exists public.ai_jobs_v2 (
 );
 
 create table if not exists public.ai_results_v2 (
-    ai_result_id uuid primary key default gen_random_uuid(),
+    ai_result_id uuid primary key default extensions.gen_random_uuid(),
     ai_job_id uuid not null references public.ai_jobs_v2(ai_job_id) on delete cascade,
     event_id text not null references public.events_v2(event_id) on delete cascade,
     result_payload jsonb not null default '{}'::jsonb,
@@ -638,7 +638,7 @@ declare
     v_session public.participant_sessions_v2%rowtype;
     v_event_lock bigint;
     v_identity_lock bigint;
-    v_next_participant_id uuid := gen_random_uuid();
+    v_next_participant_id uuid := extensions.gen_random_uuid();
 begin
     if nullif(trim(p_participant_name),'') is null then raise exception 'Participant full name is required'; end if;
     if nullif(trim(p_device_id),'') is null then raise exception 'Device identifier is required'; end if;
@@ -649,7 +649,13 @@ begin
     if not found then raise exception 'Invalid or unpublished join code'; end if;
 
     v_normalized := public.exos_v2_normalize_participant_name(p_participant_name);
-    v_idempotency_key := encode(digest(v_event.event_id||'|'||v_normalized||'|'||lower(trim(p_device_id)), 'sha256'), 'hex');
+    v_idempotency_key := encode(
+        extensions.digest(
+            v_event.event_id || '|' || v_normalized || '|' || lower(trim(p_device_id)),
+            'sha256'
+        ),
+        'hex'
+    );
     v_event_lock := hashtextextended(v_event.event_id, 11);
     v_identity_lock := hashtextextended(v_event.event_id || '|' || v_normalized, 17);
     perform pg_advisory_xact_lock(v_event_lock);
@@ -999,7 +1005,13 @@ begin
     end if;
     v_key := nullif(trim(p_idempotency_key),'');
     if v_key is null then
-        v_key := encode(digest(trim(p_event_id)||'|'||trim(p_team_id)||'|'||coalesce(p_submission_id::text,'')||'|'||coalesce(trim(p_reason), ''),'sha256'),'hex');
+        v_key := encode(
+            extensions.digest(
+                trim(p_event_id) || '|' || trim(p_team_id) || '|' || coalesce(p_submission_id::text, '') || '|' || coalesce(trim(p_reason), ''),
+                'sha256'
+            ),
+            'hex'
+        );
     end if;
     insert into public.score_transactions_v2 (
         event_id,team_id,submission_id,scoring_mode,score_delta,reason,idempotency_key
