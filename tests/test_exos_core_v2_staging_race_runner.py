@@ -237,3 +237,37 @@ def test_non_lock_error_is_not_treated_as_expected() -> None:
     runner = CoreV2RaceStagingRunner()
     err = RuntimeError('HTTP 400 PATCH race_results_v2: {"code":"23505","message":"duplicate key value violates unique constraint"}')
     assert runner._is_expected_lock_rejection(err, "race result is locked and immutable until explicit unlock") is False
+
+
+def test_ranking_10_team_produced_contract_with_exact_staging_dataset() -> None:
+    runner = CoreV2RaceStagingRunner()
+    runner.team_ids = [f"CORE-V2-RACE-UAT-T{idx:02d}-ABCDEF1234" for idx in range(1, 11)]
+
+    ranking_rows = []
+    for idx, team_id in enumerate(runner.team_ids, start=1):
+        ranking_rows.append(
+            {
+                "team_id": team_id,
+                "ranking_position": idx,
+                "result_payload": {
+                    "time_ms": 120000 + idx * 500,
+                    "penalty_ms": 5000 if idx in {1, 2} else 2000,
+                    "bonus_credits": 0,
+                },
+                "checkpoint": "Race Final",
+                "activity_id": runner.activity_ids[0],
+            }
+        )
+
+    assert runner._ranking_10_team_produced(ranking_rows, runner.team_ids[:10]) is True
+
+
+def test_ranking_10_team_produced_contract_rejects_partial_dataset() -> None:
+    runner = CoreV2RaceStagingRunner()
+    runner.team_ids = [f"CORE-V2-RACE-UAT-T{idx:02d}-ABCDEF1234" for idx in range(1, 11)]
+
+    ranking_rows = [
+        {"team_id": runner.team_ids[0], "ranking_position": 1, "result_payload": {"time_ms": 1, "penalty_ms": 0}},
+        {"team_id": runner.team_ids[0], "ranking_position": 1, "result_payload": {"time_ms": 2, "penalty_ms": 0}},
+    ]
+    assert runner._ranking_10_team_produced(ranking_rows, runner.team_ids[:10]) is False

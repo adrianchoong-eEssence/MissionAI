@@ -267,6 +267,30 @@ class CoreV2RaceStagingRunner:
 
         return expected_count, actual_count, len(team_row_map), missing_teams, duplicate_teams
 
+    def _ranking_10_team_produced(self, ranking_rows: list[dict], expected_team_ids: list[str]) -> bool:
+        """Validate exactly 10 canonical Race Final rows with positions 1..10."""
+
+        team_row_map = self._normalize_team_id_map(ranking_rows, "team_id")
+
+        missing_team_ids = [team_id for team_id in expected_team_ids if team_id not in team_row_map]
+        duplicate_team_ids = [team_id for team_id, rows in team_row_map.items() if len(rows) > 1]
+        ranking_positions = [
+            int(row.get("ranking_position", 0))
+            for row in ranking_rows
+            if isinstance(row, dict)
+            and row.get("ranking_position") is not None
+            and str(row.get("ranking_position")).isdigit()
+        ]
+
+        return (
+            len(ranking_rows) == 10
+            and len(expected_team_ids) == 10
+            and len(team_row_map) == 10
+            and not missing_team_ids
+            and not duplicate_team_ids
+            and sorted(ranking_positions) == list(range(1, 11))
+        )
+
     def _compute_rank_positions(self, rows: list[dict]) -> list[dict[str, object]]:
         """Compute canonical ranking positions for the supplied final rows."""
 
@@ -1409,23 +1433,10 @@ class CoreV2RaceStagingRunner:
         )
 
         ranking_rows = rankings if isinstance(rankings, list) else []
-        self.gates["ranking_10_teams"] = bool(len(ranking_rows) == 10)
-        unique_teams = {
-            row.get("team_id") for row in ranking_rows
-            if isinstance(row, dict) and row.get("team_id")
-        }
-        self.gates["ranking_10_teams"] = self.gates["ranking_10_teams"] and len(unique_teams) == 10
-        ranking_positions = [
-            int(row.get("ranking_position"))
-            for row in ranking_rows
-            if isinstance(row, dict)
-            and row.get("ranking_position") is not None
-            and str(row.get("ranking_position")).isdigit()
-        ]
-        self.gates["ranking_10_teams"] = (
-            self.gates["ranking_10_teams"]
-            and len(ranking_positions) == 10
-            and sorted(ranking_positions) == list(range(1, 11))
+        expected_team_ids = [str(team_id) for team_id in self.team_ids[:10]]
+        self.gates["ranking_10_teams"] = self._ranking_10_team_produced(
+            ranking_rows,
+            expected_team_ids,
         )
 
         rankings_rerun = self._get(
