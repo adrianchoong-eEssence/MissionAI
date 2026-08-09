@@ -114,6 +114,18 @@ def test_core_v2_schema_has_postgres_safe_type_creation():
     assert re.search(r"create\s+policy\s+if\s+not\s+exists", lowered) is None
 
 
+def test_core_v2_join_event_v2_session_insert_sql_shape():
+    pattern = re.compile(
+        r"create or replace function public\.exos_v2_join_event_v2[\s\S]*?"
+        r"insert into public\.participant_sessions_v2[\s\S]*?"
+        r"on conflict \(event_id, idempotency_key\) do update[\s\S]*?"
+        r"set[\s\S]*?is_active = true\s*\n\s*returning \* into v_session;",
+        re.IGNORECASE,
+    )
+    assert pattern.search(MIGRATION) is not None
+    assert ") returning * into v_session" not in MIGRATION
+
+
 def test_core_v2_schema_enum_creation_is_guarded():
     for enum_name in (
         "exos_v2_activity_type",

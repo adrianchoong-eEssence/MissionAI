@@ -1,5 +1,8 @@
 -- EXOS Core v2: canonical runtime foundation schema.
 -- Intent: introduce v2 runtime entities without modifying existing v1 structures.
+-- Safe in a single transaction for clean-room installs.
+begin;
+
 do $$
 declare
     legacy_table_names text[] := array[
@@ -725,7 +728,7 @@ begin
       set device_id = excluded.device_id,
           last_seen_at = now(),
           is_active = true
-    ) returning * into v_session;
+    returning * into v_session;
 
     if v_session.participant_id is distinct from v_participant.participant_id then
         delete from public.participants_v2 where participant_id = v_next_participant_id;
@@ -1076,3 +1079,5 @@ grant execute on function public.exos_v2_admin_merge_participants(text,uuid,uuid
 grant execute on function public.exos_v2_publish_event(text,text,text,jsonb,public.exos_v2_scoring_mode,text) to service_role;
 grant execute on function public.exos_v2_ledger_score(text,text,uuid,numeric,text,public.exos_v2_scoring_mode,text) to service_role;
 grant execute on function public.exos_v2_ledger_credit(text,text,uuid,text,integer,text,text) to service_role;
+
+commit;
