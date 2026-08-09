@@ -268,7 +268,7 @@ SCHEMA_COLUMNS = {
     },
 }
 
-REQUEST_KEYS = {"select", "order", "limit", "on_conflict"}
+RESERVED_QUERY_KEYS = {"order", "select", "limit", "on_conflict"}
 
 
 def _iter_table_ops() -> list[tuple[str, str, set[str], int]]:
@@ -281,7 +281,7 @@ def _iter_table_ops() -> list[tuple[str, str, set[str], int]]:
         fn = node.func
         if not isinstance(fn, ast.Attribute):
             continue
-        if fn.attr not in {"_get", "_post", "_delete"}:
+        if fn.attr not in {"_get", "_post", "_patch", "_delete"}:
             continue
 
         if len(node.args) < 2:
@@ -297,14 +297,57 @@ def _iter_table_ops() -> list[tuple[str, str, set[str], int]]:
         keys: set[str] = set()
         for key in query_node.keys:
             if isinstance(key, ast.Constant) and isinstance(key.value, str):
-                if key.value not in REQUEST_KEYS:
+                if key.value not in RESERVED_QUERY_KEYS:
                     keys.add(key.value)
+
+        # Column usage in explicit select/order clauses should be validated too.
+        keys.update(_collect_columns_from_select(query_node))
+        keys.update(_collect_columns_from_order(query_node))
         ops.append((fn.attr, table, keys, node.lineno))
     return ops
 
 
+def _iter_order_and_select_literals(query_node: ast.Dict) -> list[ast.expr]:
+    for key_node, value_node in zip(query_node.keys, query_node.values):
+        if not isinstance(key_node, ast.Constant) or not isinstance(key_node.value, str):
+            continue
+        if key_node.value in {"order", "select"}:
+            yield value_node
+
+
+def _collect_columns_from_select(query_node: ast.Dict) -> set[str]:
+    columns: set[str] = set()
+    for value_node in _iter_order_and_select_literals(query_node):
+        if isinstance(value_node, ast.Constant) and isinstance(value_node.value, str):
+            raw = value_node.value
+            # Examples: "event_id,team_id" or "event_id, created_at:desc"
+            for raw_token in raw.split(","):
+                token = raw_token.strip()
+                if not token:
+                    continue
+                # strip aliases/functions
+                token = token.split(":")[0].split(" as ")[0].split("(")[0].strip()
+                columns.add(token)
+    return columns
+
+
+def _collect_columns_from_order(query_node: ast.Dict) -> set[str]:
+    columns: set[str] = set()
+    for value_node in _iter_order_and_select_literals(query_node):
+        if isinstance(value_node, ast.Constant) and isinstance(value_node.value, str):
+            raw = value_node.value
+            for raw_token in raw.split(","):
+                token = raw_token.strip()
+                if not token:
+                    continue
+                token = token.split(":")[0].split(" ")[0]
+                token = token.split(".")[0]
+                columns.add(token)
+    return columns
+
+
 def _normalize_column(token: str) -> str:
-    return token.split(":")[0]
+    return token.strip().split(":")[0].split(".")[0].split(" ")[0]
 
 
 def test_runner_core_v2_schema_column_contract() -> None:

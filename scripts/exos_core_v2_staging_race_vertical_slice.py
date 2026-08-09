@@ -128,7 +128,7 @@ class CoreV2RaceStagingRunner:
 
     @staticmethod
     def _runner_version() -> str:
-        return "exos-core-v2-race-vertical-slice"
+        return "exos-core-v2-race-vertical-slice-v2"
 
     @staticmethod
     def _coerce_bool(value: object) -> bool:
@@ -1013,7 +1013,7 @@ class CoreV2RaceStagingRunner:
                 "event_id": f"eq.{self.event_id}",
                 "team_id": f"eq.{team_id}",
                 "select": "build_status,team_id",
-                "order": "created_at.desc",
+                "order": "last_updated.desc",
                 "limit": "1",
             },
         )
