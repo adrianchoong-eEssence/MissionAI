@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
+import ast
 
 
 KNOWN_PROD_HOSTS = {
@@ -49,6 +50,68 @@ def _in_filter(values: list[str]) -> str:
     return "in.({})".format(
         ",".join('"{}"'.format(value) for value in sanitized)
     )
+
+
+def _literal_string(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _activity_call_has_event_id_filter(query_node: ast.AST | None) -> bool:
+    if not isinstance(query_node, ast.Dict):
+        return False
+    for key_node in query_node.keys:
+        key = _literal_string(key_node)
+        if key == "event_id":
+            return True
+    return False
+
+
+def find_stale_activity_event_refs(source_text: str) -> list[str]:
+    """Return executable callsites that use activities_v2 with event_id filters."""
+
+    tree = ast.parse(source_text)
+    stale: list[str] = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        method_name = node.func.attr
+
+        table_expr = None
+        query_expr = None
+
+        if method_name in {"_get", "_post", "_patch", "_delete"}:
+            if len(node.args) >= 1:
+                table_expr = node.args[0]
+            if len(node.args) >= 2:
+                query_expr = node.args[1]
+            for kw in node.keywords:
+                if kw.arg in {"query", "payload"} and kw.value is not None:
+                    # For direct request calls we inspect payload filters too.
+                    query_expr = kw.value
+        elif method_name == "_request":
+            # _request(method, path, payload=None, query=None, admin=True)
+            if len(node.args) >= 2:
+                table_expr = node.args[1]
+            for kw in node.keywords:
+                if kw.arg == "query":
+                    query_expr = kw.value
+            if query_expr is None and len(node.args) >= 4:
+                query_expr = node.args[3]
+        else:
+            continue
+
+        table = _literal_string(table_expr)
+        if table != "activities_v2":
+            continue
+
+        query_key_node: ast.AST | None = query_expr
+        if _activity_call_has_event_id_filter(query_key_node):
+            stale.append(f"line {getattr(node, 'lineno', 0)}")
+
+    return stale
 
 
 class CoreV2RaceStagingRunner:
@@ -279,12 +342,8 @@ class CoreV2RaceStagingRunner:
     def _check_stale_activity_event_refs(self) -> None:
         script_path = os.path.join(os.path.dirname(__file__), os.path.basename(__file__))
         with open(script_path, "r", encoding="utf-8") as stream:
-            lines = stream.read().splitlines()
-        self.stale_activity_event_id_refs = [
-            line.strip()
-            for line in lines
-            if "activities_v2" in line and ".event_id" in line
-        ]
+            source = stream.read()
+        self.stale_activity_event_id_refs = find_stale_activity_event_refs(source)
         print(
             "STALE_ACTIVITY_EVENT_PATHS: "
             + str(len(self.stale_activity_event_id_refs))

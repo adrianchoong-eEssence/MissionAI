@@ -1,7 +1,8 @@
 import ast
 import importlib.util
-from pathlib import Path
 from typing import Any
+from pathlib import Path
+import textwrap
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +12,7 @@ spec = importlib.util.spec_from_file_location("exos_core_v2_staging_race_vertica
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)  # type: ignore[arg-type]
 CoreV2RaceStagingRunner = module.CoreV2RaceStagingRunner
+find_stale_activity_event_refs = module.find_stale_activity_event_refs
 
 
 def test_captain_reconnect_contract_with_no_session_token_in_restore_shape() -> None:
@@ -149,3 +151,77 @@ def test_review_upsert_is_idempotent_in_submit_and_review_path() -> None:
     assert len(review_post_calls) == 0
     assert len(review_patch_calls) == 1
     assert len(score_calls) == 1
+
+
+def test_stale_activity_event_detector_ignores_detector_source() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    findings = find_stale_activity_event_refs(source)
+    assert findings == []
+
+
+def test_stale_activity_event_detector_ignores_comments_and_strings() -> None:
+    source = textwrap.dedent(
+        """
+        class Demo:
+            def check(self):
+                # activities_v2.event_id should not trigger stale detector
+                msg = "activities_v2.event_id"
+                print("STALE_ACTIVITY_EVENT_PATHS:")
+                return msg
+        """
+    ).strip()
+    findings = find_stale_activity_event_refs(source)
+    assert findings == []
+
+
+def test_stale_activity_event_detector_detects_invalid_query() -> None:
+    source = textwrap.dedent(
+        """
+        class Demo:
+            def run(self):
+                rows = self._get(
+                    \"activities_v2\",
+                    {
+                        \"event_id\": \"eq.abc-123\",
+                        \"select\": \"activity_id\"
+                    },
+                )
+        """
+    ).strip()
+    findings = find_stale_activity_event_refs(source)
+    assert len(findings) == 1
+    assert findings[0].startswith("line ")
+
+
+def test_stale_activity_event_detector_allows_canonical_hierarchy_query() -> None:
+    source = textwrap.dedent(
+        """
+        class Demo:
+            def run(self):
+                rows = self._get(
+                    \"activities_v2\",
+                    {
+                        \"module_id\": \"eq.mod-001\",
+                        \"select\": \"activity_id\",
+                    },
+                )
+        """
+    ).strip()
+    findings = find_stale_activity_event_refs(source)
+    assert findings == []
+
+
+def test_stale_activity_event_detector_detects_no_false_positive_from_rest_like_query() -> None:
+    source = textwrap.dedent(
+        """
+        class Demo:
+            def run(self):
+                rows = self._request(
+                    \"GET\",
+                    \"activities_v2\",
+                    query={\"event_id\": \"eq.abc\"},
+                )
+        """
+    ).strip()
+    findings = find_stale_activity_event_refs(source)
+    assert len(findings) == 1
