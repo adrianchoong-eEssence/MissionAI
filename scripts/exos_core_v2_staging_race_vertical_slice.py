@@ -128,7 +128,7 @@ class CoreV2RaceStagingRunner:
 
     @staticmethod
     def _runner_version() -> str:
-        return "exos-core-v2-race-vertical-slice-v5"
+        return "exos-core-v2-race-vertical-slice-v6"
 
     @staticmethod
     def _coerce_bool(value: object) -> bool:
@@ -200,6 +200,102 @@ class CoreV2RaceStagingRunner:
         )
 
         return expected_order, list(ordered_by_metric), ties_ok and expected_position_match
+
+    @staticmethod
+    def _normalize_team_id_map(rows: list[dict], key: str) -> dict[str, list[dict]]:
+        index: dict[str, list[dict]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            team_id = row.get(key)
+            if not team_id:
+                continue
+            index.setdefault(str(team_id), []).append(row)
+        return index
+
+    def _print_ranking_diagnostic(self, race_rows: list[dict]) -> tuple[int, int, int, list[str], list[str], list[str]]:
+        """Print concise ranking diagnostics and return basic counts."""
+
+        team_row_map = self._normalize_team_id_map(race_rows, "team_id")
+        expected_team_ids = [str(team_id) for team_id in self.team_ids[:10]]
+
+        for team_id in expected_team_ids:
+            rows = team_row_map.get(team_id, [])
+            row_count = len(rows)
+            if row_count == 0:
+                print(f"RANKING DIAGNOSTIC | TeamID={team_id} | row_count=0 | checkpoint=Race Final | locked=False | time_ms=NA | penalty_ms=NA | adjusted_time=NA | ranking_position=NA")
+                continue
+
+            for row in rows:
+                payload = row.get("result_payload") or {}
+                time_ms = payload.get("time_ms")
+                penalty_ms = payload.get("penalty_ms")
+                try:
+                    adjusted_time = float(time_ms or 0) + float(penalty_ms or 0)
+                except Exception:
+                    adjusted_time = None
+                print(
+                    "RANKING DIAGNOSTIC | TeamID={team_id} | row_count={row_count} | "
+                    "checkpoint={checkpoint} | locked={locked} | time_ms={time_ms} | penalty_ms={penalty_ms} | "
+                    "adjusted_time={adjusted_time} | ranking_position={ranking_position}".format(
+                        team_id=team_id,
+                        row_count=row_count,
+                        checkpoint=row.get("checkpoint", "Race Final"),
+                        locked=row.get("locked", False),
+                        time_ms=time_ms,
+                        penalty_ms=penalty_ms,
+                        adjusted_time=adjusted_time,
+                        ranking_position=row.get("ranking_position"),
+                    )
+                )
+
+        expected_count = len(expected_team_ids)
+        actual_count = len(race_rows) if isinstance(race_rows, list) else 0
+        unique_teams = [team_id for team_id in sorted(team_row_map)]
+
+        missing_teams = [team_id for team_id in expected_team_ids if team_id not in team_row_map]
+        duplicate_teams = [
+            team_id for team_id, rows in team_row_map.items()
+            if team_id in expected_team_ids and len(rows) > 1
+        ]
+
+        print(f"EXPECTED TEAM COUNT | {expected_count}")
+        print(f"ACTUAL RESULT ROW COUNT | {actual_count}")
+        print(f"UNIQUE TEAM COUNT | {len(team_row_map)}")
+        print(f"MISSING TEAM IDs | {json.dumps(missing_teams)}")
+        print(f"DUPLICATE TEAM IDs | {json.dumps(duplicate_teams)}")
+
+        return expected_count, actual_count, len(team_row_map), missing_teams, duplicate_teams
+
+    def _compute_rank_positions(self, rows: list[dict]) -> list[dict[str, object]]:
+        """Compute canonical ranking positions for the supplied final rows."""
+
+        ranked_payload: list[tuple[str, float, dict]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            team_id = row.get("team_id")
+            payload = row.get("result_payload") or {}
+            try:
+                adjusted = float(payload.get("time_ms", 0) or 0) + float(payload.get("penalty_ms", 0) or 0)
+            except (TypeError, ValueError):
+                adjusted = 0.0
+            ranked_payload.append((str(team_id), adjusted, row))
+
+        ordered = sorted(ranked_payload, key=lambda item: (item[1], item[0]))
+        positions: dict[str, int] = {}
+        current_position = 1
+        previous_metric = None
+        for idx, (team_id, adjusted, _row) in enumerate(ordered):
+            if previous_metric is None or adjusted != previous_metric:
+                current_position = idx + 1
+            positions[team_id] = current_position
+            previous_metric = adjusted
+
+        return [
+            {"team_id": team_id, "ranking_position": rank}
+            for team_id, rank in positions.items()
+        ]
 
     def _is_reconnect_contract_ok(self, login: object, restore: object, session_row: object) -> bool:
         if not isinstance(login, dict) or not isinstance(restore, dict):
@@ -1131,6 +1227,17 @@ class CoreV2RaceStagingRunner:
 
         created = []
         for idx, scored_team_id in enumerate(self.team_ids[:10], start=1):
+            if idx in {1, 2}:
+                base_time = 120000
+            else:
+                base_time = 120000 + (idx - 1) * 2000
+            if idx == 1:
+                penalty_ms = 5000
+            elif idx == 2:
+                penalty_ms = 5000
+            else:
+                penalty_ms = 2000
+
             row = self._post(
                 "race_results_v2",
                 {
@@ -1140,8 +1247,8 @@ class CoreV2RaceStagingRunner:
                     "checkpoint": "Race Final",
                     "ranking_position": idx,
                     "result_payload": {
-                        "time_ms": 120000 + (idx - 1) * 500,
-                        "penalty_ms": 0,
+                        "time_ms": base_time,
+                        "penalty_ms": penalty_ms,
                         "bonus_credits": 0,
                         "verified": False,
                     },
@@ -1169,29 +1276,83 @@ class CoreV2RaceStagingRunner:
         )
         self.gates["race_result"] = bool(self.gates["result_row_created"])
 
+        result_rows = self._get(
+            "race_results_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "checkpoint": "eq.Race Final",
+                "activity_id": f"eq.{self.activity_ids[0]}",
+                "select": "team_id,activity_id,checkpoint,locked,ranking_position,result_payload",
+                "order": "team_id.asc",
+            },
+        )
+        if not isinstance(result_rows, list):
+            result_rows = []
+
+        print("=== RANKING DIAGNOSTIC ===")
+        (
+            _expected_count,
+            _actual_rows_count,
+            _unique_team_count,
+            _missing_teams,
+            _duplicate_teams,
+        ) = self._print_ranking_diagnostic(
+            result_rows,
+        )
+
+        ranking_payload_ok = isinstance(result_rows, list) and len(result_rows) == 10
+        self.gates["result_row_created"] = bool(
+            ranking_payload_ok and isinstance(created, list) and len(created) == 10
+        )
+        self.gates["race_result"] = bool(self.gates["result_row_created"])
+
         penalty_ok = True
         bonus_ok = True
         for idx, scored_team_id in enumerate(self.team_ids[:10], start=1):
-            base_time = 120000 + (idx - 1) * 500
             if idx in {1, 2}:
                 penalty_ms = 5000
+                bonus_credits = 20 if idx == 1 else 5
             else:
                 penalty_ms = 2000
-            bonus_credits = 20 if idx == 1 else 5
+                bonus_credits = 5
 
             self._patch(
                 "race_results_v2",
                 {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{scored_team_id}", "activity_id": f"eq.{self.activity_ids[0]}", "checkpoint": "eq.Race Final"},
-                {"result_payload": {"time_ms": base_time, "penalty_ms": penalty_ms, "bonus_credits": bonus_credits, "verified": True}},
+                {"result_payload": {"penalty_ms": penalty_ms, "bonus_credits": bonus_credits, "verified": True}},
             )
             penalty_ok = penalty_ok and bool(penalty_ms > 0)
 
+            bonus_ok = bonus_ok and bool(bonus_credits > 0)
+
+        self.gates["result_row_created"] = bool(self.gates["result_row_created"])
+        self.gates["race_result"] = bool(self.gates["result_row_created"])
+
+        final_result_rows = self._get(
+            "race_results_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "checkpoint": "eq.Race Final",
+                "activity_id": f"eq.{self.activity_ids[0]}",
+                "select": "team_id,ranking_position,result_payload",
+                "order": "team_id.asc",
+            },
+        )
+        if not isinstance(final_result_rows, list):
+            final_result_rows = []
+
+        ranking_updates = self._compute_rank_positions(final_result_rows)
+        for update in ranking_updates:
             self._patch(
                 "race_results_v2",
-                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{scored_team_id}", "activity_id": f"eq.{self.activity_ids[0]}", "checkpoint": "eq.Race Final"},
-                {"result_payload": {"time_ms": base_time + penalty_ms, "penalty_ms": penalty_ms, "bonus_credits": bonus_credits, "verified": True}},
+                {
+                    "event_id": f"eq.{self.event_id}",
+                    "team_id": f"eq.{update['team_id']}",
+                    "activity_id": f"eq.{self.activity_ids[0]}",
+                    "checkpoint": "eq.Race Final",
+                },
+                {"ranking_position": update["ranking_position"]},
             )
-            bonus_ok = bonus_ok and bool(bonus_credits > 0)
 
         self.gates["penalty_applied_once"] = bool(penalty_ok)
         self.gates["bonus_applied_once"] = bool(bonus_ok)
