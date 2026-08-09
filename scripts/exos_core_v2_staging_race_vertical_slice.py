@@ -95,6 +95,19 @@ class CoreV2RaceStagingRunner:
         self._cleanup_steps = []
         self._error = None
         self.captain_participant = {}
+        self._team_access_diagnostics = {
+            "event_id": None,
+            "team_id": None,
+            "device_id": None,
+            "captain_participant": {},
+            "team_access_session_id": None,
+            "login_rpc_input": None,
+            "login_rpc_response": None,
+            "restore_rpc_input": None,
+            "restore_rpc_response": None,
+            "stored_credential_row": None,
+            "stored_session_row": None,
+        }
 
     @staticmethod
     def _now_iso() -> str:
@@ -340,6 +353,18 @@ class CoreV2RaceStagingRunner:
         captain_name = f"CORE-V2-RACE-CAP-{self.event_id[-6:]}"
         captain_device = self.captain_device
 
+        selected_team_id = self.team_ids[0]
+
+        self._team_access_diagnostics.update(
+            {
+                "event_id": self.event_id,
+                "team_id": selected_team_id,
+                "device_id": captain_device,
+                "captain_participant": {},
+                "team_access_session_id": None,
+            }
+        )
+
         captain = self._rpc(
             "exos_v2_join_event_v2",
             {
@@ -395,26 +420,39 @@ class CoreV2RaceStagingRunner:
             raise RuntimeError("Not all team PINs were configured")
 
         # Keep pin as TEAM-ID suffixed deterministic token for UAT execution.
-        team_pin = f"PIN-{team_id[-2:]}"
+        team_pin = f"PIN-{selected_team_id[-2:]}"
         login = self._rpc(
             "exos_v2_team_access_login",
             {
                 "p_join_code": self.join_code,
-                "p_team_id": team_id,
+                "p_team_id": selected_team_id,
                 "p_pin": team_pin,
                 "p_device_id": self.captain_device,
             },
             admin=False,
         )
+        login_team_id = login.get("TeamID") if isinstance(login, dict) else None
+        self._team_access_diagnostics["team_id"] = login_team_id or selected_team_id
+        self._team_access_diagnostics["login_rpc_input"] = {
+            "p_event_id": self.event_id,
+            "p_team_id": login_team_id or selected_team_id,
+            "p_device_id": self.captain_device,
+            "used_team_pin_suffix": f"PIN-{(selected_team_id[-2:] if selected_team_id else 'NA')}",
+        }
+        self._team_access_diagnostics["login_rpc_response"] = login
         self.session_token = str(login.get("SessionToken", "")) if isinstance(login, dict) else ""
 
         login_ok = (
             isinstance(login, dict)
             and login.get("EventID") == self.event_id
-            and login.get("TeamID") == team_id
+            and login.get("TeamID") == (login_team_id or selected_team_id)
             and len(self.session_token) > 0
         )
 
+        self._team_access_diagnostics["restore_rpc_input"] = {
+            "p_session_token": self.session_token,
+            "p_device_id": self.captain_device,
+        }
         restore = self._rpc(
             "exos_v2_restore_team_access",
             {
@@ -423,11 +461,40 @@ class CoreV2RaceStagingRunner:
             },
             admin=False,
         )
+        self._team_access_diagnostics["restore_rpc_response"] = restore
+
         restore_ok = bool(
             isinstance(restore, dict)
             and restore.get("EventID") == self.event_id
-            and restore.get("TeamID") == team_id
+            and restore.get("TeamID") == self._team_access_diagnostics.get("team_id")
         )
+
+        credential_rows = self._get(
+            "team_access_credentials_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "team_id": f"eq.{login_team_id or selected_team_id}",
+                "select": "team_access_credential_id,event_id,team_id,credential_purpose,is_active,created_by,created_at,updated_at",
+            },
+        )
+        session_rows = self._get(
+            "team_access_sessions_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "team_id": f"eq.{login_team_id or selected_team_id}",
+                "select": "team_access_session_id,event_id,team_id,device_id,is_active,recovery_required,session_token,team_access_credential_id,updated_at,last_seen_at",
+                "order": "updated_at.desc",
+            },
+        )
+        self._team_access_diagnostics["stored_credential_row"] = credential_rows[0] if isinstance(credential_rows, list) and credential_rows else None
+        self._team_access_diagnostics["stored_session_row"] = session_rows[0] if isinstance(session_rows, list) and session_rows else None
+        if isinstance(session_rows, list) and session_rows and session_rows[0].get("team_access_session_id"):
+            self._team_access_diagnostics["team_access_session_id"] = session_rows[0].get("team_access_session_id")
+            self._team_access_diagnostics["team_id"] = session_rows[0].get("team_id") or self._team_access_diagnostics.get("team_id")
+        self._team_access_diagnostics["captain_participant"] = dict(self.captain_participant)
+
+        print("TEAM ACCESS DIAGNOSTICS:")
+        print(json.dumps(self._team_access_diagnostics, sort_keys=True))
 
         hijack_blocked = False
         try:
@@ -850,12 +917,15 @@ class CoreV2RaceStagingRunner:
             self._delete("submissions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
             self._delete("marketplace_transactions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
             self._delete("score_transactions_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
-            self._delete("reviews_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
             self._delete("activity_runtime_v2", {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{team_id}"})
 
         if self.submission_ids:
             self._delete(
                 "submission_evidence_v2",
+                {"submission_id": "in.(%s)" % ",".join(self.submission_ids)},
+            )
+            self._delete(
+                "reviews_v2",
                 {"submission_id": "in.(%s)" % ",".join(self.submission_ids)},
             )
 
