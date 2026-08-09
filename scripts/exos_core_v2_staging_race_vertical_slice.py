@@ -128,7 +128,7 @@ class CoreV2RaceStagingRunner:
 
     @staticmethod
     def _runner_version() -> str:
-        return "exos-core-v2-race-vertical-slice-v3"
+        return "exos-core-v2-race-vertical-slice-v4"
 
     @staticmethod
     def _coerce_bool(value: object) -> bool:
@@ -139,6 +139,10 @@ class CoreV2RaceStagingRunner:
         if isinstance(value, str):
             return value.lower() in {"true", "1", "yes", "y", "on"}
         return bool(value)
+
+    def _is_expected_lock_rejection(self, error: Exception, expected_message: str) -> bool:
+        text = str(error)
+        return "P0001" in text and expected_message.lower() in text.lower()
 
     def _is_reconnect_contract_ok(self, login: object, restore: object, session_row: object) -> bool:
         if not isinstance(login, dict) or not isinstance(restore, dict):
@@ -238,6 +242,7 @@ class CoreV2RaceStagingRunner:
         self._cleanup_steps = []
         self._error = None
         self.captain_participant = {}
+        self.ranking_metric = "time_ms + penalty_ms"
         self._team_access_diagnostics = {
             "event_id": None,
             "team_id": None,
@@ -1154,15 +1159,23 @@ class CoreV2RaceStagingRunner:
         self.gates["result_locking"] = self.gates["lock_persisted"]
 
         lock_mutation_rejected = False
+        expected_lock_message = "race result is locked and immutable until explicit unlock"
         try:
             self._patch(
                 "race_results_v2",
                 {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{self.team_ids[0]}", "activity_id": f"eq.{self.activity_ids[0]}", "checkpoint": "eq.Race Final"},
                 {"ranking_position": 99, "result_payload": {"verified": False}},
             )
-        except RuntimeError:
-            lock_mutation_rejected = True
+        except RuntimeError as err:
+            if self._is_expected_lock_rejection(err, expected_lock_message):
+                lock_mutation_rejected = True
+            else:
+                raise
         self.gates["locked_mutation_rejected"] = lock_mutation_rejected
+        if not lock_mutation_rejected:
+            raise RuntimeError(
+                "Expected lock rejection was not returned from post-lock result mutation"
+            )
 
         rankings = self._get(
             "race_results_v2",
@@ -1176,8 +1189,38 @@ class CoreV2RaceStagingRunner:
 
         ranking_rows = rankings if isinstance(rankings, list) else []
         self.gates["ranking_10_teams"] = bool(len(ranking_rows) == 10)
+        unique_teams = {
+            row.get("team_id") for row in ranking_rows
+            if isinstance(row, dict) and row.get("team_id")
+        }
+        self.gates["ranking_10_teams"] = self.gates["ranking_10_teams"] and len(unique_teams) == 10
+        ranking_positions = [
+            int(row.get("ranking_position"))
+            for row in ranking_rows
+            if isinstance(row, dict)
+            and row.get("ranking_position") is not None
+            and str(row.get("ranking_position")).isdigit()
+        ]
+        self.gates["ranking_10_teams"] = (
+            self.gates["ranking_10_teams"]
+            and len(ranking_positions) == 10
+            and sorted(ranking_positions) == list(range(1, 11))
+        )
 
-        expected_metric_rank: list[tuple[str | None, int]] = []
+        rankings_rerun = self._get(
+            "race_results_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "checkpoint": "eq.Race Final",
+                "select": "team_id,ranking_position,result_payload",
+                "order": "ranking_position.asc,team_id.asc",
+            },
+        )
+        rerank_rows = rankings_rerun if isinstance(rankings_rerun, list) else []
+        first_order = [row.get("team_id") for row in ranking_rows if isinstance(row, dict)]
+        second_order = [row.get("team_id") for row in rerank_rows if isinstance(row, dict)]
+        ranking_deterministic_order = first_order == second_order and len(first_order) == 10
+
         computed = []
         for row in ranking_rows:
             if not isinstance(row, dict):
@@ -1187,16 +1230,16 @@ class CoreV2RaceStagingRunner:
                 row.get("team_id"),
                 float(payload.get("time_ms", 0) or 0),
                 float(payload.get("penalty_ms", 0) or 0),
-                float(payload.get("bonus_credits", 0) or 0),
             ))
 
         if len(computed) == 10:
-            sorted_rows = sorted(computed, key=lambda item: (item[1] + item[2] - item[3], item[0] or ""))
+            self.ranking_metric = "time_ms + penalty_ms"
+            sorted_rows = sorted(computed, key=lambda item: (item[1] + item[2], item[0] or ""))
             expected_rank = {}
             current_position = 1
             previous_key = None
-            for idx, (team_id_value, metric_time, penalty_value, bonus_value) in enumerate(sorted_rows):
-                metric = metric_time + penalty_value - bonus_value
+            for idx, (team_id_value, metric_time, penalty_value) in enumerate(sorted_rows):
+                metric = metric_time + penalty_value
                 if idx and metric != previous_key:
                     current_position = idx + 1
                 expected_rank[team_id_value] = current_position
@@ -1210,37 +1253,26 @@ class CoreV2RaceStagingRunner:
             self.gates["ranking_deterministic"] = bool(all(
                 expected_rank.get(team_id) == position for team_id, position in observed
             ))
-            for team_id_value, expected_position in expected_metric_rank:
-                if team_id_value is None:
-                    continue
-                self._patch(
-                    "race_results_v2",
-                    {
-                        "event_id": f"eq.{self.event_id}",
-                        "team_id": f"eq.{team_id_value}",
-                        "activity_id": f"eq.{self.activity_ids[0]}",
-                        "checkpoint": "eq.Race Final",
-                    },
-                    {"ranking_position": expected_position},
-                )
-
             tie_metric_rows = sorted_rows
             ties_present = False
             for idx in range(1, len(tie_metric_rows)):
                 prev = tie_metric_rows[idx - 1]
                 curr = tie_metric_rows[idx]
-                if (prev[1] + prev[2] - prev[3]) == (curr[1] + curr[2] - curr[3]):
+                if (prev[1] + prev[2]) == (curr[1] + curr[2]):
                     ties_present = True
             if ties_present:
                 self.gates["tie_rule_deterministic"] = bool(all(
                     pair[0] <= pair_next[0]
                     for pair, pair_next in zip(sorted_rows, sorted_rows[1:])
-                    if (pair[1] + pair[2] - pair[3]) == (pair_next[1] + pair_next[2] - pair_next[3])
+                    if (pair[1] + pair[2]) == (pair_next[1] + pair_next[2])
                 ))
             else:
                 self.gates["tie_rule_deterministic"] = True
         else:
             self.gates["tie_rule_deterministic"] = False
+            ranking_deterministic_order = False
+
+        self.gates["ranking_10_teams"] = bool(self.gates["ranking_10_teams"] and ranking_deterministic_order)
 
         self.gates["final_ranking"] = bool(
             self.gates["ranking_10_teams"]
@@ -1411,6 +1443,8 @@ class CoreV2RaceStagingRunner:
         print(f"Bonus applied once: {'PASS' if self.gates['bonus_applied_once'] else 'FAIL'}")
         print(f"Lock persisted: {'PASS' if self.gates['lock_persisted'] else 'FAIL'}")
         print(f"Locked mutation rejected: {'PASS' if self.gates['locked_mutation_rejected'] else 'FAIL'}")
+        print(f"Result locking: {'PASS' if self.gates['result_locking'] else 'FAIL'}")
+        print(f"Ranking metric used: {self.ranking_metric}")
         print(f"10-team ranking produced: {'PASS' if self.gates['ranking_10_teams'] else 'FAIL'}")
         print(f"Ranking deterministic: {'PASS' if self.gates['ranking_deterministic'] else 'FAIL'}")
         print(f"Tie handling deterministic: {'PASS' if self.gates['tie_rule_deterministic'] else 'FAIL'}")

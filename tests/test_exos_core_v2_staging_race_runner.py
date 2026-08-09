@@ -225,3 +225,15 @@ def test_stale_activity_event_detector_detects_no_false_positive_from_rest_like_
     ).strip()
     findings = find_stale_activity_event_refs(source)
     assert len(findings) == 1
+
+
+def test_expected_lock_rejection_message_is_recognized() -> None:
+    runner = CoreV2RaceStagingRunner()
+    err = RuntimeError('HTTP 400 PATCH race_results_v2: {"code":"P0001","message":"Race result is locked and immutable until explicit unlock."}')
+    assert runner._is_expected_lock_rejection(err, "race result is locked and immutable until explicit unlock") is True
+
+
+def test_non_lock_error_is_not_treated_as_expected() -> None:
+    runner = CoreV2RaceStagingRunner()
+    err = RuntimeError('HTTP 400 PATCH race_results_v2: {"code":"23505","message":"duplicate key value violates unique constraint"}')
+    assert runner._is_expected_lock_rejection(err, "race result is locked and immutable until explicit unlock") is False
