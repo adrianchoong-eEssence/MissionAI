@@ -3,7 +3,9 @@ import json
 from pathlib import Path
 import uuid
 import html
+import os
 import streamlit as st
+from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 
 ASSET_ROOT=Path(__file__).resolve().parents[1]/"Assets"/"race_teams"
@@ -18,8 +20,31 @@ def _set_session(payload):
     st.session_state["race_captain"]=dict(payload);st.query_params["race"]="1"
     st.query_params["captain_session"]=payload.get("SessionToken","")
 
-def show_formula_race_captain():
-    runtime=get_runtime_database();device=_device_id();session=st.session_state.get("race_captain")
+
+def _is_staging_mode() -> bool:
+    return str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging"
+
+
+def _build_runtime(runtime_override=None):
+    runtime = runtime_override or get_runtime_database()
+    if not _is_staging_mode():
+        return runtime
+    return FormulaRaceCoreV2StagingAdapter(runtime)
+
+def show_formula_race_captain(runtime_override=None):
+    runtime = _build_runtime(runtime_override)
+    if _is_staging_mode() and not runtime.can_publish:
+        st.error("Core v2 staging runtime is unavailable.")
+        return
+    if _is_staging_mode() and hasattr(runtime, "_assert_no_legacy_or_sheet_calls"):
+        try:
+            runtime._assert_no_legacy_or_sheet_calls()
+        except RuntimeError as error:
+            st.error(str(error))
+            return
+    if _is_staging_mode():
+        st.caption("EXOS CORE V2 — STAGING")
+    device=_device_id();session=st.session_state.get("race_captain")
     token=str(st.query_params.get("captain_session",""))
     if not session and token:
         try:session=runtime.restore_formula_race_captain(token,device)
@@ -48,6 +73,13 @@ def show_formula_race_captain():
     try:workspace=runtime.formula_race_captain_workspace(session.get("SessionToken",""),device)
     except RuntimeDatabaseError as error:
         st.error(str(error));return
+    if _is_staging_mode() and hasattr(runtime, "get_staging_call_counts"):
+        runtime._assert_no_legacy_or_sheet_calls()
+        counts = runtime.get_staging_call_counts()
+        st.caption(
+            f"LEGACY_RUNTIME_CALLS = {counts['LEGACY_RUNTIME_CALLS']} | "
+            f"GOOGLE_SHEETS_RUNTIME_CALLS = {counts['GOOGLE_SHEETS_RUNTIME_CALLS']}"
+        )
     submissions=[
         row for row in (
             runtime.get_canonical_submissions(event_id) if runtime.can_publish else []

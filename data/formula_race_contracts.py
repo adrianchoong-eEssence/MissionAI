@@ -116,14 +116,18 @@ class LiveFormulaRaceProvider:
         except (TypeError, ValueError):
             return default
 
-    def snapshot(self, event_id: str = "") -> RaceSnapshot:
+    def snapshot(self, event_id: str = "", strict_core_v2: bool = False) -> RaceSnapshot:
         event = None
         if hasattr(self.db, "runtime") and getattr(self.db.runtime, "can_publish", False):
             try:
                 event = self.db.runtime.get_runtime_event(event_id)
             except Exception:
+                if strict_core_v2:
+                    raise RuntimeError("Core v2 runtime unavailable for event lookup.")
                 event = None
         if not event:
+            if strict_core_v2:
+                raise RuntimeError("Core v2 event lookup did not return an event.")
             event = self.db.get_event(event_id) or {}
         if not event:
             raise ValueError("Select a valid Formula R.A.C.E. event.")
@@ -132,8 +136,12 @@ class LiveFormulaRaceProvider:
             try:
                 raw_teams = self.db.runtime.get_runtime_teams(event_id)
             except Exception:
+                if strict_core_v2:
+                    raise RuntimeError("Core v2 runtime unavailable for team lookup.")
                 raw_teams = []
         if not raw_teams:
+            if strict_core_v2:
+                raise RuntimeError("Core v2 runtime unavailable for teams.")
             raw_teams = self.db.get_teams(event_id)
 
         submissions_raw = []
@@ -141,27 +149,49 @@ class LiveFormulaRaceProvider:
             try:
                 submissions_raw = self.db.runtime.get_canonical_submissions(event_id)
             except Exception:
+                if strict_core_v2:
+                    raise RuntimeError("Core v2 runtime unavailable for submissions.")
                 submissions_raw = []
-        if not submissions_raw and hasattr(self.db, "get_event_submissions"):
-            submissions_raw = self.db.get_event_submissions(event_id)
+        if not submissions_raw:
+            if strict_core_v2:
+                raise RuntimeError("Core v2 submissions not available.")
+            if hasattr(self.db, "get_event_submissions"):
+                submissions_raw = self.db.get_event_submissions(event_id)
 
         missions = []
         if hasattr(self.db, "runtime") and getattr(self.db.runtime, "can_publish", False):
             try:
                 missions = self.db.runtime.get_programme_hierarchy(event_id)
             except Exception:
+                if strict_core_v2:
+                    raise RuntimeError("Core v2 runtime unavailable for programme hierarchy.")
                 missions = []
-        if not missions and hasattr(self.db, "get_event_missions"):
-            missions = self.db.get_event_missions(event_id)
+        if not missions:
+            if strict_core_v2:
+                raise RuntimeError("Core v2 programme hierarchy not available.")
+            if hasattr(self.db, "get_event_missions"):
+                missions = self.db.get_event_missions(event_id)
 
-        state = self.db.get_event_state(event_id) or {}
-        control = self.db.get_runtime_control_state(event_id) or {}
+        if strict_core_v2:
+            if not hasattr(self.db, "get_formula_race_state"):
+                raise RuntimeError("Core v2 runtime state reader missing.")
+            state = self.db.runtime.get_formula_race_state(event_id) if hasattr(self.db.runtime, "get_formula_race_state") else {}
+            control = {
+                "CurrentStageStatus": "READY",
+                "Elapsed": "00:00",
+                "CurrentStageName": "Programme ready",
+            }
+        else:
+            state = self.db.get_event_state(event_id) or {}
+            control = self.db.get_runtime_control_state(event_id) or {}
         operations = {}
         if hasattr(self.db, "runtime") and getattr(self.db.runtime, "can_publish", False):
             try:
                 operations = self.db.runtime.get_formula_race_state(event_id) or {}
                 operations["Checkpoints"] = self.db.runtime.get_formula_race_checkpoints(event_id)
             except Exception: operations = {}
+            if strict_core_v2 and not operations:
+                raise RuntimeError("Core v2 race state unavailable.")
         report = {}
         captain_status = {}
         if self.db.runtime.can_publish:
@@ -176,6 +206,8 @@ class LiveFormulaRaceProvider:
                 }
             except Exception:
                 captain_status = {}
+            if strict_core_v2 and not report:
+                raise RuntimeError("Core v2 transaction report unavailable.")
         leaderboard = {str(row.get("TeamID", "")): row for row in report.get("Leaderboard", [])}
         balances = {
             str(row.get("team_id", row.get("TeamID", ""))): row

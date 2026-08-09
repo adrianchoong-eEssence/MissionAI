@@ -1,11 +1,73 @@
 """Client-promised Formula R.A.C.E. product shell."""
 from __future__ import annotations
 
+import os
 import streamlit as st
 
 from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRaceProvider, RaceSnapshot
+from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
+from data.runtime_database import get_runtime_database
 from data.control_runtime import ControlRuntime
 from engines.formula_race import BUILD_STATUSES,JUDGING_CATEGORIES,final_standings
+
+
+def _staging_runtime_enabled() -> bool:
+    return str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging"
+
+
+def _build_formula_race_runtime():
+    runtime = get_runtime_database()
+    if not _staging_runtime_enabled():
+        return runtime
+    return FormulaRaceCoreV2StagingAdapter(runtime)
+
+
+def _staging_banner() -> None:
+    if _staging_runtime_enabled():
+        st.caption("EXOS CORE V2 — STAGING")
+
+
+def _attach_runtime(db):
+    runtime = _build_formula_race_runtime()
+    if not _staging_runtime_enabled():
+        return db, runtime
+    # Strict staging mode to prevent silent fallback to legacy runtime paths.
+    if not getattr(runtime, "can_publish", False):
+        raise RuntimeError("Core v2 runtime not available for staging Formula R.A.C.E.")
+
+    class _FormulaRaceStagingDB:
+        def __init__(self, runtime):
+            self.runtime = runtime
+
+        def get_event(self, event_id):
+            return self.runtime.get_runtime_event(event_id)
+
+        def get_teams(self, event_id):
+            return self.runtime.get_runtime_teams(event_id)
+
+        def get_event_submissions(self, event_id):
+            return self.runtime.get_canonical_submissions(event_id)
+
+        def get_event_missions(self, event_id):
+            return self.runtime.get_programme_hierarchy(event_id)
+
+    return _FormulaRaceStagingDB(runtime), runtime
+
+
+def _assert_staging_runtime_health(runtime) -> None:
+    if not hasattr(runtime, "get_staging_call_counts"):
+        raise RuntimeError("Core v2 staging runtime is missing adapter counters.")
+    runtime._assert_no_legacy_or_sheet_calls()
+
+
+def _snapshot(db, event_id: str):
+    if db is None:
+        return DemoFormulaRaceProvider().snapshot(event_id or str(st.session_state.get("active_event_id", "")))
+
+    return LiveFormulaRaceProvider(db).snapshot(
+        event_id,
+        strict_core_v2=_staging_runtime_enabled(),
+    )
 
 
 NAV = ["Overview", "Live Programme", "Championship", "Teams", "Checkpoints", "Reviews", "Marketplace", "Race Map", "Control Centre"]
@@ -283,11 +345,28 @@ def control_centre(s, control=None):
 
 def show_formula_race(db=None, event_id=""):
     _css()
-    if db is None:
-        snapshot=DemoFormulaRaceProvider().snapshot(event_id or str(st.session_state.get("active_event_id","")))
-    else:
-        snapshot=LiveFormulaRaceProvider(db).snapshot(event_id)
-    control=ControlRuntime(db) if db is not None else None
+    _staging_banner()
+    try:
+        db, runtime = _attach_runtime(db)
+    except RuntimeError as error:
+        st.error(f"Runtime unavailable: {error}")
+        return
+    if db is not None and hasattr(db, "__dict__"):
+        db.runtime = runtime
+    try:
+        snapshot = _snapshot(db, event_id)
+        _assert_staging_runtime_health(runtime)
+    except RuntimeError as error:
+        st.error(f"Staging contract violation: {error}")
+        return
+
+    if _staging_runtime_enabled() and hasattr(runtime, "get_staging_call_counts"):
+        counts = runtime.get_staging_call_counts()
+        st.caption(
+            f"LEGACY_RUNTIME_CALLS = {counts['LEGACY_RUNTIME_CALLS']} | "
+            f"GOOGLE_SHEETS_RUNTIME_CALLS = {counts['GOOGLE_SHEETS_RUNTIME_CALLS']}"
+        )
+    control = ControlRuntime(db) if db is not None else None
     page=_top(snapshot); sub=st.session_state.get("race_subscreen","")
     if sub=="wallet": wallet(snapshot)
     elif sub=="gallery": gallery(snapshot)
