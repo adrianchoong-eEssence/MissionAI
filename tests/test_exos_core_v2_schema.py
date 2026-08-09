@@ -1,4 +1,10 @@
+import os
+import re
+
 from pathlib import Path
+from shutil import which
+
+import pytest
 
 ROOT = Path("supabase")
 SUPPORT = ROOT / "verification"
@@ -61,7 +67,7 @@ def test_core_v2_identity_contracts_present():
 
 def test_core_v2_scoring_mode_controls():
     lowered = MIGRATION.lower()
-    assert "create type if not exists public.exos_v2_scoring_mode" in lowered
+    assert "create type if not exists public.exos_v2_scoring_mode" not in lowered
     for mode in ("team_competitive", "enterprise", "non_scoring"):
         assert f"'{mode.upper()}'" in MIGRATION
 
@@ -100,3 +106,37 @@ def test_core_v2_schema_verification_exists():
     assert "required_extensions" in PRECHECK
     assert "orphan_submission" in POSTCHECK
     assert "rollback guard" in ROLLBACK_VERIFY.lower() or "v2_rollback_guard_present" in ROLLBACK_VERIFY
+
+
+def test_core_v2_schema_has_postgres_safe_type_creation():
+    lowered = MIGRATION.lower()
+    assert re.search(r"create\s+type\s+if\s+not\s+exists\s+public\.exos_v2_", lowered) is None
+    assert re.search(r"create\s+policy\s+if\s+not\s+exists", lowered) is None
+
+
+def test_core_v2_schema_enum_creation_is_guarded():
+    for enum_name in (
+        "exos_v2_activity_type",
+        "exos_v2_scoring_mode",
+        "exos_v2_submission_status",
+        "exos_v2_review_decision",
+        "exos_v2_build_status",
+    ):
+        assert f"select 1 from pg_type t" in MIGRATION
+        assert f"create type public.{enum_name}" in MIGRATION
+
+
+@pytest.mark.skipif(not os.getenv("POSTGRES_TEST_DSN") or not which("psql"), reason="POSTGRES_TEST_DSN/psql not available")
+def test_core_v2_schema_executes_clean_on_local_postgres():
+    import subprocess
+
+    dsn = os.environ["POSTGRES_TEST_DSN"]
+    proc = subprocess.run(
+        ["psql", dsn, "-v", "ON_ERROR_STOP=1", "-f", str(Path("supabase/020_exos_core_v2_schema.sql"))],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise AssertionError(f"Migration execution failed: {proc.stderr}")

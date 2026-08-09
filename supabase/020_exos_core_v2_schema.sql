@@ -33,46 +33,75 @@ create extension if not exists pgcrypto;
 
 create extension if not exists pg_trgm;
 
-create type if not exists public.exos_v2_activity_type as enum (
-    'STANDARD',
-    'MISSION',
-    'CHECKPOINT',
-    'REFLECTION',
-    'LOCATION',
-    'MARKETPLACE',
-    'BUILD',
-    'JUDGING',
-    'RACE',
-    'AI',
-    'CUSTOM'
-);
-
-create type if not exists public.exos_v2_scoring_mode as enum (
-    'TEAM_COMPETITIVE',
-    'ENTERPRISE',
-    'NON_SCORING'
-);
-
-create type if not exists public.exos_v2_submission_status as enum (
-    'PENDING',
-    'SUBMITTED',
-    'APPROVED',
-    'REJECTED',
-    'WITHDRAWN'
-);
-
-create type if not exists public.exos_v2_review_decision as enum (
-    'APPROVE',
-    'REJECT',
-    'PENDING'
-);
-
-create type if not exists public.exos_v2_build_status as enum (
-    'NOT_STARTED',
-    'IN_PROGRESS',
-    'BLOCKED',
-    'COMPLETED'
-);
+do $$
+begin
+    if not exists (
+        select 1 from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where n.nspname='public' and t.typname='exos_v2_activity_type'
+    ) then
+        create type public.exos_v2_activity_type as enum (
+            'STANDARD',
+            'MISSION',
+            'CHECKPOINT',
+            'REFLECTION',
+            'LOCATION',
+            'MARKETPLACE',
+            'BUILD',
+            'JUDGING',
+            'RACE',
+            'AI',
+            'CUSTOM'
+        );
+    end if;
+    if not exists (
+        select 1 from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where n.nspname='public' and t.typname='exos_v2_scoring_mode'
+    ) then
+        create type public.exos_v2_scoring_mode as enum (
+            'TEAM_COMPETITIVE',
+            'ENTERPRISE',
+            'NON_SCORING'
+        );
+    end if;
+    if not exists (
+        select 1 from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where n.nspname='public' and t.typname='exos_v2_submission_status'
+    ) then
+        create type public.exos_v2_submission_status as enum (
+            'PENDING',
+            'SUBMITTED',
+            'APPROVED',
+            'REJECTED',
+            'WITHDRAWN'
+        );
+    end if;
+    if not exists (
+        select 1 from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where n.nspname='public' and t.typname='exos_v2_review_decision'
+    ) then
+        create type public.exos_v2_review_decision as enum (
+            'APPROVE',
+            'REJECT',
+            'PENDING'
+        );
+    end if;
+    if not exists (
+        select 1 from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where n.nspname='public' and t.typname='exos_v2_build_status'
+    ) then
+        create type public.exos_v2_build_status as enum (
+            'NOT_STARTED',
+            'IN_PROGRESS',
+            'BLOCKED',
+            'COMPLETED'
+        );
+    end if;
+end $$;
 
 create table if not exists public.events_v2 (
     event_id text primary key,
@@ -470,10 +499,18 @@ declare
     t text;
 begin
     foreach t in array table_names loop
-        execute format(
-            'create policy if not exists %I on public.%I for all to service_role using (true) with check (true);',
-            t || '_sr_all_policy', t
-        );
+        if not exists (
+            select 1
+              from pg_policies p
+             where p.schemaname = 'public'
+               and p.tablename = t
+               and p.policyname = (t || '_sr_all_policy')
+        ) then
+            execute format(
+                'create policy %I on public.%I for all to service_role using (true) with check (true);',
+                t || '_sr_all_policy', t
+            );
+        end if;
     end loop;
 end $$;
 
@@ -532,9 +569,9 @@ create or replace function public.exos_v2_publish_event(
     p_scoring_mode public.exos_v2_scoring_mode default 'TEAM_COMPETITIVE',
     p_event_type text default 'STANDARD'
 )
-returns jsonb
+    returns jsonb
 language plpgsql security definer
-set search_path = public, extensions as $$
+set search_path = public as $$
 begin
     if nullif(trim(p_event_id),'') is null then
         raise exception 'Event ID is required';
@@ -583,10 +620,10 @@ create or replace function public.exos_v2_join_event_v2(
     p_participant_name text,
     p_device_id text,
     p_requested_team_id text default ''
-)
+) 
 returns jsonb
 language plpgsql security definer
-set search_path = public, extensions as $$
+set search_path = public as $$
 declare
     v_event public.events_v2%rowtype;
     v_normalized text;
