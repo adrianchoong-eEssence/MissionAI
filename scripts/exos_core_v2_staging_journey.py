@@ -145,6 +145,44 @@ class CoreV2JourneyRunner:
     def _rpc(self, name: str, payload: dict):
         return self._rest_request("POST", f"rpc/{name}", payload=payload, admin=True)
 
+    @staticmethod
+    def _to_in_list(values):
+        if not values:
+            return None
+        escaped = []
+        for value in values:
+            escaped_value = str(value).replace("\\", "\\\\").replace('"', '\\"')
+            escaped.append(f'"{escaped_value}"')
+        return "in.(" + ",".join(escaped) + ")"
+
+    def _fetch(self, table: str, query: dict):
+        return self._rest_request("GET", table, query=query, admin=True)
+
+    def _pluck(self, table: str, column: str, query: dict):
+        rows = self._fetch(table, query)
+        if not isinstance(rows, list):
+            return []
+        return [row.get(column) for row in rows if isinstance(row, dict) and row.get(column) is not None]
+
+    def _count(self, table: str, query: dict) -> int:
+        rows = self._fetch(table, query)
+        if isinstance(rows, list):
+            return len(rows)
+        return 0
+
+    def _delete_rows(self, table: str, query: dict, label: str = ""):
+        try:
+            self._rest_request("DELETE", table, query=query, admin=True)
+        except Exception as exc:
+            raise RuntimeError(f"delete failed for {label or table}: {exc}")
+
+    def _delete_by_ids(self, table: str, ids, id_column: str, label: str = ""):
+        in_clause = self._to_in_list(ids)
+        if not in_clause:
+            return
+        self._delete_rows(table, {id_column: in_clause}, label=label or f"{table}.{id_column}")
+
+
     def _set(self, key: str, value: bool) -> None:
         self.gates[key] = bool(value)
 
@@ -554,25 +592,125 @@ class CoreV2JourneyRunner:
 
     def cleanup(self) -> None:
         try:
-            self._rest_request("DELETE", "events_v2", query={"event_id": f"eq.{self.event_id}"}, admin=True)
-            # fallback verification for any event-scoped rows if a constrained project layout differs
-            for table in (
-                "score_transactions_v2",
-                "reviews_v2",
-                "submission_evidence_v2",
-                "submissions_v2",
-                "activity_runtime_v2",
-                "participant_sessions_v2",
-                "participants_v2",
-                "teams_v2",
-                "activities_v2",
+            # Resolve all IDs for deterministic dependency cleanup.
+            event_id = self.event_id
+
+            programme_ids = self._pluck("programmes_v2", "programme_id", {"event_id": f"eq.{self.event_id}", "select": "programme_id"})
+            module_ids = self._pluck(
                 "modules_v2",
-                "programmes_v2",
-            ):
-                self._rest_request("DELETE", table, query={"event_id": f"eq.{self.event_id}"}, admin=True)
-            self._set("cleanup", True)
-        except Exception:
+                "module_id",
+                {"programme_id": self._to_in_list(programme_ids) or "eq.none", "select": "module_id"},
+            )
+            activity_ids = self._pluck(
+                "activities_v2",
+                "activity_id",
+                {"module_id": self._to_in_list(module_ids) or "eq.none", "select": "activity_id"},
+            )
+            session_ids = self._pluck(
+                "participant_sessions_v2",
+                "participant_session_id",
+                {"event_id": f"eq.{self.event_id}", "select": "participant_session_id"},
+            )
+            submission_ids = self._pluck("submissions_v2", "submission_id", {"event_id": f"eq.{self.event_id}", "select": "submission_id"})
+            ai_job_ids = self._pluck("ai_jobs_v2", "ai_job_id", {"event_id": f"eq.{self.event_id}", "select": "ai_job_id"})
+
+            # Leaf cleanup by dependency (children first)
+            self._delete_by_ids("submission_evidence_v2", submission_ids, "submission_id", "submission_evidence_v2")
+            self._delete_rows(
+                "location_evidence_v2",
+                {"submission_id": self._to_in_list(submission_ids) or "eq.none"},
+                "location_evidence_v2 by submission_id",
+            )
+            self._delete_rows(
+                "location_evidence_v2",
+                {"participant_session_id": self._to_in_list(session_ids) or "eq.none"},
+                "location_evidence_v2 by participant_session_id",
+            )
+            self._delete_rows("ai_results_v2", {"ai_job_id": self._to_in_list(ai_job_ids) or "eq.none"}, "ai_results_v2")
+            self._delete_rows("reviews_v2", {"event_id": f"eq.{event_id}"}, "reviews_v2")
+            self._delete_rows("score_transactions_v2", {"event_id": f"eq.{event_id}"}, "score_transactions_v2")
+            self._delete_rows("credit_transactions_v2", {"event_id": f"eq.{event_id}"}, "credit_transactions_v2")
+            self._delete_rows("marketplace_transactions_v2", {"event_id": f"eq.{event_id}"}, "marketplace_transactions_v2")
+            self._delete_rows("build_status_v2", {"event_id": f"eq.{event_id}"}, "build_status_v2")
+            self._delete_rows("judging_scores_v2", {"event_id": f"eq.{event_id}"}, "judging_scores_v2")
+            self._delete_rows("race_results_v2", {"event_id": f"eq.{event_id}"}, "race_results_v2")
+            self._delete_rows("projector_state_v2", {"event_id": f"eq.{event_id}"}, "projector_state_v2")
+            self._delete_rows("location_checkpoints_v2", {"event_id": f"eq.{event_id}"}, "location_checkpoints_v2")
+            self._delete_rows("submissions_v2", {"submission_id": self._to_in_list(submission_ids) or "eq.none"}, "submissions_v2")
+            self._delete_rows("activity_runtime_v2", {"event_id": f"eq.{event_id}"}, "activity_runtime_v2")
+            self._delete_rows("participant_sessions_v2", {"event_id": f"eq.{event_id}"}, "participant_sessions_v2")
+            self._delete_rows("participants_v2", {"event_id": f"eq.{event_id}"}, "participants_v2")
+            self._delete_rows("teams_v2", {"event_id": f"eq.{event_id}"}, "teams_v2")
+            self._delete_rows("activities_v2", {"activity_id": self._to_in_list(activity_ids) or "eq.none"}, "activities_v2")
+            self._delete_rows("modules_v2", {"module_id": self._to_in_list(module_ids) or "eq.none"}, "modules_v2")
+            self._delete_rows("programmes_v2", {"programme_id": self._to_in_list(programme_ids) or "eq.none"}, "programmes_v2")
+            self._delete_rows("marketplace_items_v2", {"event_id": f"eq.{event_id}"}, "marketplace_items_v2")
+            self._delete_rows("ai_jobs_v2", {"event_id": f"eq.{event_id}"}, "ai_jobs_v2")
+            self._delete_rows("audit_log_v2", {"event_id": f"eq.{event_id}"}, "audit_log_v2")
+            self._delete_rows("events_v2", {"event_id": f"eq.{event_id}"}, "events_v2")
+
+            leftovers = self.verify_cleanup()
+            self._set("cleanup", all(v == 0 for v in leftovers.values()))
+            if not self.gates["cleanup"]:
+                self.log("Remaining UAT rows:", leftovers)
+        except Exception as exc:
+            self.log(f"[ERROR] cleanup failed: {exc}")
             self._set("cleanup", False)
+
+    def verify_cleanup(self) -> dict:
+        remaining = {}
+        event_filter = self.event_id
+        tables_by_event_id = {
+            "events_v2": "event_id",
+            "programmes_v2": "event_id",
+            "teams_v2": "event_id",
+            "participants_v2": "event_id",
+            "participant_sessions_v2": "event_id",
+            "activity_runtime_v2": "event_id",
+            "submissions_v2": "event_id",
+            "reviews_v2": "event_id",
+            "score_transactions_v2": "event_id",
+            "credit_transactions_v2": "event_id",
+            "marketplace_items_v2": "event_id",
+            "marketplace_transactions_v2": "event_id",
+            "build_status_v2": "event_id",
+            "judging_scores_v2": "event_id",
+            "race_results_v2": "event_id",
+            "projector_state_v2": "event_id",
+            "location_checkpoints_v2": "event_id",
+            "ai_jobs_v2": "event_id",
+            "ai_results_v2": "event_id",
+            "audit_log_v2": "event_id",
+        }
+
+        for table, column in tables_by_event_id.items():
+            remaining[f"{table}_event"] = self._count(
+                table, {column: f"eq.{event_filter}", "select": column}
+            )
+
+        # eventless children that depend on known child ids
+        submission_ids = self._pluck("submissions_v2", "submission_id", {"event_id": f"eq.{event_filter}", "select": "submission_id"})
+        session_ids = self._pluck("participant_sessions_v2", "participant_session_id", {"event_id": f"eq.{event_filter}", "select": "participant_session_id"})
+
+        remaining["submission_evidence_v2_submission"] = self._count(
+            "submission_evidence_v2", {"submission_id": self._to_in_list(submission_ids) or "eq.none", "select": "evidence_id"}
+        )
+        remaining["location_evidence_v2_reference"] = self._count(
+            "location_evidence_v2",
+            {"submission_id": self._to_in_list(submission_ids) or "eq.none", "select": "location_evidence_id"}
+        )
+        remaining["location_evidence_v2_sessions"] = self._count(
+            "location_evidence_v2",
+            {"participant_session_id": self._to_in_list(session_ids) or "eq.none", "select": "location_evidence_id"}
+        )
+
+        programme_ids = self._pluck("programmes_v2", "programme_id", {"event_id": f"eq.{event_filter}", "select": "programme_id"})
+        module_ids = self._pluck("modules_v2", "module_id", {"programme_id": self._to_in_list(programme_ids) or "eq.none", "select": "module_id"})
+        activity_ids = self._pluck("activities_v2", "activity_id", {"module_id": self._to_in_list(module_ids) or "eq.none", "select": "activity_id"})
+
+        remaining["modules_v2_for_event"] = len(module_ids)
+        remaining["activities_v2_for_event"] = len(activity_ids)
+        return remaining
 
     # ---------------------------------------------------------
     def print_result_matrix(self) -> None:
