@@ -142,6 +142,57 @@ class CoreV2JourneyRunner:
         except (URLError, TimeoutError) as exc:
             raise RuntimeError(f"Request failed for {method} {path}: {exc}")
 
+    def _rest_request_with_status(self, method: str, path: str, payload=None, query=None, admin=True):
+        base = self.supabase_url.rstrip("/")
+        url = f"{base}/rest/v1/{path.lstrip('/')}"
+        if query:
+            q = urlencode(query, doseq=True)
+            url = f"{url}?{q}"
+
+        headers = {
+            "apikey": self.service_key if admin else self.anon_key,
+            "Authorization": f"Bearer {self.service_key if admin else self.anon_key}",
+            "Accept": "application/json",
+        }
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+            if method.upper() in {"POST", "PATCH", "PUT"}:
+                headers["Prefer"] = "return=representation"
+        if method.upper() == "GET":
+            headers["Prefer"] = "count=exact"
+
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+
+        req = Request(url, method=method.upper(), headers=headers, data=data)
+        try:
+            with urlopen(req, timeout=45) as resp:
+                raw = resp.read().decode("utf-8")
+                payload_data = True
+                if raw:
+                    try:
+                        payload_data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        payload_data = raw
+                return resp.status, payload_data
+        except HTTPError as error:
+            body = ""
+            try:
+                body = error.read().decode("utf-8")
+            except Exception:
+                pass
+            return error.code, {
+                "error": {
+                    "status": error.code,
+                    "path": path,
+                    "method": method.upper(),
+                    "body": body or error.reason,
+                }
+            }
+        except (URLError, TimeoutError) as exc:
+            raise RuntimeError(f"Request failed for {method} {path}: {exc}")
+
     def _rpc(self, name: str, payload: dict):
         return self._rest_request("POST", f"rpc/{name}", payload=payload, admin=True)
 
@@ -182,6 +233,62 @@ class CoreV2JourneyRunner:
             return
         self._delete_rows(table, {id_column: in_clause}, label=label or f"{table}.{id_column}")
 
+    @staticmethod
+    def _fmt_filter(query: dict) -> str:
+        if not query:
+            return "<empty>"
+        parts = []
+        for key in sorted(query.keys()):
+            parts.append(f"{key}={query[key]}")
+        return ", ".join(parts)
+
+    def _delete_step(self, table: str, query: dict, label: str = "") -> tuple[dict, bool]:
+        step_label = label or table
+        query_filter = dict(query or {})
+        query_filter_repr = self._fmt_filter(query_filter)
+        matched_before = self._count(table, query_filter)
+
+        status, response = self._rest_request_with_status(
+            "DELETE", table, query=query_filter, admin=True
+        )
+        rows_remaining = self._count(table, query_filter)
+
+        failure_body = ""
+        failed = False
+        delete_result = "ok"
+
+        if status >= 400 or (isinstance(response, dict) and response.get("error")):
+            failed = True
+            delete_result = "failed"
+            failure_body = response.get("error", {}).get("body", "") if isinstance(response, dict) else str(response)
+        elif isinstance(response, list):
+            delete_result = f"deleted rows={len(response)}"
+        elif isinstance(response, bool):
+            delete_result = "ok (no payload)"
+        else:
+            delete_result = "ok"
+
+        result = {
+            "table": table,
+            "label": step_label,
+            "filter": query_filter_repr,
+            "rows_matched_before_delete": matched_before,
+            "delete_result": delete_result,
+            "rows_remaining_after_delete": rows_remaining,
+            "http_status": status,
+            "error_body": failure_body,
+        }
+        print(
+            "CLEANUP STEP | "
+            f"{result['table']} | {result['filter']} | "
+            f"before={result['rows_matched_before_delete']} | "
+            f"result={result['delete_result']} | "
+            f"after={result['rows_remaining_after_delete']} | "
+            f"status={result['http_status']}"
+        )
+        if failure_body:
+            print(f"CLEANUP STEP ERROR BODY | {failure_body}")
+        return result, failed
 
     def _set(self, key: str, value: bool) -> None:
         self.gates[key] = bool(value)
@@ -591,11 +698,18 @@ class CoreV2JourneyRunner:
         self._set("result_retrievable_after_close", has_submission and reviewed)
 
     def cleanup(self) -> None:
+        self._cleanup_steps = []
+        first_failed_step = None
         try:
             # Resolve all IDs for deterministic dependency cleanup.
             event_id = self.event_id
 
             programme_ids = self._pluck("programmes_v2", "programme_id", {"event_id": f"eq.{self.event_id}", "select": "programme_id"})
+            participant_ids = self._pluck(
+                "participants_v2",
+                "participant_id",
+                {"event_id": f"eq.{self.event_id}", "select": "participant_id"},
+            )
             module_ids = self._pluck(
                 "modules_v2",
                 "module_id",
@@ -614,40 +728,50 @@ class CoreV2JourneyRunner:
             submission_ids = self._pluck("submissions_v2", "submission_id", {"event_id": f"eq.{self.event_id}", "select": "submission_id"})
             ai_job_ids = self._pluck("ai_jobs_v2", "ai_job_id", {"event_id": f"eq.{self.event_id}", "select": "ai_job_id"})
 
-            # Leaf cleanup by dependency (children first)
-            self._delete_by_ids("submission_evidence_v2", submission_ids, "submission_id", "submission_evidence_v2")
-            self._delete_rows(
-                "location_evidence_v2",
-                {"submission_id": self._to_in_list(submission_ids) or "eq.none"},
-                "location_evidence_v2 by submission_id",
-            )
-            self._delete_rows(
-                "location_evidence_v2",
-                {"participant_session_id": self._to_in_list(session_ids) or "eq.none"},
-                "location_evidence_v2 by participant_session_id",
-            )
-            self._delete_rows("ai_results_v2", {"ai_job_id": self._to_in_list(ai_job_ids) or "eq.none"}, "ai_results_v2")
-            self._delete_rows("reviews_v2", {"event_id": f"eq.{event_id}"}, "reviews_v2")
-            self._delete_rows("score_transactions_v2", {"event_id": f"eq.{event_id}"}, "score_transactions_v2")
-            self._delete_rows("credit_transactions_v2", {"event_id": f"eq.{event_id}"}, "credit_transactions_v2")
-            self._delete_rows("marketplace_transactions_v2", {"event_id": f"eq.{event_id}"}, "marketplace_transactions_v2")
-            self._delete_rows("build_status_v2", {"event_id": f"eq.{event_id}"}, "build_status_v2")
-            self._delete_rows("judging_scores_v2", {"event_id": f"eq.{event_id}"}, "judging_scores_v2")
-            self._delete_rows("race_results_v2", {"event_id": f"eq.{event_id}"}, "race_results_v2")
-            self._delete_rows("projector_state_v2", {"event_id": f"eq.{event_id}"}, "projector_state_v2")
-            self._delete_rows("location_checkpoints_v2", {"event_id": f"eq.{event_id}"}, "location_checkpoints_v2")
-            self._delete_rows("submissions_v2", {"submission_id": self._to_in_list(submission_ids) or "eq.none"}, "submissions_v2")
-            self._delete_rows("activity_runtime_v2", {"event_id": f"eq.{event_id}"}, "activity_runtime_v2")
-            self._delete_rows("participant_sessions_v2", {"event_id": f"eq.{event_id}"}, "participant_sessions_v2")
-            self._delete_rows("participants_v2", {"event_id": f"eq.{event_id}"}, "participants_v2")
-            self._delete_rows("teams_v2", {"event_id": f"eq.{event_id}"}, "teams_v2")
-            self._delete_rows("activities_v2", {"activity_id": self._to_in_list(activity_ids) or "eq.none"}, "activities_v2")
-            self._delete_rows("modules_v2", {"module_id": self._to_in_list(module_ids) or "eq.none"}, "modules_v2")
-            self._delete_rows("programmes_v2", {"programme_id": self._to_in_list(programme_ids) or "eq.none"}, "programmes_v2")
-            self._delete_rows("marketplace_items_v2", {"event_id": f"eq.{event_id}"}, "marketplace_items_v2")
-            self._delete_rows("ai_jobs_v2", {"event_id": f"eq.{event_id}"}, "ai_jobs_v2")
-            self._delete_rows("audit_log_v2", {"event_id": f"eq.{event_id}"}, "audit_log_v2")
-            self._delete_rows("events_v2", {"event_id": f"eq.{event_id}"}, "events_v2")
+            print("CLEANUP TARGET UAT IDs")
+            print(f"EventID: {self.event_id}")
+            print(f"ProgrammeIDs: {programme_ids}")
+            print(f"ModuleIDs: {module_ids}")
+            print(f"ActivityIDs: {activity_ids}")
+            print(f"ParticipantIDs: {participant_ids}")
+            print(f"SessionIDs: {session_ids}")
+            print(f"SubmissionIDs: {submission_ids}")
+            print(f"AIJobIDs: {ai_job_ids}")
+
+            cleanup_sequence = [
+                ("submission_evidence_v2", {"submission_id": self._to_in_list(submission_ids) or "eq.none"}, "submission_evidence_v2"),
+                ("location_evidence_v2", {"submission_id": self._to_in_list(submission_ids) or "eq.none"}, "location_evidence_v2 by submission_id"),
+                ("location_evidence_v2", {"participant_session_id": self._to_in_list(session_ids) or "eq.none"}, "location_evidence_v2 by participant_session_id"),
+                ("ai_results_v2", {"ai_job_id": self._to_in_list(ai_job_ids) or "eq.none"}, "ai_results_v2"),
+                ("reviews_v2", {"event_id": f"eq.{event_id}"}, "reviews_v2"),
+                ("score_transactions_v2", {"event_id": f"eq.{event_id}"}, "score_transactions_v2"),
+                ("credit_transactions_v2", {"event_id": f"eq.{event_id}"}, "credit_transactions_v2"),
+                ("marketplace_transactions_v2", {"event_id": f"eq.{event_id}"}, "marketplace_transactions_v2"),
+                ("build_status_v2", {"event_id": f"eq.{event_id}"}, "build_status_v2"),
+                ("judging_scores_v2", {"event_id": f"eq.{event_id}"}, "judging_scores_v2"),
+                ("race_results_v2", {"event_id": f"eq.{event_id}"}, "race_results_v2"),
+                ("projector_state_v2", {"event_id": f"eq.{event_id}"}, "projector_state_v2"),
+                ("location_checkpoints_v2", {"event_id": f"eq.{event_id}"}, "location_checkpoints_v2"),
+                ("submissions_v2", {"submission_id": self._to_in_list(submission_ids) or "eq.none"}, "submissions_v2"),
+                ("activity_runtime_v2", {"event_id": f"eq.{event_id}"}, "activity_runtime_v2"),
+                ("participant_sessions_v2", {"event_id": f"eq.{event_id}"}, "participant_sessions_v2"),
+                ("participants_v2", {"event_id": f"eq.{event_id}"}, "participants_v2"),
+                ("teams_v2", {"event_id": f"eq.{event_id}"}, "teams_v2"),
+                ("activities_v2", {"activity_id": self._to_in_list(activity_ids) or "eq.none"}, "activities_v2"),
+                ("modules_v2", {"module_id": self._to_in_list(module_ids) or "eq.none"}, "modules_v2"),
+                ("programmes_v2", {"programme_id": self._to_in_list(programme_ids) or "eq.none"}, "programmes_v2"),
+                ("marketplace_items_v2", {"event_id": f"eq.{event_id}"}, "marketplace_items_v2"),
+                ("ai_jobs_v2", {"event_id": f"eq.{event_id}"}, "ai_jobs_v2"),
+                ("audit_log_v2", {"event_id": f"eq.{event_id}"}, "audit_log_v2"),
+                ("events_v2", {"event_id": f"eq.{event_id}"}, "events_v2"),
+            ]
+
+            for table, query, label in cleanup_sequence:
+                step_result, failed = self._delete_step(table, query, label)
+                self._cleanup_steps.append(step_result)
+                if failed:
+                    first_failed_step = step_result
+                    raise RuntimeError(f"delete failed for {label}")
 
             leftovers = self.verify_cleanup()
             self._set("cleanup", all(v == 0 for v in leftovers.values()))
@@ -656,6 +780,18 @@ class CoreV2JourneyRunner:
         except Exception as exc:
             self.log(f"[ERROR] cleanup failed: {exc}")
             self._set("cleanup", False)
+
+        if first_failed_step is not None:
+            print("\nFIRST FAILED CLEANUP STEP:")
+            print(f"TABLE: {first_failed_step['table']}")
+            print(f"FILTER: {first_failed_step['filter']}")
+            print(f"HTTP STATUS: {first_failed_step['http_status']}")
+            print(f"ERROR: {first_failed_step['error_body'] or '<none>'}")
+
+        print("\nREMAINING UAT ROWS BY TABLE")
+        leftovers = self.verify_cleanup()
+        for key, value in leftovers.items():
+            print(f"{key}: {value}")
 
     def verify_cleanup(self) -> dict:
         remaining = {}
