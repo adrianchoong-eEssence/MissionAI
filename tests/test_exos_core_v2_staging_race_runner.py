@@ -1,6 +1,7 @@
 import ast
 import importlib.util
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,3 +70,82 @@ def test_race_cleanup_does_not_filter_reviews_by_team_id() -> None:
             }
             assert "submission_id" in keys
             assert "team_id" not in keys
+
+
+def test_submit_and_review_uses_single_review_upsert() -> None:
+    source = (ROOT / "scripts" / "exos_core_v2_staging_race_vertical_slice.py").read_text()
+    ast_tree = ast.parse(source)
+
+    submit = next(
+        node
+        for node in ast.walk(ast_tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "submit_and_review"
+    )
+
+    submit_calls = [node for node in ast.walk(submit) if isinstance(node, ast.Call)]
+    has_review_upsert = False
+    has_direct_reviews_insert = False
+
+    for call in submit_calls:
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "_ensure_single_review":
+            has_review_upsert = True
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "_post":
+            if (
+                len(call.args) >= 1
+                and isinstance(call.args[0], ast.Constant)
+                and call.args[0].value == "reviews_v2"
+            ):
+                has_direct_reviews_insert = True
+
+    assert has_review_upsert is True
+    assert has_direct_reviews_insert is False
+
+
+def test_review_upsert_is_idempotent_in_submit_and_review_path() -> None:
+    runner = CoreV2RaceStagingRunner()
+    runner.checkpoint_rows = [{"activity_id": "CORE-V2-RACE-CP-01"}]
+    runner.captain_participant = {"team_id": "CORE-V2-RACE-T01"}
+
+    calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    def fake_get(table: str, query: dict):
+        if table == "activities_v2":
+            return [{"activity_id": "CORE-V2-RACE-CP-01"}]
+        if table == "reviews_v2":
+            calls.append((table, "GET", dict(query)))
+            return [{"review_id": "REV-1"}]
+        if table == "credit_transactions_v2":
+            calls.append((table, "GET", dict(query)))
+            return []
+        return []
+
+    def fake_post(table: str, payload: dict) -> list[dict]:
+        calls.append((table, "POST", dict(payload)))
+        if table == "submissions_v2":
+            return [{"submission_id": "SUB-1"}]
+        if table == "reviews_v2":
+            return [{"review_id": "REV-1"}]
+        return []
+
+    def fake_patch(table: str, query: dict, payload: dict) -> list[dict]:
+        calls.append((table, "PATCH", dict(payload)))
+        return [{"review_id": "REV-1"}]
+
+    def fake_rpc(name: str, payload: dict, admin: bool = True) -> str:
+        calls.append((name, "RPC", dict(payload)))
+        return "txn-1"
+
+    runner._get = fake_get  # type: ignore[method-assign]
+    runner._post = fake_post  # type: ignore[method-assign]
+    runner._patch = fake_patch  # type: ignore[method-assign]
+    runner._rpc = fake_rpc  # type: ignore[method-assign]
+
+    runner.submit_and_review()
+
+    review_post_calls = [call for call in calls if call[:2] == ("reviews_v2", "POST")]
+    review_patch_calls = [call for call in calls if call[:2] == ("reviews_v2", "PATCH")]
+    score_calls = [call for call in calls if call[0] == "exos_v2_ledger_score"]
+
+    assert len(review_post_calls) == 0
+    assert len(review_patch_calls) == 1
+    assert len(score_calls) == 1

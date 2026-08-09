@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import uuid
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
@@ -51,6 +52,21 @@ def _in_filter(values: list[str]) -> str:
 
 
 class CoreV2RaceStagingRunner:
+    @staticmethod
+    def _git_commit_short() -> str:
+        try:
+            return subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=os.path.dirname(__file__),
+                stderr=subprocess.DEVNULL,
+            ).decode().strip()
+        except Exception:
+            return "unknown"
+
+    @staticmethod
+    def _runner_version() -> str:
+        return "exos-core-v2-race-vertical-slice"
+
     @staticmethod
     def _coerce_bool(value: object) -> bool:
         if isinstance(value, bool):
@@ -167,6 +183,8 @@ class CoreV2RaceStagingRunner:
 
         # Canonical operation audit for this runner.
         self.operation_audit = []
+        self.runner_commit = self._git_commit_short()
+        self.runner_version = self._runner_version()
 
     @staticmethod
     def _now_iso() -> str:
@@ -253,6 +271,29 @@ class CoreV2RaceStagingRunner:
             for row in (reviews or [])
             if isinstance(row, dict) and row.get("review_id")
         ]
+
+    def _emit_runner_identity(self) -> None:
+        print(f"RUNNER COMMIT: {self.runner_commit}")
+        print(f"RUNNER VERSION: {self.runner_version}")
+
+    def _check_stale_activity_event_refs(self) -> None:
+        script_path = os.path.join(os.path.dirname(__file__), os.path.basename(__file__))
+        with open(script_path, "r", encoding="utf-8") as stream:
+            lines = stream.read().splitlines()
+        self.stale_activity_event_id_refs = [
+            line.strip()
+            for line in lines
+            if "activities_v2" in line and ".event_id" in line
+        ]
+        print(
+            "STALE_ACTIVITY_EVENT_PATHS: "
+            + str(len(self.stale_activity_event_id_refs))
+        )
+        if self.stale_activity_event_id_refs:
+            raise RuntimeError(
+                "Stale activities_v2 event_id references detected: "
+                + ", ".join(self.stale_activity_event_id_refs)
+            )
 
     def _require_env(self) -> None:
         if self.env != "staging":
@@ -360,10 +401,45 @@ class CoreV2RaceStagingRunner:
         self._record_operation("query", table, "GET", query)
         return self._request("GET", table, query=query, admin=True)
 
+    def _patch(self, table: str, query: dict, payload: dict):
+        self._record_operation("update", table, "PATCH", payload)
+        return self._request("PATCH", table, query=query, payload=payload, admin=True)
+
     def _delete(self, table: str, query: dict):
         self._cleanup_steps.append((table, dict(query)))
         self._record_operation("delete", table, "DELETE", query)
         return self._request("DELETE", table, query=query, admin=True)
+
+    def _ensure_single_review(self, event_id: str, submission_id: str, payload: dict) -> list[dict]:
+        reviewer = str(payload.get("reviewer", "")).strip()
+        if not reviewer:
+            raise RuntimeError("Reviewer required for review write")
+
+        existing = self._get(
+            "reviews_v2",
+            {
+                "event_id": f"eq.{event_id}",
+                "submission_id": f"eq.{submission_id}",
+                "reviewer": f"eq.{reviewer}",
+                "select": "review_id",
+                "limit": "1",
+            },
+        )
+        if isinstance(existing, list) and existing and existing[0].get("review_id"):
+            review_id = existing[0]["review_id"]
+            updated = self._patch(
+                "reviews_v2",
+                {"review_id": f"eq.{review_id}"},
+                {
+                    "decision": payload.get("decision"),
+                    "score_points": payload.get("score_points"),
+                    "rationale": payload.get("rationale"),
+                },
+            )
+            if isinstance(updated, list) and updated:
+                return updated
+
+        return self._post("reviews_v2", payload)
 
     def check_connectivity(self) -> None:
         rows = self._get("events_v2", {"select": "event_id", "limit": "1"})
@@ -728,8 +804,9 @@ class CoreV2RaceStagingRunner:
         if not self.gates["checkpoint_submission"]:
             raise RuntimeError("Checkpoint submission failed")
 
-        review = self._post(
-            "reviews_v2",
+        review = self._ensure_single_review(
+            self.event_id,
+            submission_id,
             {
                 "event_id": self.event_id,
                 "submission_id": submission_id,
@@ -737,18 +814,6 @@ class CoreV2RaceStagingRunner:
                 "decision": "APPROVE",
                 "score_points": 10,
                 "rationale": "Looks good",
-            },
-        )
-
-        repeat_review = self._post(
-            "reviews_v2",
-            {
-                "event_id": self.event_id,
-                "submission_id": submission_id,
-                "reviewer": "QA Reviewer",
-                "decision": "APPROVE",
-                "score_points": 10,
-                "rationale": "Repeat",
             },
         )
 
@@ -768,7 +833,6 @@ class CoreV2RaceStagingRunner:
 
         self.gates["facilitator_review"] = bool(
             isinstance(review, list)
-            and isinstance(repeat_review, list)
             and isinstance(score_txn, str)
         )
 
@@ -1177,6 +1241,8 @@ class CoreV2RaceStagingRunner:
             print("FORMULA R.A.C.E. ON EXOS CORE V2: READY")
 
     def run(self) -> int:
+        self._emit_runner_identity()
+        self._check_stale_activity_event_refs()
         self._require_env()
         try:
             self.check_connectivity()
