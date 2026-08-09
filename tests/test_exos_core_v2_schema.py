@@ -132,6 +132,34 @@ def test_core_v2_sql_artifacts_do_not_contain_bad_dollar_quotes():
             )
 
 
+def test_core_v2_sql_no_wrapper_or_unqualified_pgcrypto_calls():
+    files = (
+        Path("supabase/020_exos_core_v2_schema.sql"),
+        Path("supabase/021_exos_core_v2_pgcrypto_fix.sql"),
+    )
+    disallowed_wrappers = re.compile(r"create\s+or\s+replace\s+function\s+extensions\.(?:digest|gen_random_uuid|crypt|gen_salt)\s*\(", re.IGNORECASE)
+    disallowed_public_calls = re.compile(r"\bpublic\.(?:digest|gen_random_uuid|crypt|gen_salt)\s*\(", re.IGNORECASE)
+    unqualified_calls = re.compile(r"(?<![\w\.])(?:digest|gen_random_uuid|crypt|gen_salt)\s*\(", re.IGNORECASE)
+
+    for path in files:
+        text = path.read_text()
+        assert disallowed_wrappers.search(text) is None, (
+            f"{path}: wrapper/proxy function definition detected for pgcrypto call"
+        )
+        assert disallowed_public_calls.search(text) is None, (
+            f"{path}: public-schema pgcrypto call detected"
+        )
+        cleaned = re.sub(
+            r"(--.*?$|/\*.*?\*/|'[^']*'|\"[^\"]*\")",
+            "",
+            text,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        for match in unqualified_calls.finditer(cleaned):
+            token = match.group(0).lower()
+            raise AssertionError(f"{path}: unqualified pgcrypto call detected: {token} at {match.start()}")
+
+
 def test_core_v2_join_event_v2_session_insert_sql_shape():
     pattern = re.compile(
         r"create or replace function public\.exos_v2_join_event_v2[\s\S]*?"

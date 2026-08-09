@@ -1,12 +1,8 @@
-begin;
+BEGIN;
 
-create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
 
-do $$
-declare
-    v_miss_extensions_digest boolean := false;
-    v_miss_extensions_gen_random_uuid boolean := false;
+DO $guard$
 begin
     if not exists (
         select 1
@@ -15,7 +11,7 @@ begin
          where n.nspname = 'extensions'
            and p.proname = 'digest'
     ) then
-        v_miss_extensions_digest := true;
+        raise exception 'pgcrypto digest() is not available in extensions schema.';
     end if;
 
     if not exists (
@@ -25,57 +21,21 @@ begin
          where n.nspname = 'extensions'
            and p.proname = 'gen_random_uuid'
     ) then
-        v_miss_extensions_gen_random_uuid := true;
+        raise exception 'pgcrypto gen_random_uuid() is not available in extensions schema.';
     end if;
+end;
+$guard$;
 
-    if v_miss_extensions_digest then
-        if exists (
-            select 1
-              from pg_proc p
-              join pg_namespace n on n.oid = p.pronamespace
-             where n.nspname = 'public'
-               and p.proname = 'digest'
-        ) then
-            create or replace function extensions.digest(data text, typ text)
-            returns bytea
-            language sql
-            as $$
-                select public.digest(data, typ);
-            $$;
-        else
-            raise exception 'pgcrypto digest() unavailable in extensions or public schema';
-        end if;
-    end if;
-
-    if v_miss_extensions_gen_random_uuid then
-        if exists (
-            select 1
-              from pg_proc p
-              join pg_namespace n on n.oid = p.pronamespace
-             where n.nspname = 'public'
-               and p.proname = 'gen_random_uuid'
-        ) then
-            create or replace function extensions.gen_random_uuid()
-            returns uuid
-            language sql
-            as $$
-                select public.gen_random_uuid();
-            $$;
-        else
-            raise exception 'pgcrypto gen_random_uuid() unavailable in extensions or public schema';
-        end if;
-    end if;
-end $$;
-
-create or replace function public.exos_v2_join_event_v2(
+CREATE OR REPLACE FUNCTION public.exos_v2_join_event_v2(
     p_join_code text,
     p_participant_name text,
     p_device_id text,
     p_requested_team_id text default ''
 ) 
-returns jsonb
-language plpgsql security definer
-set search_path = public as $$
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public
+AS $function$
 declare
     v_event public.events_v2%rowtype;
     v_normalized text;
@@ -204,9 +164,9 @@ begin
 
     return public.exos_v2_identity_payload(v_event.event_id, v_participant.participant_id);
 end;
-$$;
+$function$;
 
-create or replace function public.exos_v2_ledger_score(
+CREATE OR REPLACE FUNCTION public.exos_v2_ledger_score(
     p_event_id text,
     p_team_id text,
     p_submission_id uuid,
@@ -215,9 +175,10 @@ create or replace function public.exos_v2_ledger_score(
     p_scoring_mode public.exos_v2_scoring_mode default 'TEAM_COMPETITIVE',
     p_idempotency_key text default ''
 )
-returns uuid
-language plpgsql security definer
-set search_path=public as $$
+RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=public
+AS $function$
 declare
     v_tx_id uuid;
     v_key text;
@@ -246,22 +207,22 @@ begin
       returning score_transaction_id into v_tx_id;
     return v_tx_id;
 end;
-$$;
+$function$;
 
-alter table public.participants_v2 alter column participant_id set default extensions.gen_random_uuid();
-alter table public.participant_sessions_v2 alter column participant_session_id set default extensions.gen_random_uuid();
-alter table public.participant_sessions_v2 alter column session_token set default extensions.gen_random_uuid();
-alter table public.activity_runtime_v2 alter column runtime_id set default extensions.gen_random_uuid();
-alter table public.submissions_v2 alter column submission_id set default extensions.gen_random_uuid();
-alter table public.submission_evidence_v2 alter column evidence_id set default extensions.gen_random_uuid();
-alter table public.reviews_v2 alter column review_id set default extensions.gen_random_uuid();
-alter table public.score_transactions_v2 alter column score_transaction_id set default extensions.gen_random_uuid();
-alter table public.credit_transactions_v2 alter column credit_transaction_id set default extensions.gen_random_uuid();
-alter table public.marketplace_transactions_v2 alter column marketplace_transaction_id set default extensions.gen_random_uuid();
-alter table public.judging_scores_v2 alter column judging_score_id set default extensions.gen_random_uuid();
-alter table public.race_results_v2 alter column race_result_id set default extensions.gen_random_uuid();
-alter table public.location_evidence_v2 alter column location_evidence_id set default extensions.gen_random_uuid();
-alter table public.ai_jobs_v2 alter column ai_job_id set default extensions.gen_random_uuid();
-alter table public.ai_results_v2 alter column ai_result_id set default extensions.gen_random_uuid();
+ALTER TABLE public.participants_v2 ALTER COLUMN participant_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.participant_sessions_v2 ALTER COLUMN participant_session_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.participant_sessions_v2 ALTER COLUMN session_token SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.activity_runtime_v2 ALTER COLUMN runtime_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.submissions_v2 ALTER COLUMN submission_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.submission_evidence_v2 ALTER COLUMN evidence_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.reviews_v2 ALTER COLUMN review_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.score_transactions_v2 ALTER COLUMN score_transaction_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.credit_transactions_v2 ALTER COLUMN credit_transaction_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.marketplace_transactions_v2 ALTER COLUMN marketplace_transaction_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.judging_scores_v2 ALTER COLUMN judging_score_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.race_results_v2 ALTER COLUMN race_result_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.location_evidence_v2 ALTER COLUMN location_evidence_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.ai_jobs_v2 ALTER COLUMN ai_job_id SET DEFAULT extensions.gen_random_uuid();
+ALTER TABLE public.ai_results_v2 ALTER COLUMN ai_result_id SET DEFAULT extensions.gen_random_uuid();
 
-commit;
+COMMIT;
