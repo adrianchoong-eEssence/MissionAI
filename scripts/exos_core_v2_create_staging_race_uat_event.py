@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create a persistent Formula R.A.C.E. Core v2 staging UAT event.
 
-This script is staging-only and does not clean up created rows.
+This script is staging-only and does not clean up created rows by default.
 It prints and persists the generated Team PINs to a one-time local text report
 for Adrian UAT testing.
 """
@@ -20,6 +20,20 @@ from urllib.request import Request, urlopen
 KNOWN_PROD_HOSTS = {
     "bqsbkdfzqyiodivhyxnq.supabase.co",
 }
+
+CREATOR = "exos_core_v2_create_staging_race_uat_event"
+LAST_RUN_STATE = Path("/tmp") / "exos_core_v2_race_uat_last_run.json"
+EVENT_NAME = "L'OREAL FORMULA R.A.C.E. DEMO"
+
+
+class RequestFailure(RuntimeError):
+    def __init__(self, method: str, table: str, status: int | None, body: str, payload: object):
+        super().__init__(body)
+        self.method = method
+        self.table = table
+        self.status = status
+        self.body = body
+        self.payload_keys = sorted(payload.keys()) if isinstance(payload, dict) else []
 
 
 def _now_id() -> str:
@@ -41,14 +55,8 @@ def _require_staging_env() -> tuple[str, str, str, str]:
         raise RuntimeError("Refusing to run: EXOS_ENV must be exactly 'staging'.")
 
     supabase_url = str(os.getenv("SUPABASE_URL", "")).strip().rstrip("/")
-    anon_key = str(
-        os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
-        or os.getenv("SUPABASE_ANON_KEY", "")
-    ).strip()
-    service_key = str(
-        os.getenv("SUPABASE_SECRET_KEY", "")
-        or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-    ).strip()
+    anon_key = str(os.getenv("SUPABASE_PUBLISHABLE_KEY", "") or os.getenv("SUPABASE_ANON_KEY", "")).strip()
+    service_key = str(os.getenv("SUPABASE_SECRET_KEY", "") or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")).strip()
 
     if not supabase_url:
         raise RuntimeError("SUPABASE_URL is required.")
@@ -63,13 +71,37 @@ def _require_staging_env() -> tuple[str, str, str, str]:
     return supabase_url, anon_key, service_key, host
 
 
+def _read_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as handle:
+        try:
+            data = json.loads(handle.read() or "{}")
+        except json.JSONDecodeError:
+            return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _clear_state() -> None:
+    try:
+        LAST_RUN_STATE.unlink(missing_ok=True)  # type: ignore[arg-type]
+    except TypeError:
+        if LAST_RUN_STATE.exists():
+            LAST_RUN_STATE.unlink()
+
+
 class RestClient:
     def __init__(self, url: str, anon_key: str, service_key: str):
         self.url = url
         self.anon_key = anon_key
         self.service_key = service_key
 
-    def request(self, method: str, path: str, payload=None, query=None, admin=True):
+    def request(self, method: str, path: str, payload=None, query=None, table=None, admin=True):
         endpoint = f"{self.url}/rest/v1/{path.lstrip('/')}"
         if query:
             endpoint = f"{endpoint}?{urlencode(query, doseq=True, safe='(),.*')}"
@@ -96,18 +128,123 @@ class RestClient:
                 return json.loads(raw)
         except HTTPError as error:
             body = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {error.code} {method} {path}: {body or error.reason}")
-        except (URLError, TimeoutError) as exc:  # pragma: no cover - network-only failure path
-            raise RuntimeError(f"Request failed for {method} {path}: {exc}")
+            raise RequestFailure(method.upper(), table or path, error.code, body or error.reason, payload)
+        except (URLError, TimeoutError) as exc:
+            raise RequestFailure(method.upper(), table or path, None, f"Request failed for {method} {path}: {exc}", payload)
 
     def get(self, path: str, query=None):
         return self.request("GET", path, query=query, admin=True)
 
     def post(self, path: str, payload=None):
-        return self.request("POST", path, payload=payload, admin=True)
+        return self.request("POST", path, payload=payload, table=path, admin=True)
+
+    def patch(self, path: str, payload=None, query=None):
+        return self.request("PATCH", path, payload=payload, query=query, table=path, admin=True)
+
+    def delete(self, path: str, query=None):
+        return self.request("DELETE", path, payload=None, query=query, table=path, admin=True)
 
     def rpc(self, name: str, payload):
-        return self.post(f"rpc/{name}", payload=payload)
+        return self.request("POST", f"rpc/{name}", payload=payload, table=name, admin=True)
+
+
+def _collect_ids(rows: object) -> list[str]:
+    if not isinstance(rows, list):
+        return []
+    ids: list[str] = []
+    for row in rows:
+        if isinstance(row, dict):
+            if "programme_id" in row and isinstance(row["programme_id"], str):
+                ids.append(row["programme_id"])
+            if "module_id" in row and isinstance(row["module_id"], str):
+                ids.append(row["module_id"])
+    return ids
+
+
+def _cleanup_incomplete_event_if_needed(
+    client: RestClient,
+    event_id: str,
+    team_count_min: int,
+    item_count_min: int,
+) -> bool:
+    events = client.get("events_v2", {"event_id": f"eq.{event_id}", "select": "event_id,event_name"})
+    if not isinstance(events, list) or not events:
+        return False
+
+    programmes = client.get("programmes_v2", {"event_id": f"eq.{event_id}", "select": "programme_id"})
+    if not isinstance(programmes, list) or len(programmes) < 1:
+        client.delete("events_v2", {"event_id": f"eq.{event_id}"})
+        return True
+    programme_ids = _collect_ids(programmes)
+    if not programme_ids:
+        client.delete("events_v2", {"event_id": f"eq.{event_id}"})
+        return True
+
+    modules = []
+    for programme_id in programme_ids:
+        modules.extend(client.get("modules_v2", {"programme_id": f"eq.{programme_id}", "select": "module_id"}) or [])
+    module_ids = _collect_ids(modules)
+    if not module_ids:
+        client.delete("events_v2", {"event_id": f"eq.{event_id}"})
+        return True
+
+    activities = []
+    for module_id in module_ids:
+        activities.extend(client.get("activities_v2", {"module_id": f"eq.{module_id}", "select": "activity_id"}) or [])
+    if not isinstance(activities, list) or len(activities) < 4:
+        client.delete("events_v2", {"event_id": f"eq.{event_id}"})
+        return True
+
+    teams = client.get("teams_v2", {"event_id": f"eq.{event_id}", "select": "team_id"})
+    if not isinstance(teams, list) or len(teams) < team_count_min:
+        client.delete("events_v2", {"event_id": f"eq.{event_id}"})
+        return True
+
+    items = client.get("marketplace_items_v2", {"event_id": f"eq.{event_id}", "select": "item_id"})
+    if not isinstance(items, list) or len(items) < item_count_min:
+        client.delete("events_v2", {"event_id": f"eq.{event_id}"})
+        return True
+
+    return False
+
+
+def _cleanup_stale_previous_run(client: RestClient, team_count_min: int, item_count_min: int) -> None:
+    state = _read_json(LAST_RUN_STATE)
+    previous_event_id = str(state.get("event_id", "")).strip()
+    previous_join_code = str(state.get("join_code", "")).strip()
+    if not previous_event_id or not previous_join_code:
+        return
+    event_rows = client.get(
+        "events_v2",
+        {"event_id": f"eq.{previous_event_id}", "join_code": f"eq.{previous_join_code}", "select": "event_name"},
+    )
+    if not isinstance(event_rows, list) or not event_rows:
+        return
+    if _cleanup_incomplete_event_if_needed(client, previous_event_id, team_count_min, item_count_min):
+        print(f"Removed incomplete stale run from local state: {previous_event_id}")
+
+
+def _safe_run_step(step: str, table: str, action):
+    try:
+        return action()
+    except RequestFailure as exc:
+        print(f"FAILED STEP: {step}")
+        print(f"TABLE/RPC: {table}")
+        print(f"PAYLOAD KEYS: {', '.join(exc.payload_keys)}")
+        print(f"HTTP STATUS: {exc.status}")
+        print(f"ERROR: {exc.body}")
+        raise
+
+
+def _persist_pin_report(pin_file: Path, now: str, event_id: str, join_code: str, pin_report: list[dict[str, str]]) -> None:
+    with pin_file.open("w", encoding="utf-8") as handle:
+        handle.write(f"{EVENT_NAME} PIN REPORT\n")
+        handle.write(f"Generated At: {now}\n")
+        handle.write(f"EventID: {event_id}\n")
+        handle.write(f"Join Code: {join_code}\n")
+        handle.write("\nTeam PINs (ONE-TIME local reference only):\n")
+        for row in pin_report:
+            handle.write(f"{row['team_id']}\t{row['team_name']}\t{row['pin']}\n")
 
 
 def create_uat_race_event() -> dict:
@@ -123,46 +260,64 @@ def create_uat_race_event() -> dict:
     activity_ids = [f"CORE-V2-RACE-UAT-CP-{idx:02d}-{run_id}" for idx in range(1, 5)]
     now = _now_iso()
 
+    _write_json(
+        LAST_RUN_STATE,
+        {
+            "event_id": event_id,
+            "join_code": join_code,
+            "run_id": run_id,
+            "event_name": EVENT_NAME,
+            "created_at": now,
+            "creator": CREATOR,
+        },
+    )
+
     client = RestClient(supabase_url, anon_key, service_key)
 
-    teams = [
-        {
-            "team_id": team_id,
-            "team_name": f"CORE-V2-RACE-UAT Team {idx:02d}",
-            "country": f"Country {idx:02d}",
-            "team_flag": f"FLAG-{idx:02d}",
+    try:
+        _cleanup_stale_previous_run(client, team_count_min=10, item_count_min=2)
+
+        teams = [
+            {
+                "team_id": team_id,
+                "team_name": f"CORE-V2-RACE-UAT Team {idx:02d}",
+                "country": f"Country {idx:02d}",
+                "team_flag": f"FLAG-{idx:02d}",
+            }
+            for idx, team_id in enumerate(team_ids, start=1)
+        ]
+
+        publish_payload = {
+            "p_event_id": event_id,
+            "p_join_code": join_code,
+            "p_event_name": EVENT_NAME,
+            "p_teams": teams,
+            "p_scoring_mode": "TEAM_COMPETITIVE",
+            "p_event_type": "RACE",
         }
-        for idx, team_id in enumerate(team_ids, start=1)
-    ]
+        published = _safe_run_step(
+            "RPC:exos_v2_publish_event",
+            "exos_v2_publish_event",
+            lambda: client.rpc("exos_v2_publish_event", publish_payload),
+        )
+        if not isinstance(published, dict) or published.get("EventID") != event_id:
+            raise RuntimeError("Failed to publish persistent UAT event via exos_v2_publish_event.")
 
-    publish_payload = {
-        "p_event_id": event_id,
-        "p_join_code": join_code,
-        "p_event_name": "Formula R.A.C.E. Core v2 UAT",
-        "p_teams": teams,
-        "p_scoring_mode": "TEAM_COMPETITIVE",
-        "p_event_type": "RACE",
-    }
-
-    published = client.rpc("exos_v2_publish_event", publish_payload)
-    if not isinstance(published, dict) or published.get("EventID") != event_id:
-        raise RuntimeError("Failed to publish persistent UAT event via exos_v2_publish_event.")
-
-    # Programme + module + checkpoints.
-    client.post(
-        "programmes_v2",
-        {
+        programme_payload = {
             "programme_id": programme_id,
             "event_id": event_id,
             "programme_name": "Formula R.A.C.E. UAT Programme",
             "programme_type": "Formula R.A.C.E.",
             "module_count": 1,
             "is_active": True,
-        },
-    )
-    client.post(
-        "modules_v2",
-        {
+        }
+        _safe_run_step(
+            "POST",
+            "programmes_v2",
+            lambda payload=programme_payload: client.post("programmes_v2", payload),
+        )
+
+        module_payload = {
             "module_id": module_id,
             "programme_id": programme_id,
             "module_name": "Formula R.A.C.E. Checkpoints",
@@ -170,16 +325,15 @@ def create_uat_race_event() -> dict:
             "activity_sequence": 1,
             "scoring_mode": "TEAM_COMPETITIVE",
             "is_active": True,
-            "module_order": 1,
-            "created_at": now,
-            "updated_at": now,
-        },
-    )
+        }
+        _safe_run_step(
+            "POST",
+            "modules_v2",
+            lambda payload=module_payload: client.post("modules_v2", payload),
+        )
 
-    for idx, activity_id in enumerate(activity_ids, start=1):
-        client.post(
-            "activities_v2",
-            {
+        for idx, activity_id in enumerate(activity_ids, start=1):
+            activity_payload = {
                 "activity_id": activity_id,
                 "programme_id": programme_id,
                 "module_id": module_id,
@@ -195,82 +349,105 @@ def create_uat_race_event() -> dict:
                     "credits": 2,
                 },
                 "is_active": True,
-            },
-        )
+            }
+            _safe_run_step(
+                "POST",
+                "activities_v2",
+                lambda payload=activity_payload: client.post("activities_v2", payload),
+            )
 
-    # Seed sensible TEST marketplace values.
-    items = [
-        {
-            "event_id": event_id,
-            "item_id": f"CORE-V2-RACE-UAT-ITEM-{run_id}-01",
-            "item_name": "Carbon Fibre Kit",
-            "item_type": "MATERIAL",
-            "unit_cost_credits": 20,
-            "stock_limit": 40,
-            "is_active": True,
-        },
-        {
-            "event_id": event_id,
-            "item_id": f"CORE-V2-RACE-UAT-ITEM-{run_id}-02",
-            "item_name": "Axle Upgrade",
-            "item_type": "UPGRADE",
-            "unit_cost_credits": 35,
-            "stock_limit": 25,
-            "is_active": True,
-        },
-    ]
-    for item in items:
-        client.post("marketplace_items_v2", item)
-
-    # Configure team access PINs and keep a local plaintext report.
-    pin_report = []
-    for idx, team_id in enumerate(team_ids, start=1):
-        pin = f"PIN-{idx:02d}"
-        pin_set = client.rpc(
-            "exos_v2_set_team_access_pin",
+        items = [
             {
+                "event_id": event_id,
+                "item_id": f"CORE-V2-RACE-UAT-ITEM-{run_id}-01",
+                "item_name": "Carbon Fibre Kit",
+                "item_type": "MATERIAL",
+                "unit_cost_credits": 20,
+                "stock_limit": 40,
+                "is_active": True,
+            },
+            {
+                "event_id": event_id,
+                "item_id": f"CORE-V2-RACE-UAT-ITEM-{run_id}-02",
+                "item_name": "Axle Upgrade",
+                "item_type": "UPGRADE",
+                "unit_cost_credits": 35,
+                "stock_limit": 25,
+                "is_active": True,
+            },
+        ]
+        for item in items:
+            _safe_run_step(
+                "POST",
+                "marketplace_items_v2",
+                lambda payload=item: client.post("marketplace_items_v2", payload),
+            )
+
+        pin_report = []
+        for idx, team_id in enumerate(team_ids, start=1):
+            pin = f"PIN-{idx:02d}"
+            pin_payload = {
                 "p_event_id": event_id,
                 "p_team_id": team_id,
                 "p_pin": pin,
                 "p_actor": "UAT bootstrap",
-            },
+            }
+            pin_set = _safe_run_step(
+                "RPC:exos_v2_set_team_access_pin",
+                "exos_v2_set_team_access_pin",
+                lambda payload=pin_payload: client.rpc("exos_v2_set_team_access_pin", payload),
+            )
+            if not isinstance(pin_set, dict) or not pin_set.get("Configured"):
+                raise RuntimeError(f"Failed to configure PIN for {team_id}")
+            pin_report.append({"team_id": team_id, "team_name": f"CORE-V2-RACE-UAT Team {idx:02d}", "pin": pin})
+
+        _safe_run_step(
+            "PATCH",
+            "events_v2",
+            lambda: client.patch(
+                "events_v2",
+                {"event_payload": {"creator": CREATOR, "run_id": run_id}},
+                {"event_id": f"eq.{event_id}"},
+            ),
         )
-        if not isinstance(pin_set, dict) or not pin_set.get("Configured"):
-            raise RuntimeError(f"Failed to configure PIN for {team_id}")
-        pin_report.append({"team_id": team_id, "team_name": f"CORE-V2-RACE-UAT Team {idx:02d}", "pin": pin})
 
-    result = {
-        "event_id": event_id,
-        "join_code": join_code,
-        "programme_id": programme_id,
-        "module_id": module_id,
-        "activity_ids": activity_ids,
-        "team_ids": team_ids,
-        "marketplace_items": [item["item_name"] for item in items],
-        "pin_rows": pin_report,
-    }
+        result = {
+            "event_id": event_id,
+            "join_code": join_code,
+            "programme_id": programme_id,
+            "module_id": module_id,
+            "activity_ids": activity_ids,
+            "team_ids": team_ids,
+            "marketplace_items": [item["item_name"] for item in items],
+            "pin_rows": pin_report,
+        }
 
-    output_dir = Path("/tmp")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    pin_file = output_dir / f"{event_id}_race_uat_pins.txt"
-    with pin_file.open("w", encoding="utf-8") as handle:
-        handle.write(f"Formula R.A.C.E. Core v2 UAT PIN REPORT\n")
-        handle.write(f"Generated At: {now}\n")
-        handle.write(f"EventID: {event_id}\n")
-        handle.write(f"Join Code: {join_code}\n")
-        handle.write("\nTeam PINs (ONE-TIME local reference only):\n")
-        for row in pin_report:
-            handle.write(f"{row['team_id']}\t{row['team_name']}\t{row['pin']}\n")
+        output_dir = Path("/tmp")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        pin_file = output_dir / f"{event_id}_race_uat_pins.txt"
+        _persist_pin_report(pin_file, now, event_id, join_code, pin_report)
 
-    print(f"EventID: {event_id}")
-    print(f"Join Code: {join_code}")
-    print(f"PIN report local path: {pin_file}")
-    print("10 Team PINs configured.")
+        _clear_state()
+        print(f"EventID: {event_id}")
+        print(f"Join Code: {join_code}")
+        print(f"PIN report local path: {pin_file}")
+        print("10 Team PINs configured.")
 
-    return {
-        **result,
-        "pin_report_path": str(pin_file),
-    }
+        return {**result, "pin_report_path": str(pin_file)}
+
+    except RequestFailure:
+        if _cleanup_incomplete_event_if_needed(client, event_id, team_count_min=10, item_count_min=2):
+            print("Cleaned incomplete UAT event before exiting. Please rerun command to recreate it.")
+        raise
+    except RuntimeError as exc:
+        print("FAILED STEP: CREATION")
+        print("TABLE/RPC: CREATOR")
+        print("PAYLOAD KEYS: ")
+        print("HTTP STATUS: n/a")
+        print(f"ERROR: {exc}")
+        if _cleanup_incomplete_event_if_needed(client, event_id, team_count_min=10, item_count_min=2):
+            print("Cleaned incomplete UAT event before exiting. Please rerun command to recreate it.")
+        raise
 
 
 def main() -> None:
