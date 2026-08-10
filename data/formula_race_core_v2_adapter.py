@@ -121,6 +121,8 @@ class FormulaRaceCoreV2StagingAdapter:
         self.runtime = runtime
         self.legacy_runtime_calls = 0
         self.google_sheets_runtime_calls = 0
+        self.last_login_rpc_response: dict[str, Any] | None = None
+        self.last_login_normalized_token: str = ""
 
     @staticmethod
     def _is_google_sheets_like(path: str) -> bool:
@@ -538,16 +540,28 @@ class FormulaRaceCoreV2StagingAdapter:
                 "p_device_id": str(device_id).strip(),
             },
         ) or {}
-        token = str(row.get("SessionToken", row.get("session_token", ""))).strip()
+        self.last_login_rpc_response = dict(row) if isinstance(row, dict) else {}
+        raw_token = row.get("SessionToken", row.get("session_token", ""))
+        raw_token = "" if raw_token is None else str(raw_token).strip()
+        token = raw_token
+        self.last_login_normalized_token = token
+        event_id = str(row.get("EventID", row.get("event_id", ""))).strip()
+        team_id = str(row.get("TeamID", row.get("team_id", ""))).strip()
+        ambiguous = bool(row.get("Ambiguous", False))
+        recovery_required = bool(row.get("RecoveryRequired", False))
         if not _is_valid_uuid(token):
             raise RuntimeError("Invalid captain session token returned by login service.")
+        if not event_id or not team_id:
+            raise RuntimeError("Login response missing EventID or TeamID.")
+        if ambiguous or recovery_required:
+            raise RuntimeError("Login response indicates unresolved captain identity state.")
         return {
             "SessionToken": token,
-            "EventID": str(row.get("EventID", row.get("event_id", ""))),
-            "TeamID": str(row.get("TeamID", row.get("team_id", ""))),
+            "EventID": event_id,
+            "TeamID": team_id,
             "TeamName": str(row.get("TeamName", row.get("team_name", ""))),
-            "RecoveryRequired": bool(row.get("RecoveryRequired", False)),
-            "Ambiguous": bool(row.get("Ambiguous", False)),
+            "RecoveryRequired": recovery_required,
+            "Ambiguous": ambiguous,
         }
 
     def restore_formula_race_captain(self, session_token: str, device_id: str) -> dict[str, Any]:

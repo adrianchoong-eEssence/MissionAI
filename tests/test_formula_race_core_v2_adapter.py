@@ -131,3 +131,58 @@ def test_race_adapter_captain_workspace_returns_default_build_status_when_empty(
     assert build_status.get("status") == "NOT_STARTED"
     assert build_status.get("Status") == "NOT_STARTED"
     assert int(build_status.get("Progress", 0)) == 0
+
+
+def test_formula_race_captain_login_returns_normalized_valid_token():
+    class FakeRuntime:
+        is_configured = True
+        can_publish = True
+        url = "https://staging.exos-core-v2.example.com"
+
+        def __init__(self):
+            self.payload = None
+
+        def _request(self, method, path, payload=None, query=None, admin=True):
+            self.payload = payload
+            return {
+                "Ambiguous": False,
+                "EventID": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F",
+                "RecoveryRequired": False,
+                "SessionToken": "0e7f8f56-9f16-4dbf-a8bb-2d2f1f5d7f3c",
+                "TeamID": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F",
+            }
+
+    runtime = FakeRuntime()
+    with _staging_env():
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+        payload = adapter.formula_race_captain_login("RACE4CF0CE", "CORE-V2-RACE-UAT-T01-4CF0CEAF5F", "PIN-01", "DEVICE-01")
+
+    assert adapter.last_login_rpc_response is not None
+    assert "SessionToken" in adapter.last_login_rpc_response
+    assert payload["SessionToken"] == "0e7f8f56-9f16-4dbf-a8bb-2d2f1f5d7f3c"
+    assert payload["EventID"] == "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
+    assert payload["TeamID"] == "CORE-V2-RACE-UAT-T01-4CF0CEAF5F"
+
+
+def test_formula_race_captain_login_rejects_missing_session_token():
+    class FakeRuntime:
+        is_configured = True
+        can_publish = True
+        url = "https://staging.exos-core-v2.example.com"
+
+        def _request(self, method, path, payload=None, query=None, admin=True):
+            return {
+                "Ambiguous": False,
+                "EventID": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F",
+                "RecoveryRequired": False,
+                "SessionToken": None,
+                "TeamID": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F",
+            }
+
+    with _staging_env():
+        adapter = FormulaRaceCoreV2StagingAdapter(FakeRuntime())
+        try:
+            adapter.formula_race_captain_login("RACE4CF0CE", "CORE-V2-RACE-UAT-T01-4CF0CEAF5F", "PIN-01", "DEVICE-01")
+            assert False, "Expected missing token to raise"
+        except Exception:
+            pass

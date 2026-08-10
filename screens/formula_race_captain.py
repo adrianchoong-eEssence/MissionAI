@@ -28,15 +28,24 @@ def _normalise_session_token(value) -> str:
     return raw if _is_valid_session_token(raw) else ""
 
 
+def _is_valid_login_payload(payload: dict[str, object]) -> bool:
+    event_id = str(payload.get("EventID", "")).strip()
+    team_id = str(payload.get("TeamID", "")).strip()
+    token = _normalise_session_token(payload.get("SessionToken"))
+    return bool(event_id and team_id and token and not bool(payload.get("Ambiguous")) and not bool(payload.get("RecoveryRequired")))
+
+
 def _device_id():
     value=str(st.session_state.get("race_captain_device_id", ""))
     if not value:value=str(uuid.uuid4());st.session_state["race_captain_device_id"]=value
     return value
 
 def _set_session(payload):
+    if not _is_valid_login_payload(payload or {}):
+        raise RuntimeError("Invalid captain login payload.")
     st.session_state["race_captain"]=dict(payload);st.query_params["race"]="1"
-    token = str(payload.get("SessionToken","")).strip()
-    if _is_valid_session_token(token):
+    token = _normalise_session_token(payload.get("SessionToken"))
+    if token:
         st.query_params["captain_session"]=token
     else:
         try:
@@ -75,7 +84,12 @@ def show_formula_race_captain(runtime_override=None):
     if not session and token:
         try:session=runtime.restore_formula_race_captain(token,device)
         except RuntimeDatabaseError:session=None
-        if session:_set_session(session)
+        if session:
+            try:
+                _set_session(session)
+            except RuntimeError:
+                st.session_state.pop("race_captain",None)
+                session=None
     if not session:
         st.title("Formula R.A.C.E.");st.caption("TEAM CAPTAIN ACCESS · ONE TEAM · ONE ACTIVE DEVICE")
         join_code=st.text_input("Event Join Code").upper().strip()
@@ -93,10 +107,9 @@ def show_formula_race_captain(runtime_override=None):
                 return
             try:payload=runtime.formula_race_captain_login(join_code,team_map[team],pin,device)
             except RuntimeDatabaseError as error:st.error(str(error));return
-            if not _is_valid_session_token(payload.get("SessionToken","")):
-                st.error("Login did not return a valid session token.")
-                return
-            _set_session(payload);st.rerun()
+            try:_set_session(payload)
+            except RuntimeError as error:st.error(str(error));return
+            st.rerun()
             return
     event_id=str(session.get("EventID",""));team_id=str(session.get("TeamID",""));name=str(session.get("TeamName",""))
     try:workspace=runtime.formula_race_captain_workspace(session.get("SessionToken",""),device)
