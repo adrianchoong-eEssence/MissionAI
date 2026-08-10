@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import uuid
 import html
 import os
@@ -59,6 +61,11 @@ def _clear_captain_query_param() -> None:
         st.query_params["captain_session"] = ""
 
 
+def _clear_captain_state() -> None:
+    st.session_state.pop("race_captain", None)
+    _clear_captain_query_param()
+
+
 def _write_captain_session_param(token: str) -> None:
     normalised = _normalise_session_token(token)
     if not normalised:
@@ -69,7 +76,12 @@ def _write_captain_session_param(token: str) -> None:
 
 def _device_id():
     value=str(st.session_state.get("race_captain_device_id", ""))
-    if not value:value=str(uuid.uuid4());st.session_state["race_captain_device_id"]=value
+    if not _is_valid_session_token(value):
+        value=_normalise_session_token(st.query_params.get("captain_device", ""))
+    if not value:
+        value=str(uuid.uuid4())
+    st.session_state["race_captain_device_id"]=value
+    st.query_params["captain_device"]=value
     return value
 
 def _set_session(payload):
@@ -112,7 +124,7 @@ def show_formula_race_captain(runtime_override=None):
             return
     if _staging_mode():
         st.caption("EXOS CORE V2 — STAGING")
-    device=_device_id();session=st.session_state.get("race_captain")
+    device=_device_id();raw_session=st.session_state.get("race_captain")
     token=str(st.query_params.get("captain_session",""))
     if _staging_mode():
         raw_token = token
@@ -124,18 +136,20 @@ def show_formula_race_captain(runtime_override=None):
             f"is_none: {is_none} | is_literal_none: {is_literal_none} | is_valid_uuid: {bool(normalised)}"
         )
     token=_normalise_session_token(token)
-    session = _normalise_session_payload(session)
-    if not session and token:
+    session = _normalise_session_payload(raw_session)
+    if raw_session is not None and not session:
+        _clear_captain_state()
+    if "captain_session" in st.query_params and not token:
         _clear_captain_query_param()
     if not session and token:
         try:session=runtime.restore_formula_race_captain(token,device)
-        except RuntimeDatabaseError:session=None
+        except (RuntimeDatabaseError,RuntimeError):
+            _clear_captain_state();session=None
         if session:
             try:
                 _set_session(session)
             except RuntimeError:
-                st.session_state.pop("race_captain", None)
-                _clear_captain_query_param()
+                _clear_captain_state()
                 session=None
     if not session:
         st.title("Formula R.A.C.E.");st.caption("TEAM CAPTAIN ACCESS · ONE TEAM · ONE ACTIVE DEVICE")
@@ -155,8 +169,12 @@ def show_formula_race_captain(runtime_override=None):
                     )
                     payload["TeamName"]=str(recovery.get("TeamName", ""))
                     _set_session(payload)
-                except RuntimeDatabaseError as error:st.error(str(error));return
-                except RuntimeError as error:st.error(str(error));return
+                except RuntimeDatabaseError as error:
+                    st.error("The team PIN is incorrect." if "invalid pin" in str(error).lower() else "Team access recovery could not be completed.")
+                    return
+                except RuntimeError:
+                    st.error("Team access recovery could not be completed.")
+                    return
                 st.rerun()
                 return
             return
@@ -174,7 +192,12 @@ def show_formula_race_captain(runtime_override=None):
                 st.error("Choose a team before continuing.")
                 return
             try:payload=runtime.formula_race_captain_login(join_code,team_map[team],pin,device)
-            except RuntimeDatabaseError as error:st.error(str(error));return
+            except RuntimeDatabaseError as error:
+                st.error("The team PIN is incorrect." if "invalid pin" in str(error).lower() else "Team access could not be opened.")
+                return
+            except RuntimeError:
+                st.error("Team access could not be opened.")
+                return
             if bool(payload.get("RecoveryRequired",False)):
                 st.session_state["race_captain_recovery"]={
                     "JoinCode":join_code,
@@ -194,13 +217,16 @@ def show_formula_race_captain(runtime_override=None):
     if not _normalise_session_payload(session):
         if _is_staging_mode():
             print("CAPTAIN UUID TRACE | session_state_rejected_before_workspace | rpc/table: race_captain_session | field: SessionToken | is_none: True | is_literal_none: True | is_valid_uuid: False")
-        st.session_state.pop("race_captain",None)
-        _clear_captain_query_param()
+        _clear_captain_state()
         return
     try:
         workspace=runtime.formula_race_captain_workspace(str(session.get("SessionToken","")),device)
     except RuntimeDatabaseError as error:
         st.error(str(error));return
+    except RuntimeError:
+        _clear_captain_state()
+        st.info("Your captain session has expired. Sign in again.")
+        return
     if _is_staging_mode() and hasattr(runtime, "get_staging_call_counts"):
         runtime._assert_no_legacy_or_sheet_calls()
         counts = runtime.get_staging_call_counts()
@@ -245,6 +271,7 @@ def show_formula_race_captain(runtime_override=None):
                             checkpoint.get("ActivityID",""),answer,storage_reference,str(uuid.uuid4()))
                         st.success("Proof submitted for facilitator review.");st.rerun()
                     except RuntimeDatabaseError as error:st.error(str(error))
+                    except RuntimeError as error:st.error(str(error))
     with two:
         st.caption("All wallet and marketplace activity is scoped to this EventID and TeamID.")
         items=list(workspace.get("Marketplace",[]))
@@ -260,6 +287,7 @@ def show_formula_race_captain(runtime_override=None):
                         labels[selected].get("ItemID",""),quantity,str(uuid.uuid4()))
                     st.success(f"Purchase confirmed. Balance: {result.get('Balance',0)} Credits");st.rerun()
                 except RuntimeDatabaseError as error:st.error(str(error))
+                except RuntimeError as error:st.error(str(error))
         purchases=list(workspace.get("Purchases",[]))
         if purchases:st.dataframe(purchases,width="stretch",hide_index=True)
     with three:
@@ -269,5 +297,5 @@ def show_formula_race_captain(runtime_override=None):
             st.info("No submissions yet for this team.")
     if st.button("Log out",width="stretch"):
         try:runtime.formula_race_captain_logout(session.get("SessionToken",""),device)
-        except RuntimeDatabaseError:pass
-        st.session_state.pop("race_captain",None);st.query_params.clear();st.rerun()
+        except (RuntimeDatabaseError,RuntimeError):pass
+        _clear_captain_state();st.query_params.clear();st.rerun()

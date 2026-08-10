@@ -35,14 +35,36 @@ def test_set_session_only_writes_valid_captain_token():
     captain_screen.st = fake_st
     try:
         payload = {"SessionToken": "None", "EventID": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F", "TeamID": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F", "TeamName": "SANDSTORM"}
-        captain_screen._set_session(payload)
-        assert fake_st.session_state.get("race_captain") == payload
+        try:
+            captain_screen._set_session(payload)
+            assert False, "Invalid Captain token must not create a session."
+        except RuntimeError:
+            pass
+        assert fake_st.session_state.get("race_captain") is None
         assert "captain_session" not in fake_st.query_params
 
         valid = str(uuid.uuid4())
         captain_screen._set_session({**payload, "SessionToken": valid})
         assert fake_st.query_params.get("captain_session") == valid
         assert fake_st.query_params.get("race") == "1"
+    finally:
+        captain_screen.st = original_st
+
+
+def test_device_id_persists_across_a_new_streamlit_session():
+    class _FakeStreamlit:
+        def __init__(self):
+            self.session_state = {}
+            self.query_params = _Query()
+
+    fake_st = _FakeStreamlit()
+    original_st = captain_screen.st
+    captain_screen.st = fake_st
+    try:
+        first = captain_screen._device_id()
+        assert fake_st.query_params["captain_device"] == first
+        fake_st.session_state.clear()
+        assert captain_screen._device_id() == first
     finally:
         captain_screen.st = original_st
 

@@ -126,7 +126,9 @@ def test_race_adapter_captain_workspace_returns_default_build_status_when_empty(
         ]
         adapter = FormulaRaceCoreV2StagingAdapter(runtime)
 
-    workspace = adapter.formula_race_captain_workspace("TOKEN-ONE", "DEVICE-ONE")
+    workspace = adapter.formula_race_captain_workspace(
+        "123e4567-e89b-12d3-a456-426614174000", "DEVICE-ONE"
+    )
     build_status = workspace.get("BuildStatus", {})
     assert build_status.get("status") == "NOT_STARTED"
     assert build_status.get("Status") == "NOT_STARTED"

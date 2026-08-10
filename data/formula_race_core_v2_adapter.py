@@ -864,8 +864,48 @@ class FormulaRaceCoreV2StagingAdapter:
                 "limit": "1",
             },
         )
-        participant_id = str(rows[0].get("participant_id")) if rows else None
+        participant_id = _normalise_uuid_value(
+            rows[0].get("participant_id") if rows else None
+        )
         _trace_uuid_context("_team_participant.response", "participants_v2", "participant_id", participant_id)
+        return participant_id or None
+
+    def _ensure_team_participant(self, event_id: str, team_id: str) -> str:
+        participant_id = self._team_participant(event_id, team_id)
+        if participant_id:
+            return participant_id
+
+        event_rows = self._get(
+            "events_v2",
+            {
+                "event_id": f"eq.{str(event_id).strip()}",
+                "select": "join_code",
+                "limit": "1",
+            },
+        )
+        join_code = str(event_rows[0].get("join_code", "")).strip() if event_rows else ""
+        if not join_code:
+            raise RuntimeError("Captain participant identity could not be established.")
+
+        identity = self._rpc(
+            "exos_v2_join_event_v2",
+            {
+                "p_join_code": join_code,
+                "p_participant_name": f"Captain {team_id}",
+                "p_device_id": f"TEAM_ACCESS:{team_id}",
+                "p_requested_team_id": str(team_id).strip(),
+            },
+            admin=False,
+        ) or {}
+        participant_id = _normalise_uuid_value(
+            identity.get("ParticipantID", identity.get("participant_id", ""))
+        )
+        if (
+            not participant_id
+            or str(identity.get("TeamID", identity.get("team_id", ""))).strip()
+            != str(team_id).strip()
+        ):
+            raise RuntimeError("Captain participant identity could not be established.")
         return participant_id
 
     def _submission_event_id(self, submission_id: str) -> str:
@@ -892,15 +932,8 @@ class FormulaRaceCoreV2StagingAdapter:
         token = _require_uuid(session_token, "session_token")
         _trace_uuid_context("formula_race_submit_checkpoint.request", "team_access_sessions_v2", "session_token", token)
         _trace_uuid_context("formula_race_submit_checkpoint.request", "team_access_sessions_v2", "device_id", device_id)
-        _trace_uuid_context("formula_race_submit_checkpoint.request", "submissions_v2", "activity_id", activity_id)
-        activity_filter = _optional_uuid_filter(
-            "activity_id",
-            activity_id,
-            required=True,
-            step="formula_race_submit_checkpoint.request.activity",
-            rpc_or_table="submissions_v2",
-        )
-        if not activity_filter:
+        activity_id = str(activity_id or "").strip()
+        if not activity_id:
             raise RuntimeError("Invalid activity id.")
         rows = self._get(
             "team_access_sessions_v2",
@@ -916,9 +949,7 @@ class FormulaRaceCoreV2StagingAdapter:
             raise RuntimeError("Invalid captain session.")
         event_id = str(rows[0].get("event_id", ""))
         team_id = str(rows[0].get("team_id", ""))
-        participant_id = self._team_participant(event_id, team_id)
-        if not participant_id:
-            raise RuntimeError("No participant for team; add at least one participant via join path before captain submit.")
+        participant_id = self._ensure_team_participant(event_id, team_id)
 
         submission_key = str(idempotency_key or f"{event_id}:{team_id}:{activity_id}:{_now_iso()}")
         _trace_uuid_context("formula_race_submit_checkpoint.payload", "participants_v2", "participant_id", participant_id)
@@ -928,7 +959,7 @@ class FormulaRaceCoreV2StagingAdapter:
                 "event_id": event_id,
                 "team_id": team_id,
                 "participant_id": participant_id,
-                "activity_id": activity_filter.replace("eq.", "", 1),
+                "activity_id": activity_id,
                 "submission_key": submission_key,
                 "submission_status": "SUBMITTED",
                 "submission_payload": {
@@ -976,15 +1007,10 @@ class FormulaRaceCoreV2StagingAdapter:
         token = _require_uuid(session_token, "session_token")
         _trace_uuid_context("formula_race_purchase.request", "team_access_sessions_v2", "session_token", token)
         _trace_uuid_context("formula_race_purchase.request", "team_access_sessions_v2", "device_id", device_id)
-        item_filter = _optional_uuid_filter(
-            "item_id",
-            item_id,
-            required=True,
-            step="formula_race_purchase.request.item",
-            rpc_or_table="marketplace_items_v2",
-        )
-        if not item_filter:
+        item_id = str(item_id or "").strip()
+        if not item_id:
             raise RuntimeError("Invalid marketplace item id.")
+        item_filter = f"eq.{item_id}"
         rows = self._get(
             "team_access_sessions_v2",
             {
@@ -1038,7 +1064,7 @@ class FormulaRaceCoreV2StagingAdapter:
         if int(balance) < cost:
             raise RuntimeError("Insufficient credits.")
 
-        participant_id = self._team_participant(event_id, team_id)
+        participant_id = self._ensure_team_participant(event_id, team_id)
         _trace_uuid_context("formula_race_purchase.participant", "participants_v2", "participant_id", participant_id)
         tx_key = str(idempotency_key or f"{event_id}:{team_id}:{item_id}:{_now_iso()}")
         participant_id = _normalise_uuid_value(participant_id)
@@ -1056,11 +1082,15 @@ class FormulaRaceCoreV2StagingAdapter:
                 "p_idempotency_key": tx_key,
             },
         )
-        credit_txn_id = None
+        credit_txn_id = ""
         if isinstance(credit, dict):
-            credit_txn_id = str(credit.get("credit_transaction_id", ""))
+            credit_txn_id = _normalise_uuid_value(
+                credit.get("credit_transaction_id", "")
+            )
         elif isinstance(credit, str):
-            credit_txn_id = str(credit)
+            credit_txn_id = _normalise_uuid_value(credit)
+        if not credit_txn_id:
+            raise RuntimeError("Credit transaction could not be recorded.")
 
         purchase = self._post(
             "marketplace_transactions_v2",
