@@ -53,10 +53,22 @@ def require_staging(db):
         raise RuntimeError("SUPABASE_SECRET_KEY is required for staging event setup.")
 
 
-def team_configuration(event_id, active_count):
-    active_count = int(active_count)
-    if not 1 <= active_count <= len(COUNTRIES):
-        raise ValueError("Active team count must be between 1 and 6.")
+def allocate_country_pool(upper_count, lower_count):
+    upper_count, lower_count = int(upper_count), int(lower_count)
+    if upper_count < 1 or lower_count < 1:
+        raise ValueError("Each event must have at least one active group.")
+    if upper_count + lower_count > len(COUNTRIES):
+        raise ValueError("The two events cannot exceed six active groups in total.")
+    upper = COUNTRIES[:upper_count]
+    lower = COUNTRIES[upper_count:upper_count + lower_count]
+    return upper, lower
+
+
+def team_configuration(event_id, country_allocation):
+    allocation = list(country_allocation)
+    identities = [str(country).strip().casefold() for country, _ in allocation]
+    if not allocation or len(identities) != len(set(identities)):
+        raise ValueError("An event country allocation must be non-empty and unique.")
     return [
         {
             "TeamID": f"{event_id}-TEAM-{position:02d}",
@@ -64,7 +76,7 @@ def team_configuration(event_id, active_count):
             "Country": country,
             "Flag": flag,
         }
-        for position, (country, flag) in enumerate(COUNTRIES[:active_count], 1)
+        for position, (country, flag) in enumerate(allocation, 1)
     ]
 
 
@@ -126,7 +138,10 @@ def agile_programme(event_id):
     return modules
 
 
-def _create_event(db, event_id, join_code, name, department, event_date, pax, teams, venue, facilitator):
+def _create_event(db, event_id, join_code, name, department, event_date, pax,
+                  country_allocation, venue, facilitator, allocation_group_id,
+                  paired_event_id):
+    teams = len(country_allocation)
     db.create_event(
         event_id, "AIA", department, name, str(event_date), venue,
         "AGILE", join_code, teams, facilitator,
@@ -136,10 +151,14 @@ def _create_event(db, event_id, join_code, name, department, event_date, pax, te
         "DurationHours": 8.0,
         "TeamTheme": "Countries",
         "CountryPool": [country for country, _ in COUNTRIES],
+        "CountryAllocationGroupID": allocation_group_id,
+        "PairedEventID": paired_event_id,
+        "AssignedCountries": [country for country, _ in country_allocation],
+        "CrossEventAllocationValidated": True,
         "ActiveTeamCount": int(teams),
         "Provisional": True,
     })
-    db.replace_event_teams(event_id, team_configuration(event_id, teams))
+    db.replace_event_teams(event_id, team_configuration(event_id, country_allocation))
 
 
 def _assert_empty_runtime(db, event_id):
@@ -159,23 +178,27 @@ def _assert_empty_runtime(db, event_id):
     return evidence
 
 
-def prepare(db, *, event_date, upper_pax=26, lower_pax=36, upper_teams=6,
-            lower_teams=6, venue="TBC", facilitator="TBC", prefix="AIA-WE"):
+def prepare(db, *, event_date, upper_pax=26, lower_pax=36, upper_teams=2,
+            lower_teams=4, venue="TBC", facilitator="TBC", prefix="AIA-WE"):
     require_staging(db)
+    upper_countries, lower_countries = allocate_country_pool(upper_teams, lower_teams)
     stamp = datetime.now(timezone.utc).strftime("%y%m%d%H%M%S")
     upper_id = f"{prefix}-{stamp}-UPPER"
     lower_id = f"{prefix}-{stamp}-LOWER"
+    allocation_group_id = f"{prefix}-{stamp}-COUNTRIES"
     upper_code = db.create_new_join_code()
 
     _create_event(db, upper_id, upper_code, "AIA Upper South", "Upper South",
-                  event_date, upper_pax, upper_teams, venue, facilitator)
+                  event_date, upper_pax, upper_countries, venue, facilitator,
+                  allocation_group_id, lower_id)
     saved = db._safe_save_programme(upper_id, agile_programme(upper_id), "AGILE Standard")
     if saved["ModuleCount"] != 7 or saved["ActivityCount"] != 7:
         raise AssertionError(saved)
 
     lower_code = db.create_new_join_code()
     _create_event(db, lower_id, lower_code, "AIA Lower South", "Lower South",
-                  event_date, lower_pax, lower_teams, venue, facilitator)
+                  event_date, lower_pax, lower_countries, venue, facilitator,
+                  allocation_group_id, upper_id)
     duplicate = db.duplicate_programme_configuration(upper_id, lower_id)
     isolation = _assert_empty_runtime(db, lower_id)
 
@@ -188,10 +211,14 @@ def prepare(db, *, event_date, upper_pax=26, lower_pax=36, upper_teams=6,
     ]
     if projection(upper_stages) != projection(lower_stages):
         raise AssertionError("Programme configuration duplication mismatch.")
+    all_countries = []
     for event_id in (upper_id, lower_id):
         countries = [row["Country"] for row in db.get_teams(event_id)]
-        if len(countries) != len(set(countries)):
+        if len(countries) != len({country.casefold() for country in countries}):
             raise AssertionError(f"Duplicate country in {event_id}: {countries}")
+        all_countries.extend(countries)
+    if len(all_countries) != len({country.casefold() for country in all_countries}):
+        raise AssertionError(f"Duplicate country across paired events: {all_countries}")
 
     counts = db.assert_core_v2_only()
     return {
@@ -209,6 +236,8 @@ def prepare(db, *, event_date, upper_pax=26, lower_pax=36, upper_teams=6,
         },
         "editable_team_count": True,
         "editable_pax_count": True,
+        "country_allocation_group_id": allocation_group_id,
+        "cross_event_country_uniqueness": "PASS",
         "programme_duplication": "PASS",
         "duplicate_evidence": duplicate,
         "destination_isolation": isolation,
@@ -221,8 +250,8 @@ def main():
     parser.add_argument("--event-date", default=str(next_saturday()))
     parser.add_argument("--upper-pax", type=int, default=26)
     parser.add_argument("--lower-pax", type=int, default=36)
-    parser.add_argument("--upper-teams", type=int, default=6)
-    parser.add_argument("--lower-teams", type=int, default=6)
+    parser.add_argument("--upper-teams", type=int, default=2)
+    parser.add_argument("--lower-teams", type=int, default=4)
     parser.add_argument("--venue", default="TBC")
     parser.add_argument("--facilitator", default="TBC")
     parser.add_argument("--prefix", default="AIA-WE")

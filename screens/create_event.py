@@ -70,6 +70,70 @@ def _resize_event_teams(event_id, existing_teams, target_count, country_pool=Non
     return revised
 
 
+def _resize_cross_event_teams(db, event, existing_teams, target_count):
+    """Resize one member of a configured event pair without country collisions."""
+    event_id = str(event.get("EventID", ""))
+    metadata = StandardCoreV2Adapter.event_metadata(event)
+    paired_event_id = str(metadata.get("PairedEventID", "")).strip()
+    pool = [
+        str(value).strip() for value in metadata.get("CountryPool", [])
+        if str(value).strip()
+    ]
+    if not paired_event_id or not pool:
+        return _resize_event_teams(event_id, existing_teams, target_count, pool)
+
+    paired_event = db.get_event(paired_event_id)
+    if not paired_event:
+        raise ValueError(
+            "The paired event could not be loaded; cross-event country allocation was not changed."
+        )
+    if db.get_participant_count(paired_event_id):
+        raise ValueError(
+            "Team allocation cannot change after participants have joined either paired event."
+        )
+
+    paired_teams = db.get_teams(paired_event_id)
+    reserved = {
+        str(team.get("Country", "")).strip().casefold()
+        for team in paired_teams if str(team.get("Country", "")).strip()
+    }
+    current = [dict(team) for team in list(existing_teams)[: int(target_count)]]
+    current_identities = {
+        str(team.get("Country", "")).strip().casefold()
+        for team in current if str(team.get("Country", "")).strip()
+    }
+    if reserved & current_identities:
+        raise ValueError("The paired events already contain a duplicate country identity.")
+
+    available = [
+        country for country in pool
+        if country.casefold() not in reserved | current_identities
+    ]
+    required = int(target_count) - len(current)
+    if required > len(available):
+        raise ValueError(
+            f"The paired events can use at most {len(pool)} unique countries in total. "
+            "Reduce the other event's group count before increasing this event."
+        )
+    for country in available[:required]:
+        position = len(current) + 1
+        current.append({
+            "TeamID": f"{event_id}-TEAM-{position:02d}",
+            "TeamName": country,
+            "Country": country,
+        })
+
+    combined = [
+        str(team.get("Country", "")).strip()
+        for team in current + paired_teams
+    ]
+    if len(combined) > len(pool) or len({value.casefold() for value in combined}) != len(combined):
+        raise ValueError("Cross-event country allocation must remain unique across both events.")
+    if any(value.casefold() not in {country.casefold() for country in pool} for value in combined):
+        raise ValueError("Every paired-event country must belong to the configured country pool.")
+    return current
+
+
 def _event_form(db, event=None):
     editing = bool(event)
     defaults = _event_defaults(event or {})
@@ -177,16 +241,18 @@ def _event_form(db, event=None):
                 st.error("Team count cannot change after participants have joined.")
                 return None
             try:
-                revised = _resize_event_teams(
-                    event_id,
-                    existing_teams,
-                    int(teams),
-                    StandardCoreV2Adapter.event_metadata(event).get("CountryPool", []),
+                revised = _resize_cross_event_teams(
+                    db, event, existing_teams, int(teams)
                 )
             except ValueError as error:
                 st.error(str(error))
                 return None
             db.replace_event_teams(event_id, revised)
+            db.update_event_metadata(event_id, {
+                "ActiveTeamCount": len(revised),
+                "AssignedCountries": [team.get("Country", "") for team in revised],
+                "CrossEventAllocationValidated": True,
+            })
         db.update_event(event_id, {
             "Client": client,
             "Department": department,
