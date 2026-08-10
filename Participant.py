@@ -1,4 +1,5 @@
 import os
+import subprocess
 from uuid import UUID
 
 import streamlit as st
@@ -15,6 +16,27 @@ apply_branding(participant_pwa=True)
 
 def _staging() -> bool:
     return str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging"
+
+
+def _captain_deployed_commit():
+    configured = str(
+        os.getenv("GIT_COMMIT", "") or os.getenv("COMMIT_SHA", "")
+    ).strip()
+    if configured:
+        return configured[:7]
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+if _staging():
+    print(f"CAPTAIN_DEPLOYED_COMMIT={_captain_deployed_commit()}", flush=True)
 
 
 def _is_core_v2_race_request() -> bool:

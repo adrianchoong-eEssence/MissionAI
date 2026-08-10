@@ -22,6 +22,99 @@ class RuntimeDatabaseError(RuntimeError):
     """Raised when the live EXOS runtime cannot complete a request."""
 
 
+def _core_v2_http_trace_enabled(path):
+    """Keep forensic HTTP diagnostics confined to staging Core v2 requests."""
+    if str(os.getenv("EXOS_ENV", "")).strip().lower() != "staging":
+        return False
+    clean_path = str(path or "").strip().lower()
+    return clean_path.endswith("_v2") or clean_path.startswith("rpc/exos_v2_")
+
+
+def _core_v2_uuid_field(name):
+    """Identify UUID-bearing Core v2 fields without logging their values."""
+    clean_name = str(name or "").strip().lower()
+    return (
+        clean_name.endswith("_id")
+        or clean_name.endswith("_token")
+        or "session" in clean_name
+        or "credential" in clean_name
+        or "runtime" in clean_name
+    )
+
+
+def _core_v2_uuid_state(name, value):
+    candidate = value
+    if isinstance(candidate, str):
+        for prefix in ("eq.", "neq.", "gt.", "gte.", "lt.", "lte."):
+            if candidate.startswith(prefix):
+                candidate = candidate[len(prefix):]
+                break
+    is_none = candidate is None
+    literal_none = isinstance(candidate, str) and candidate.strip().lower() in {
+        "none",
+        "null",
+    }
+    try:
+        valid_uuid = not is_none and not literal_none and bool(
+            uuid.UUID(str(candidate).strip())
+        )
+    except (ValueError, AttributeError, TypeError):
+        valid_uuid = False
+    return {
+        "field": str(name),
+        "python_type": type(value).__name__,
+        "is_none": is_none,
+        "is_literal_none": literal_none,
+        "is_valid_uuid": valid_uuid,
+    }
+
+
+def _core_v2_uuid_states(query, payload):
+    states = []
+    for source in (query or {}, payload or {}):
+        if isinstance(source, dict):
+            states.extend(
+                _core_v2_uuid_state(name, value)
+                for name, value in source.items()
+                if _core_v2_uuid_field(name)
+            )
+    return states
+
+
+def _core_v2_trace_request(sequence, method, path, query, payload, uuid_states):
+    print("CORE_V2_HTTP_TRACE", flush=True)
+    print(f"REQUEST_SEQUENCE={sequence}", flush=True)
+    print(f"METHOD={method}", flush=True)
+    print(f"PATH={path}", flush=True)
+    print(f"QUERY_KEYS={','.join(sorted((query or {}).keys()))}", flush=True)
+    print(f"PAYLOAD_KEYS={','.join(sorted((payload or {}).keys()))}", flush=True)
+    for state in uuid_states:
+        print(f"FIELD={state['field']}", flush=True)
+        print(f"PYTHON_TYPE={state['python_type']}", flush=True)
+        print(f"IS_NONE={str(state['is_none']).lower()}", flush=True)
+        print(f"IS_LITERAL_NONE={str(state['is_literal_none']).lower()}", flush=True)
+        print(f"IS_VALID_UUID={str(state['is_valid_uuid']).lower()}", flush=True)
+
+
+def _core_v2_trace_failure(
+    sequence, method, path, query, payload, uuid_states, error, response_text
+):
+    try:
+        postgres_error = json.loads(response_text)
+    except (TypeError, ValueError):
+        postgres_error = {}
+    print("CORE_V2_HTTP_FAILURE", flush=True)
+    print(f"REQUEST_SEQUENCE={sequence}", flush=True)
+    print(f"METHOD={method}", flush=True)
+    print(f"PATH={path}", flush=True)
+    print(f"QUERY_KEYS={','.join(sorted((query or {}).keys()))}", flush=True)
+    print(f"PAYLOAD_KEYS={','.join(sorted((payload or {}).keys()))}", flush=True)
+    print(f"UUID_FIELD_STATES={json.dumps(uuid_states, sort_keys=True)}", flush=True)
+    print(f"HTTP_STATUS={error.code}", flush=True)
+    print(f"POSTGRES_CODE={postgres_error.get('code', '')}", flush=True)
+    print(f"POSTGRES_MESSAGE={postgres_error.get('message', '')}", flush=True)
+
+
 def _secret(name):
     try:
         value = st.secrets[name]
@@ -43,6 +136,8 @@ class SupabaseRuntimeDB:
     Google Sheets remains the programme configuration and reporting layer.
     This service handles concurrent participant joins and live participant reads.
     """
+
+    _core_v2_http_request_sequence = 0
 
     def __init__(self):
         self.url = _secret("SUPABASE_URL").rstrip("/")
@@ -98,8 +193,21 @@ class SupabaseRuntimeDB:
             body = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
 
+        trace_enabled = _core_v2_http_trace_enabled(path)
+        uuid_states = _core_v2_uuid_states(query, payload) if trace_enabled else []
         last_error = None
         for attempt in range(retries):
+            if trace_enabled:
+                SupabaseRuntimeDB._core_v2_http_request_sequence += 1
+                request_sequence = SupabaseRuntimeDB._core_v2_http_request_sequence
+                _core_v2_trace_request(
+                    request_sequence,
+                    method,
+                    path,
+                    query,
+                    payload,
+                    uuid_states,
+                )
             request = Request(endpoint, data=body, headers=headers, method=method)
             try:
                 with urlopen(request, timeout=20) as response:
@@ -107,6 +215,17 @@ class SupabaseRuntimeDB:
                     return json.loads(raw) if raw else None
             except HTTPError as error:
                 response_text = error.read().decode("utf-8", errors="replace")
+                if trace_enabled:
+                    _core_v2_trace_failure(
+                        request_sequence,
+                        method,
+                        path,
+                        query,
+                        payload,
+                        uuid_states,
+                        error,
+                        response_text,
+                    )
                 last_error = RuntimeDatabaseError(
                     f"Runtime request failed ({error.code}): {response_text}"
                 )
