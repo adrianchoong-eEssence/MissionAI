@@ -1,13 +1,20 @@
+import os
+
 import streamlit as st
 from branding import apply_branding, configure_page, footer
-from data.google_sheets import GoogleSheetsDB
 from data.standard_core_v2_adapter import get_standard_database
 from screens.app_state import ACTIVE_EVENT_KEY
 from screens.control_centre import show_control_centre
-from screens.formula_race import show_formula_race
-from screens.live_event_console import show_live_event_console
-from screens.event_manager import FORMULA_RACE_TEAMS
-from data.control_runtime import ControlRuntime
+
+
+def _deployment_environment():
+    value = str(os.getenv("EXOS_ENV", "") or "").strip()
+    if value:
+        return value.casefold()
+    try:
+        return str(st.secrets.get("EXOS_ENV", "") or "").strip().casefold()
+    except Exception:
+        return ""
 
 configure_page(layout="wide")
 apply_branding()
@@ -15,6 +22,24 @@ apply_branding()
 db = get_standard_database()
 requested_event_id = str(st.query_params.get("event_id", "")).strip()
 requested_event = db.get_event(requested_event_id) if requested_event_id else {}
+
+if _deployment_environment() == "staging":
+    st.sidebar.success("EXOS CORE v2 — STAGING")
+    if requested_event_id and requested_event:
+        st.session_state[ACTIVE_EVENT_KEY] = requested_event_id
+    show_control_centre(db=db)
+    db.assert_core_v2_only()
+    footer()
+    st.stop()
+
+# The existing non-staging Formula R.A.C.E. shell stays isolated from the
+# Standard Core v2 staging application and is loaded only when needed.
+from data.google_sheets import GoogleSheetsDB
+from data.control_runtime import ControlRuntime
+from screens.event_manager import FORMULA_RACE_TEAMS
+from screens.formula_race import show_formula_race
+from screens.live_event_console import show_live_event_console
+
 requested_name = str((requested_event or {}).get("EventName", "")).upper().replace(".", "")
 requested_client = str((requested_event or {}).get("Client", "")).upper().replace("’", "'")
 requested_is_race = (
@@ -41,7 +66,7 @@ if mode == "Event Control":
     # every non-RACE event.  Keep Formula R.A.C.E. in its dedicated shell below.
     if requested_event_id:
         st.session_state[ACTIVE_EVENT_KEY] = requested_event_id
-    show_control_centre()
+    show_control_centre(db=db)
 else:
     db = GoogleSheetsDB()
     workspace = st.sidebar.radio(

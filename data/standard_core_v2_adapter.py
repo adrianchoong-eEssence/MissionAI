@@ -371,6 +371,10 @@ class StandardCoreV2Adapter:
     def get_programme_stages(self, event_id):
         return self._client.get_programme_hierarchy(event_id)
 
+    # Control Centre review helpers historically call through ``db.runtime``.
+    # On the Standard adapter that facade is this same guarded Core v2 object.
+    get_programme_hierarchy = get_programme_stages
+
     def _safe_save_programme(self, event_id, modules, programme_name=""):
         event = self.get_event(event_id)
         if not event:
@@ -607,7 +611,12 @@ class StandardCoreV2Adapter:
 
     def decide_canonical_submission(self, submission_id, decision, reviewer_id, score=0, credits=0,
                                     notes="", reason="", idempotency_key="", supersedes_id=""):
-        mapped = "APPROVE" if str(decision).upper() in {"APPROVE", "APPROVED"} else "REJECT"
+        requested = str(decision).upper()
+        mapped = (
+            "APPROVE" if requested in {"APPROVE", "APPROVED"}
+            else "PENDING" if requested in {"PENDING", "RETURN_FOR_REVISION"}
+            else "REJECT"
+        )
         return self._rpc("exos_v2_standard_review_submission", {
             "p_submission_id": submission_id, "p_decision": mapped, "p_score": float(score or 0),
             "p_reviewer": reviewer_id, "p_rationale": notes or reason,

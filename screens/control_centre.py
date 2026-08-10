@@ -33,6 +33,12 @@ from screens.projector_broadcast import (
 
 
 def stage_family(stage):
+    submission_type = str(
+        stage.get("SubmissionType", "")
+        or activity_details(stage).get("SubmissionType", "")
+    ).strip().upper()
+    if submission_type not in {"", "NONE"}:
+        return "scored"
     combined = (
         str(stage.get("StageName", ""))
         + " "
@@ -644,7 +650,7 @@ def _render_nasi_operations(db, control, event_id, activity_id):
     )
 
 
-def show_control_centre():
+def show_control_centre(db=None):
     st.markdown(
         """
         <style>
@@ -659,7 +665,7 @@ def show_control_centre():
         """,
         unsafe_allow_html=True,
     )
-    db = get_standard_database()
+    db = db or get_standard_database()
     control = ControlRuntime(db)
     events = db.get_events()
     if not events:
@@ -859,6 +865,8 @@ def show_control_centre():
     st.divider()
     if str(stage.get("StageName", "")).strip().upper() == "NASI":
         _render_nasi_operations(db, control, event_id, stage.get("ActivityID", ""))
+    elif not bool(stage.get("RuntimeEligible", True)):
+        st.info("This is a non-runtime programme marker. No launch or submission controls apply.")
     else:
         _render_stage_widgets(db, control, event_id, stage_family(stage))
     st.divider()

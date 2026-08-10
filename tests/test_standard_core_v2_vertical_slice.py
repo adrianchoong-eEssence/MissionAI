@@ -127,6 +127,20 @@ def test_uat_runner_covers_all_acceptance_gates_and_hard_assertions():
 def test_facilitator_standard_path_selects_core_before_race_branch():
     source = (ROOT / "Facilitator.py").read_text()
     core_position = source.index("db = get_standard_database()")
+    staging_position = source.index('if _deployment_environment() == "staging":')
+    stop_position = source.index("st.stop()", staging_position)
+    google_import_position = source.index("from data.google_sheets import GoogleSheetsDB")
     mode_position = source.index('mode = st.sidebar.radio')
     race_position = source.index("db = GoogleSheetsDB()", mode_position)
-    assert core_position < mode_position < race_position
+    assert core_position < staging_position < stop_position < google_import_position
+    assert google_import_position < mode_position < race_position
+    staging_path = source[staging_position:stop_position]
+    assert "show_control_centre(db=db)" in staging_path
+    assert "db.assert_core_v2_only()" in staging_path
+    assert "GoogleSheetsDB" not in staging_path
+
+
+def test_control_centre_accepts_the_strict_staging_adapter():
+    source = (ROOT / "screens/control_centre.py").read_text()
+    assert "def show_control_centre(db=None):" in source
+    assert "db = db or get_standard_database()" in source
