@@ -33,6 +33,18 @@ LINK_REQUIRED = {"Experience Board", "Sync AI", "Catalyst", "Marketplace", "Cust
 _READ_LOCK = RLock()
 
 
+def requires_linked_content(activity):
+    """Return whether an activity's actual content contract requires a link."""
+    content_type = str(activity.get("ContentType", "")).strip()
+    submission_type = str(activity.get("SubmissionType", "")).strip().upper()
+    # A native Catalyst challenge is handled by its CATALYST submission
+    # contract. Catalyst rows with any other submission contract still refer
+    # to separately configured Catalyst content and must provide its stable ID.
+    if content_type == "Catalyst" and submission_type == "CATALYST":
+        return False
+    return content_type in LINK_REQUIRED
+
+
 class ProgrammeIntegrityError(ValueError):
     """Raised when unsafe hierarchy data is selected for runtime use."""
 
@@ -236,7 +248,7 @@ class CanonicalProgrammeAdapter:
                 errors.append(f"Activity {activity['ActivityID']} has missing or foreign parent ProgrammeID.")
             if activity["MissingCanonicalParent"]:
                 errors.append(f"Activity {activity['ActivityID']} has no canonical parent ModuleID.")
-            if activity["ContentType"] in LINK_REQUIRED and not activity["LinkedContentID"]:
+            if requires_linked_content(activity) and not activity["LinkedContentID"]:
                 errors.append(f"Activity {activity['ActivityID']} is missing linked content.")
             linked = self.linked_content.get(activity["LinkedContentID"])
             if activity["LinkedContentID"] and self.linked_content:

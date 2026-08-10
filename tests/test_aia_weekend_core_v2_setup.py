@@ -3,6 +3,7 @@ import pytest
 from data.runtime_database import RuntimeDatabaseError
 from data.standard_core_v2_adapter import StandardCoreV2Adapter
 from engines.programme_adapter import CanonicalProgrammeAdapter
+from engines.programme_hierarchy import activity_details, encode_activity_details
 from screens.create_event import _resize_cross_event_teams, _resize_event_teams
 from scripts.exos_core_v2_prepare_aia_weekend import (
     COUNTRIES,
@@ -27,6 +28,31 @@ def test_agile_weekend_template_has_required_order_and_break_marker():
     assert lunch["ScoringMode"] == "NON_SCORING"
     assert lunch["SubmissionType"] == "NONE"
     assert lunch["RuntimeEligible"] is False
+
+
+@pytest.mark.parametrize("event_id", [
+    "AIA-WE-260810081110-UPPER",
+    "AIA-WE-260810081110-LOWER",
+])
+def test_real_aia_programmes_validate_all_seven_native_stages(event_id):
+    rows = [module["Activities"][0] for module in agile_programme(event_id)]
+    catalyst = rows[5]
+    catalyst["ActivityID"] = f"{event_id}-ACT-006"
+    details = activity_details(catalyst)
+    details["ActivityID"] = catalyst["ActivityID"]
+    catalyst["FacilitatorInstruction"] = encode_activity_details(details)
+    snapshot = CanonicalProgrammeAdapter(event_id, rows).snapshot()
+    assert snapshot.errors == []
+    assert len(snapshot.activities) == 7
+    assert [activity["StageName"] for activity in snapshot.activities] == [
+        "Launch App / Country Assignment", "Pipeline", "Helium Stick",
+        "Key Punch", "Lunch / Break", "Catalyst Challenge", "NASI",
+    ]
+    resolved = snapshot.activity(f"{event_id}-ACT-006")
+    assert resolved["ActivityType"] == "Activity"
+    assert resolved["SubmissionType"] == "CATALYST"
+    assert resolved["ContentType"] == "Catalyst"
+    assert resolved["LinkedContentID"] == ""
 
 
 def test_country_pool_is_event_configuration_and_supports_fewer_groups():

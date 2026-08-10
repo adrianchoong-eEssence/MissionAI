@@ -89,6 +89,21 @@ def test_linked_content_event_type_and_active_validation():
     assert len(invalid.errors) >= 1
 
 
+def test_native_catalyst_submission_does_not_require_fake_linked_content():
+    activity = row(content_type="Catalyst", linked="")
+    activity["SubmissionType"] = "CATALYST"
+    snapshot = CanonicalProgrammeAdapter("E1", [activity]).snapshot()
+    assert snapshot.errors == []
+    assert snapshot.activities[0]["LinkedContentID"] == ""
+
+
+def test_non_native_catalyst_content_still_requires_linked_content():
+    snapshot = CanonicalProgrammeAdapter("E1", [
+        row(content_type="Catalyst", linked=""),
+    ]).snapshot()
+    assert snapshot.errors == ["Activity A1 is missing linked content."]
+
+
 def test_inactive_activity_is_filtered_and_cannot_launch():
     snapshot = CanonicalProgrammeAdapter("E1", [row(active="No")]).snapshot()
     assert snapshot.activities == []
