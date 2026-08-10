@@ -1,4 +1,19 @@
 from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
+import os
+from contextlib import contextmanager
+
+
+@contextmanager
+def _staging_env():
+    original = os.getenv("EXOS_ENV")
+    os.environ["EXOS_ENV"] = "staging"
+    try:
+        yield
+    finally:
+        if original is None:
+            os.environ.pop("EXOS_ENV", None)
+        else:
+            os.environ["EXOS_ENV"] = original
 
 
 def _fake_runtime_factory(team_active: bool = True):
@@ -60,8 +75,9 @@ def _fake_runtime_factory(team_active: bool = True):
 
 
 def test_race_adapter_resolves_join_code_and_returns_ten_teams():
-    runtime = _fake_runtime_factory()
-    adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+    with _staging_env():
+        runtime = _fake_runtime_factory()
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
 
     event = adapter.get_runtime_event("RACE4CF0CE")
     assert event["EventID"] == "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
@@ -72,9 +88,22 @@ def test_race_adapter_resolves_join_code_and_returns_ten_teams():
 
 
 def test_race_adapter_get_runtime_teams_falls_back_when_inactive_rows_exist():
-    runtime = _fake_runtime_factory(team_active=False)
-    adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+    with _staging_env():
+        runtime = _fake_runtime_factory(team_active=False)
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
 
     teams = adapter.get_runtime_teams("RACE4CF0CE")
     assert len(teams) == 10
     assert {team["TeamName"] for team in teams} == {f"Team {idx:02d}" for idx in range(1, 11)}
+
+
+def test_race_adapter_debug_get_runtime_teams_tracks_expected_filter():
+    with _staging_env():
+        runtime = _fake_runtime_factory()
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+
+    result = adapter.debug_get_runtime_teams("RACE4CF0CE")
+    assert result["event_found"] is True
+    assert result["resolved_event_id"] == "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
+    assert result["query"]["event_id"] == "eq.CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
+    assert len(result["rows"]) == 10

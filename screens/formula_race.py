@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 import streamlit as st
 
 from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRaceProvider, RaceSnapshot
@@ -13,6 +14,27 @@ from engines.formula_race import BUILD_STATUSES,JUDGING_CATEGORIES,final_standin
 
 def _staging_runtime_enabled() -> bool:
     return str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging"
+
+
+def _runtime_staging_commit() -> str:
+    return str(os.getenv("STREAMLIT_GIT_COMMIT", "")).strip() or "UNKNOWN"
+
+
+def _supabase_host(runtime) -> str:
+    return (urlparse(str(getattr(runtime, "url", ""))).hostname or "").strip()
+
+
+def _resolve_event_from_join_code(runtime, join_code: str) -> str:
+    join_code = str(join_code or "").strip().upper()
+    if not join_code:
+        return ""
+    if not hasattr(runtime, "get_event_by_join_code"):
+        return ""
+    try:
+        event = runtime.get_event_by_join_code(join_code)
+        return str(event.get("EventID", "")).strip()
+    except Exception:
+        return ""
 
 
 def _build_formula_race_runtime():
@@ -58,6 +80,42 @@ def _assert_staging_runtime_health(runtime) -> None:
     if not hasattr(runtime, "get_staging_call_counts"):
         raise RuntimeError("Core v2 staging runtime is missing adapter counters.")
     runtime._assert_no_legacy_or_sheet_calls()
+
+
+def _staging_diagnostics(runtime, requested_join_code: str, event_id: str) -> None:
+    normalized_join_code = str(requested_join_code or "").strip().upper()
+    host = _supabase_host(runtime)
+    resolution = {}
+    if hasattr(runtime, "debug_get_runtime_teams"):
+        try:
+            resolution = runtime.debug_get_runtime_teams(event_id)
+        except Exception as error:
+            resolution = {
+                "requested": str(event_id).strip(),
+                "resolved_event_id": "",
+                "event_found": False,
+                "query": {"event_id": ""},
+                "raw_count": 0,
+                "fallback_used": False,
+                "rows": [],
+                "adapter_error": str(error),
+            }
+
+    event_identifier = str(event_id or resolution.get("resolved_event_id", "")).strip()
+    raw_count = len(resolution.get("rows", [])) if isinstance(resolution.get("rows"), list) else 0
+    normalized_count = raw_count
+    st.caption(f"DEPLOYED COMMIT: {_runtime_staging_commit()}")
+    st.caption(f"EXOS_ENV: {str(os.getenv('EXOS_ENV', '')).strip() or 'unknown'}")
+    st.caption(f"SUPABASE HOST: {host}")
+    st.caption(f"REQUESTED JOIN CODE: {normalized_join_code or '—'}")
+    st.caption(f"RESOLVED EVENT ID: {str(resolution.get('resolved_event_id', event_identifier) or '—')}")
+    st.caption(f"EVENT FOUND: {'YES' if resolution.get('event_found') else 'NO'}")
+    st.caption(f"TEAM QUERY EVENT ID: {str((resolution.get('query') or {}).get('event_id', '') or '—')}")
+    st.caption(f"RAW TEAM ROW COUNT: {raw_count}")
+    st.caption(f"NORMALIZED TEAM COUNT: {normalized_count}")
+    st.caption(
+        f"STRICT PROVIDER REJECTION REASON: {str(resolution.get('adapter_error', '') if resolution.get('adapter_error') else '') or '—'}"
+    )
 
 
 def _snapshot(db, event_id: str):
@@ -353,11 +411,16 @@ def show_formula_race(db=None, event_id=""):
         return
     if db is not None and hasattr(db, "__dict__"):
         db.runtime = runtime
+    requested_join_code = str(st.query_params.get("join_code", "")).strip()
+    if not event_id and requested_join_code:
+        event_id = _resolve_event_from_join_code(runtime, requested_join_code)
     try:
         snapshot = _snapshot(db, event_id)
         _assert_staging_runtime_health(runtime)
     except RuntimeError as error:
         st.error(f"Staging contract violation: {error}")
+        if _staging_runtime_enabled():
+            _staging_diagnostics(runtime, requested_join_code, event_id)
         return
 
     if _staging_runtime_enabled() and hasattr(runtime, "get_staging_call_counts"):
@@ -366,6 +429,7 @@ def show_formula_race(db=None, event_id=""):
             f"LEGACY_RUNTIME_CALLS = {counts['LEGACY_RUNTIME_CALLS']} | "
             f"GOOGLE_SHEETS_RUNTIME_CALLS = {counts['GOOGLE_SHEETS_RUNTIME_CALLS']}"
         )
+        _staging_diagnostics(runtime, requested_join_code, event_id)
     control = ControlRuntime(db) if db is not None else None
     page=_top(snapshot); sub=st.session_state.get("race_subscreen","")
     if sub=="wallet": wallet(snapshot)

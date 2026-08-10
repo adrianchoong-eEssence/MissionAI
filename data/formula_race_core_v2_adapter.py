@@ -225,8 +225,8 @@ class FormulaRaceCoreV2StagingAdapter:
 
         return {}
 
-    def get_runtime_teams(self, event_id: str) -> list[dict[str, Any]]:
-        rows = self._get(
+    def debug_get_runtime_teams(self, event_id: str) -> dict[str, Any]:
+        row = self._get(
             "events_v2",
             {
                 "event_id": f"eq.{str(event_id).strip()}",
@@ -234,27 +234,43 @@ class FormulaRaceCoreV2StagingAdapter:
                 "limit": "1",
             },
         )
-        row = rows[0] if rows else self._lookup_event(event_id)
-        event_key = str(row.get("event_id", event_id)).strip() if row else str(event_id).strip()
-
-        rows = self._get(
-            "teams_v2",
-            {
-                "event_id": f"eq.{event_key}",
+        resolved_event = row[0] if row else self._lookup_event(event_id)
+        resolved_event_id = str(resolved_event.get("event_id", "")).strip() if resolved_event else ""
+        primary_query = {
+            "event_id": f"eq.{resolved_event_id}",
+            "is_active": "eq.true",
+            "select": "team_id,team_name,country,team_flag,is_active",
+            "order": "team_id.asc",
+        }
+        primary_rows = self._get("teams_v2", primary_query) if resolved_event_id else []
+        fallback_rows = []
+        if not primary_rows and resolved_event_id:
+            fallback_query = {
+                "event_id": f"eq.{resolved_event_id}",
+                "select": "team_id,team_name,country,team_flag,is_active",
+                "order": "team_id.asc",
+            }
+            fallback_rows = self._get("teams_v2", fallback_query)
+        rows = primary_rows if primary_rows else fallback_rows
+        normalized_count = len(rows)
+        return {
+            "requested": str(event_id).strip(),
+            "resolved_event_id": resolved_event_id,
+            "event_found": bool(resolved_event_id),
+            "query": primary_query if primary_rows else {
+                "event_id": f"eq.{resolved_event_id}",
                 "is_active": "eq.true",
                 "select": "team_id,team_name,country,team_flag,is_active",
                 "order": "team_id.asc",
             },
-        )
-        if not rows and event_key:
-            rows = self._get(
-                "teams_v2",
-                {
-                    "event_id": f"eq.{event_key}",
-                    "select": "team_id,team_name,country,team_flag,is_active",
-                    "order": "team_id.asc",
-                },
-            )
+            "raw_count": len(primary_rows if primary_rows else fallback_rows),
+            "fallback_used": bool(fallback_rows) and not primary_rows,
+            "rows": rows,
+        }
+
+    def get_runtime_teams(self, event_id: str) -> list[dict[str, Any]]:
+        debug = self.debug_get_runtime_teams(event_id)
+        rows = debug.get("rows", [])
         return [
             {
                 "TeamID": str(row.get("team_id", "")),
