@@ -1,4 +1,5 @@
 import os
+from uuid import UUID
 
 import streamlit as st
 
@@ -21,6 +22,18 @@ def _is_core_v2_race_request() -> bool:
         return False
 
     captain_session = str(st.query_params.get("captain_session", "")).strip()
+    if str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging":
+        is_valid_uuid = False
+        try:
+            UUID(captain_session)
+            is_valid_uuid = True
+        except Exception:
+            is_valid_uuid = False
+        print(
+            f"CAPTAIN UUID TRACE | Participant._is_core_v2_race_request | rpc/table: query_params | field: captain_session | "
+            f"is_none: {not captain_session and 'captain_session' not in st.query_params} | "
+            f"is_literal_none: {captain_session.lower() == 'none'} | is_valid_uuid: {is_valid_uuid}"
+        )
     if captain_session:
         return True
 
