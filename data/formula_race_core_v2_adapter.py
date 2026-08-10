@@ -75,6 +75,13 @@ def _as_dict(row: dict[str, Any] | None, fallback: dict[str, Any] | None = None)
     return dict(row)
 
 
+def _resolve_event_candidates(event_id: str) -> list[str]:
+    value = str(event_id or "").strip()
+    if not value:
+        return []
+    return [value]
+
+
 def _uuid_filter_value(value: str) -> str:
     return str(value).strip()
 
@@ -179,6 +186,46 @@ class FormulaRaceCoreV2StagingAdapter:
         }
 
     def get_runtime_event(self, event_id: str) -> dict[str, Any]:
+        event_row = self._lookup_event(event_id)
+        return {
+            "EventID": str(event_row.get("event_id", "")),
+            "EventName": str(event_row.get("event_name", "")),
+            "JoinCode": str(event_row.get("join_code", "")),
+            "Status": str(event_row.get("lifecycle_status", "READY")),
+        }
+
+    def _lookup_event(self, event_id: str) -> dict[str, Any]:
+        candidates = _resolve_event_candidates(event_id)
+        if not candidates:
+            return {}
+
+        for key in candidates:
+            rows = self._get(
+                "events_v2",
+                {
+                    "event_id": f"eq.{str(key).strip()}",
+                    "select": "event_id,event_name,join_code,lifecycle_status",
+                    "limit": "1",
+                },
+            )
+            if rows:
+                return rows[0]
+
+        for key in candidates:
+            rows = self._get(
+                "events_v2",
+                {
+                    "join_code": f"eq.{str(key).strip().upper()}",
+                    "select": "event_id,event_name,join_code,lifecycle_status",
+                    "limit": "1",
+                },
+            )
+            if rows:
+                return rows[0]
+
+        return {}
+
+    def get_runtime_teams(self, event_id: str) -> list[dict[str, Any]]:
         rows = self._get(
             "events_v2",
             {
@@ -187,24 +234,27 @@ class FormulaRaceCoreV2StagingAdapter:
                 "limit": "1",
             },
         )
-        row = rows[0] if rows else {}
-        return {
-            "EventID": str(row.get("event_id", "")),
-            "EventName": str(row.get("event_name", "")),
-            "JoinCode": str(row.get("join_code", "")),
-            "Status": str(row.get("lifecycle_status", "READY")),
-        }
+        row = rows[0] if rows else self._lookup_event(event_id)
+        event_key = str(row.get("event_id", event_id)).strip() if row else str(event_id).strip()
 
-    def get_runtime_teams(self, event_id: str) -> list[dict[str, Any]]:
         rows = self._get(
             "teams_v2",
             {
-                "event_id": f"eq.{str(event_id).strip()}",
+                "event_id": f"eq.{event_key}",
                 "is_active": "eq.true",
                 "select": "team_id,team_name,country,team_flag,is_active",
                 "order": "team_id.asc",
             },
         )
+        if not rows and event_key:
+            rows = self._get(
+                "teams_v2",
+                {
+                    "event_id": f"eq.{event_key}",
+                    "select": "team_id,team_name,country,team_flag,is_active",
+                    "order": "team_id.asc",
+                },
+            )
         return [
             {
                 "TeamID": str(row.get("team_id", "")),
