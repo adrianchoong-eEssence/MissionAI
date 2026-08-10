@@ -150,6 +150,62 @@ def _trace_uuid_context(step: str, rpc_or_table: str, field: str, value) -> None
     )
 
 
+def _trace_captain_login_raw_response(response: object) -> None:
+    """Log staging-only response structure without exposing login data."""
+    if str(os.getenv("EXOS_ENV", "")).strip().lower() != "staging":
+        return
+
+    is_dict = isinstance(response, dict)
+    is_list = isinstance(response, list)
+    top_level = response if is_dict else {}
+    first_item = response[0] if is_list and response else None
+    first_mapping = first_item if isinstance(first_item, dict) else {}
+    field_source = top_level if is_dict else first_mapping
+
+    print("CAPTAIN_LOGIN_RAW_TRACE", flush=True)
+    print(f"response_python_type={type(response).__name__}", flush=True)
+    print(f"is_dict={str(is_dict).lower()}", flush=True)
+    print(f"is_list={str(is_list).lower()}", flush=True)
+    print(f"list_length={len(response) if is_list else 0}", flush=True)
+    print(f"top_level_keys={','.join(sorted(top_level.keys()))}", flush=True)
+    if is_list and response:
+        print(f"first_item_type={type(first_item).__name__}", flush=True)
+        print(f"first_item_keys={','.join(sorted(first_mapping.keys()))}", flush=True)
+    if is_dict:
+        for key, value in top_level.items():
+            print(f"key_name={key}", flush=True)
+            print(f"value_python_type={type(value).__name__}", flush=True)
+
+    for key in (
+        "SessionToken",
+        "session_token",
+        "EventID",
+        "event_id",
+        "TeamID",
+        "team_id",
+        "Ambiguous",
+        "RecoveryRequired",
+    ):
+        present = key in field_source
+        value = field_source.get(key) if present else None
+        print(f"KEY={key}", flush=True)
+        print(f"PRESENT={str(present).lower()}", flush=True)
+        print(f"TYPE={type(value).__name__}", flush=True)
+        print(f"IS_NONE={str(value is None).lower()}", flush=True)
+        if key in {"SessionToken", "session_token"}:
+            raw = "" if value is None else str(value)
+            print(f"STRING_LENGTH={len(raw)}", flush=True)
+            print(f"VALID_UUID={str(_is_valid_uuid(raw)).lower()}", flush=True)
+
+    for key in ("data", "result", "payload", "rows", "value"):
+        if key in top_level:
+            nested = top_level[key]
+            nested_keys = nested.keys() if isinstance(nested, dict) else []
+            print(f"NESTED_KEY={key}", flush=True)
+            print(f"NESTED_TYPE={type(nested).__name__}", flush=True)
+            print(f"NESTED_KEYS={','.join(sorted(nested_keys))}", flush=True)
+
+
 def _in_filter(values: list[str]) -> str:
     sanitized = [str(value).replace('"', '\"').strip() for value in values if str(value).strip()]
     if not sanitized:
@@ -582,7 +638,7 @@ class FormulaRaceCoreV2StagingAdapter:
         _trace_uuid_context("formula_race_captain_login.request", "rpc/exos_v2_team_access_login", "p_join_code", join_code)
         _trace_uuid_context("formula_race_captain_login.request", "rpc/exos_v2_team_access_login", "p_team_id", team_id)
         _trace_uuid_context("formula_race_captain_login.request", "rpc/exos_v2_team_access_login", "p_device_id", device_id)
-        row = self._rpc(
+        raw_response = self._rpc(
             "exos_v2_team_access_login",
             {
                 "p_join_code": str(join_code).strip().upper(),
@@ -590,7 +646,9 @@ class FormulaRaceCoreV2StagingAdapter:
                 "p_pin": str(pin).strip(),
                 "p_device_id": str(device_id).strip(),
             },
-        ) or {}
+        )
+        _trace_captain_login_raw_response(raw_response)
+        row = raw_response or {}
         self.last_login_rpc_response = dict(row) if isinstance(row, dict) else {}
         raw_token = row.get("SessionToken", row.get("session_token", ""))
         _trace_uuid_context("formula_race_captain_login.response", "rpc/exos_v2_team_access_login", "SessionToken", raw_token)
