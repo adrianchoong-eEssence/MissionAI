@@ -84,15 +84,44 @@ def _resolve_event_candidates(event_id: str) -> list[str]:
 
 
 def _uuid_filter_value(value: str) -> str:
-    return str(value).strip()
+    return _normalise_uuid_value(value)
 
 
 def _is_valid_uuid(value: str) -> bool:
+    return bool(_normalise_uuid_value(value))
+
+
+def _normalise_uuid_value(value: object) -> str:
+    raw = str(value).strip() if value is not None else ""
     try:
-        UUID(str(value).strip())
-        return True
+        return str(UUID(raw))
     except (ValueError, AttributeError, TypeError):
-        return False
+        return ""
+
+
+def _require_uuid(value: object, field: str) -> str:
+    token = _normalise_uuid_value(value)
+    if not token:
+        raise RuntimeError(f"Invalid UUID supplied for {field}.")
+    return token
+
+
+def _optional_uuid_filter(
+    field: str,
+    value: object,
+    *,
+    required: bool,
+    step: str,
+    rpc_or_table: str,
+) -> str | None:
+    token = _normalise_uuid_value(value)
+    if not token:
+        if required:
+            raise RuntimeError(f"Invalid UUID supplied for {field}.")
+        _trace_uuid_context(f"{step}.omit", rpc_or_table, field, value)
+        return None
+    _trace_uuid_context(step, rpc_or_table, field, token)
+    return f"eq.{token}"
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -565,14 +594,13 @@ class FormulaRaceCoreV2StagingAdapter:
         self.last_login_rpc_response = dict(row) if isinstance(row, dict) else {}
         raw_token = row.get("SessionToken", row.get("session_token", ""))
         _trace_uuid_context("formula_race_captain_login.response", "rpc/exos_v2_team_access_login", "SessionToken", raw_token)
-        raw_token = "" if raw_token is None else str(raw_token).strip()
-        token = raw_token
+        token = _normalise_uuid_value(raw_token)
         self.last_login_normalized_token = token
         event_id = str(row.get("EventID", row.get("event_id", ""))).strip()
         team_id = str(row.get("TeamID", row.get("team_id", ""))).strip()
         ambiguous = bool(row.get("Ambiguous", False))
         recovery_required = bool(row.get("RecoveryRequired", False))
-        if not _is_valid_uuid(token):
+        if not token:
             raise RuntimeError("Invalid captain session token returned by login service.")
         if not event_id or not team_id:
             raise RuntimeError("Login response missing EventID or TeamID.")
@@ -590,18 +618,20 @@ class FormulaRaceCoreV2StagingAdapter:
     def restore_formula_race_captain(self, session_token: str, device_id: str) -> dict[str, Any]:
         _trace_uuid_context("restore_formula_race_captain.request", "rpc/exos_v2_restore_team_access", "p_session_token", session_token)
         _trace_uuid_context("restore_formula_race_captain.request", "rpc/exos_v2_restore_team_access", "p_device_id", device_id)
-        if not _is_valid_uuid(session_token):
-            raise RuntimeError("Invalid captain session token.")
+        token = _require_uuid(session_token, "p_session_token")
         row = self._rpc(
             "exos_v2_restore_team_access",
             {
-                "p_session_token": str(session_token).strip(),
+                "p_session_token": token,
                 "p_device_id": str(device_id).strip(),
             },
         ) or {}
         _trace_uuid_context("restore_formula_race_captain.response", "rpc/exos_v2_restore_team_access", "SessionToken", row.get("SessionToken"))
+        response_token = _normalise_uuid_value(row.get("SessionToken", token))
+        if not response_token:
+            raise RuntimeError("Invalid captain session token returned by restore service.")
         return {
-            "SessionToken": str(row.get("SessionToken", str(session_token))),
+            "SessionToken": response_token,
             "EventID": str(row.get("EventID", row.get("event_id", ""))),
             "TeamID": str(row.get("TeamID", row.get("team_id", ""))),
             "TeamName": str(row.get("TeamName", row.get("team_name", ""))),
@@ -641,12 +671,13 @@ class FormulaRaceCoreV2StagingAdapter:
         }
 
     def formula_race_captain_workspace(self, session_token: str, device_id: str) -> dict[str, Any]:
-        _trace_uuid_context("formula_race_captain_workspace.request", "team_access_sessions_v2", "session_token", session_token)
+        token = _require_uuid(session_token, "session_token")
+        _trace_uuid_context("formula_race_captain_workspace.request", "team_access_sessions_v2", "session_token", token)
         _trace_uuid_context("formula_race_captain_workspace.request", "team_access_sessions_v2", "device_id", device_id)
         rows = self._get(
             "team_access_sessions_v2",
             {
-                "session_token": f"eq.{str(session_token).strip()}",
+                "session_token": f"eq.{token}",
                 "device_id": f"eq.{str(device_id).strip()}",
                 "select": "team_access_session_id,event_id,team_id,is_active,last_seen_at,updated_at",
                 "limit": "1",
@@ -700,12 +731,13 @@ class FormulaRaceCoreV2StagingAdapter:
         }
 
     def formula_race_captain_logout(self, session_token: str, device_id: str) -> dict[str, Any]:
-        _trace_uuid_context("formula_race_captain_logout.request", "team_access_sessions_v2", "session_token", session_token)
+        token = _require_uuid(session_token, "session_token")
+        _trace_uuid_context("formula_race_captain_logout.request", "team_access_sessions_v2", "session_token", token)
         _trace_uuid_context("formula_race_captain_logout.request", "team_access_sessions_v2", "device_id", device_id)
         rows = self._get(
             "team_access_sessions_v2",
             {
-                "session_token": f"eq.{str(session_token).strip()}",
+                "session_token": f"eq.{token}",
                 "device_id": f"eq.{str(device_id).strip()}",
                 "select": "team_access_session_id",
                 "limit": "1",
@@ -743,11 +775,15 @@ class FormulaRaceCoreV2StagingAdapter:
         return participant_id
 
     def _submission_event_id(self, submission_id: str) -> str:
-        rows = self._get("submissions_v2", {"submission_id": f"eq.{_uuid_filter_value(submission_id)}", "select": "event_id", "limit": "1"})
+        submission_id = _require_uuid(submission_id, "submission_id")
+        _trace_uuid_context("_submission_event_id", "submissions_v2", "submission_id", submission_id)
+        rows = self._get("submissions_v2", {"submission_id": f"eq.{submission_id}", "select": "event_id", "limit": "1"})
         return str(rows[0].get("event_id", "")) if rows else ""
 
     def _submission_team_id(self, submission_id: str) -> str:
-        rows = self._get("submissions_v2", {"submission_id": f"eq.{_uuid_filter_value(submission_id)}", "select": "team_id", "limit": "1"})
+        submission_id = _require_uuid(submission_id, "submission_id")
+        _trace_uuid_context("_submission_team_id", "submissions_v2", "submission_id", submission_id)
+        rows = self._get("submissions_v2", {"submission_id": f"eq.{submission_id}", "select": "team_id", "limit": "1"})
         return str(rows[0].get("team_id", "")) if rows else ""
 
     def formula_race_submit_checkpoint(
@@ -759,13 +795,23 @@ class FormulaRaceCoreV2StagingAdapter:
         storage_reference: str = "",
         idempotency_key: str = "",
     ) -> dict[str, Any]:
-        _trace_uuid_context("formula_race_submit_checkpoint.request", "team_access_sessions_v2", "session_token", session_token)
+        token = _require_uuid(session_token, "session_token")
+        _trace_uuid_context("formula_race_submit_checkpoint.request", "team_access_sessions_v2", "session_token", token)
         _trace_uuid_context("formula_race_submit_checkpoint.request", "team_access_sessions_v2", "device_id", device_id)
         _trace_uuid_context("formula_race_submit_checkpoint.request", "submissions_v2", "activity_id", activity_id)
+        activity_filter = _optional_uuid_filter(
+            "activity_id",
+            activity_id,
+            required=True,
+            step="formula_race_submit_checkpoint.request.activity",
+            rpc_or_table="submissions_v2",
+        )
+        if not activity_filter:
+            raise RuntimeError("Invalid activity id.")
         rows = self._get(
             "team_access_sessions_v2",
             {
-                "session_token": f"eq.{str(session_token).strip()}",
+                "session_token": f"eq.{token}",
                 "device_id": f"eq.{str(device_id).strip()}",
                 "is_active": "eq.true",
                 "select": "event_id,team_id",
@@ -788,7 +834,7 @@ class FormulaRaceCoreV2StagingAdapter:
                 "event_id": event_id,
                 "team_id": team_id,
                 "participant_id": participant_id,
-                "activity_id": str(activity_id),
+                "activity_id": activity_filter.replace("eq.", "", 1),
                 "submission_key": submission_key,
                 "submission_status": "SUBMITTED",
                 "submission_payload": {
@@ -833,12 +879,22 @@ class FormulaRaceCoreV2StagingAdapter:
         return {"SubmissionID": submission_id, "EventID": event_id, "TeamID": team_id, "Status": "SUBMITTED"}
 
     def formula_race_purchase(self, session_token: str, device_id: str, item_id: str, quantity: int = 1, idempotency_key: str = "") -> dict[str, Any]:
-        _trace_uuid_context("formula_race_purchase.request", "team_access_sessions_v2", "session_token", session_token)
+        token = _require_uuid(session_token, "session_token")
+        _trace_uuid_context("formula_race_purchase.request", "team_access_sessions_v2", "session_token", token)
         _trace_uuid_context("formula_race_purchase.request", "team_access_sessions_v2", "device_id", device_id)
+        item_filter = _optional_uuid_filter(
+            "item_id",
+            item_id,
+            required=True,
+            step="formula_race_purchase.request.item",
+            rpc_or_table="marketplace_items_v2",
+        )
+        if not item_filter:
+            raise RuntimeError("Invalid marketplace item id.")
         rows = self._get(
             "team_access_sessions_v2",
             {
-                "session_token": f"eq.{str(session_token).strip()}",
+                "session_token": f"eq.{token}",
                 "device_id": f"eq.{str(device_id).strip()}",
                 "is_active": "eq.true",
                 "select": "event_id,team_id",
@@ -858,7 +914,7 @@ class FormulaRaceCoreV2StagingAdapter:
             "marketplace_items_v2",
             {
                 "event_id": f"eq.{event_id}",
-                "item_id": f"eq.{str(item_id).strip()}",
+                "item_id": item_filter,
                 "select": "item_id,item_name,unit_cost_credits,stock_limit,is_active",
                 "limit": "1",
             },
@@ -875,7 +931,7 @@ class FormulaRaceCoreV2StagingAdapter:
             {
                 "event_id": f"eq.{event_id}",
                 "team_id": f"eq.{team_id}",
-                "item_id": f"eq.{str(item_id).strip()}",
+                "item_id": item_filter,
                 "select": "quantity",
             },
         )
@@ -891,12 +947,15 @@ class FormulaRaceCoreV2StagingAdapter:
         participant_id = self._team_participant(event_id, team_id)
         _trace_uuid_context("formula_race_purchase.participant", "participants_v2", "participant_id", participant_id)
         tx_key = str(idempotency_key or f"{event_id}:{team_id}:{item_id}:{_now_iso()}")
+        participant_id = _normalise_uuid_value(participant_id)
+        if not participant_id:
+            raise RuntimeError("Invalid participant id.")
         credit = self._rpc(
             "exos_v2_ledger_credit",
             {
                 "p_event_id": event_id,
                 "p_team_id": team_id,
-                "p_participant_id": _uuid_filter_value(participant_id) if participant_id else None,
+                "p_participant_id": participant_id,
                 "p_transaction_type": "PURCHASE",
                 "p_amount": -int(cost),
                 "p_reason": str(item.get("item_name", "Marketplace purchase")),
@@ -914,7 +973,7 @@ class FormulaRaceCoreV2StagingAdapter:
             {
                 "event_id": event_id,
                 "team_id": team_id,
-                "item_id": str(item_id),
+                "item_id": item_filter.replace("eq.", "", 1),
                 "credit_transaction_id": credit_txn_id,
                 "quantity": qty,
                 "amount_paid": int(cost),
@@ -929,6 +988,7 @@ class FormulaRaceCoreV2StagingAdapter:
 
     def formula_race_review_checkpoint(self, submission_id: str, decision: str, reviewer_id: str, notes: str = "", reason: str = "", idempotency_key: str = "") -> dict[str, Any]:
         mapped = str(decision or "").strip().upper()
+        submission_id = _require_uuid(submission_id, "submission_id")
         _trace_uuid_context("formula_race_review_checkpoint.request", "submissions_v2", "submission_id", submission_id)
         _trace_uuid_context("formula_race_review_checkpoint.request", "reviews_v2", "reviewer_id", reviewer_id)
         if mapped in {"APPROVE", "APPROVED"}:
@@ -944,7 +1004,7 @@ class FormulaRaceCoreV2StagingAdapter:
         existing = self._get(
             "reviews_v2",
             {
-                "submission_id": f"eq.{_uuid_filter_value(submission_id)}",
+                "submission_id": f"eq.{submission_id}",
                 "reviewer": f"eq.{str(reviewer_id).strip()}",
                 "select": "review_id",
                 "limit": "1",
@@ -952,8 +1012,8 @@ class FormulaRaceCoreV2StagingAdapter:
         )
 
         payload = {
-            "event_id": self._submission_event_id(_uuid_filter_value(submission_id)),
-            "submission_id": _uuid_filter_value(submission_id),
+            "event_id": self._submission_event_id(submission_id),
+            "submission_id": submission_id,
             "reviewer": str(reviewer_id or "facilitator"),
             "decision": decision_value,
             "score_points": score_points,
@@ -979,16 +1039,16 @@ class FormulaRaceCoreV2StagingAdapter:
                 review_id = str(created.get("review_id", ""))
 
         if decision_value == "APPROVE":
-            event_id = str(self._submission_event_id(_uuid_filter_value(submission_id)))
-            team_id = str(self._submission_team_id(_uuid_filter_value(submission_id)))
+            event_id = str(self._submission_event_id(submission_id))
+            team_id = str(self._submission_team_id(submission_id))
             if event_id and team_id:
-                _trace_uuid_context("formula_race_review_checkpoint.rpc", "exos_v2_ledger_score", "p_submission_id", _uuid_filter_value(submission_id))
+                _trace_uuid_context("formula_race_review_checkpoint.rpc", "exos_v2_ledger_score", "p_submission_id", submission_id)
                 self._rpc(
                     "exos_v2_ledger_score",
                     {
                         "p_event_id": event_id,
                         "p_team_id": team_id,
-                        "p_submission_id": _uuid_filter_value(submission_id),
+                        "p_submission_id": submission_id,
                         "p_amount": 10,
                         "p_reason": "Checkpoint approved",
                         "p_scoring_mode": "TEAM_COMPETITIVE",
@@ -997,17 +1057,17 @@ class FormulaRaceCoreV2StagingAdapter:
                 )
                 self._patch(
                     "submissions_v2",
-                    {"submission_id": f"eq.{_uuid_filter_value(submission_id)}"},
+                    {"submission_id": f"eq.{submission_id}"},
                     {"submission_status": "APPROVED", "reviewed_at": _now_iso(), "reviewed_by": str(reviewer_id or "facilitator")},
                 )
         else:
             self._patch(
                 "submissions_v2",
-                {"submission_id": f"eq.{_uuid_filter_value(submission_id)}"},
+                {"submission_id": f"eq.{submission_id}"},
                 {"submission_status": "REJECTED", "reviewed_at": _now_iso(), "reviewed_by": str(reviewer_id or "facilitator")},
             )
 
-        return {"ReviewID": review_id, "SubmissionID": str(submission_id)}
+        return {"ReviewID": review_id, "SubmissionID": submission_id}
 
     # ---------------------------
     # Control-plane writes from Control Runtime

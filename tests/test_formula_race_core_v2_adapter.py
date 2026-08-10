@@ -119,7 +119,7 @@ def test_race_adapter_captain_workspace_returns_default_build_status_when_empty(
                 "team_id": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F",
                 "is_active": True,
                 "device_id": "DEVICE-ONE",
-                "session_token": "TOKEN-ONE",
+                "session_token": "123e4567-e89b-12d3-a456-426614174000",
                 "last_seen_at": "2026-08-10T00:00:00Z",
                 "updated_at": "2026-08-10T00:00:00Z",
             }
@@ -186,3 +186,50 @@ def test_formula_race_captain_login_rejects_missing_session_token():
             assert False, "Expected missing token to raise"
         except Exception:
             pass
+
+
+def test_formula_race_captain_workspace_rejects_invalid_session_token_before_runtime_call():
+    class FakeRuntime:
+        is_configured = True
+        can_publish = True
+        url = "https://staging.exos-core-v2.example.com"
+
+        def __init__(self):
+            self.calls = 0
+
+        def _request(self, method, path, payload=None, query=None, admin=True):
+            self.calls += 1
+            return []
+
+    runtime = FakeRuntime()
+    with _staging_env():
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+    try:
+        adapter.formula_race_captain_workspace("None", "DEVICE-ONE")
+        assert False
+    except Exception:
+        pass
+    assert runtime.calls == 0
+
+
+def test_formula_race_restore_captain_session_rejects_invalid_token_without_rpc():
+    class FakeRuntime:
+        is_configured = True
+        can_publish = True
+        url = "https://staging.exos-core-v2.example.com"
+        def __init__(self):
+            self.calls = 0
+        def _request(self, method, path, payload=None, query=None, admin=True):
+            self.calls += 1
+            return {}
+
+    runtime = FakeRuntime()
+    with _staging_env():
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+    for token in ("None", "null", "", "not-a-uuid", "123"):
+        try:
+            adapter.restore_formula_race_captain(token, "DEVICE-ONE")
+            assert False
+        except Exception:
+            pass
+    assert runtime.calls == 0

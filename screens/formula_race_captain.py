@@ -1,10 +1,11 @@
-"""Formula R.A.C.E. fixed-team captain surface."""
-import json
-from pathlib import Path
 import uuid
 import html
 import os
+import json
+from pathlib import Path
+from typing import Any
 import streamlit as st
+
 from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 
@@ -28,11 +29,42 @@ def _normalise_session_token(value) -> str:
     return raw if _is_valid_session_token(raw) else ""
 
 
-def _is_valid_login_payload(payload: dict[str, object]) -> bool:
-    event_id = str(payload.get("EventID", "")).strip()
-    team_id = str(payload.get("TeamID", "")).strip()
-    token = _normalise_session_token(payload.get("SessionToken"))
-    return bool(event_id and team_id and token and not bool(payload.get("Ambiguous")) and not bool(payload.get("RecoveryRequired")))
+def _staging_mode() -> bool:
+    return str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging"
+
+
+def _normalise_session_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    token = _normalise_session_token(payload.get("SessionToken", payload.get("session_token")))
+    event_id = str(payload.get("EventID", payload.get("event_id", ""))).strip()
+    team_id = str(payload.get("TeamID", payload.get("team_id", ""))).strip()
+    if not token or not event_id or not team_id:
+        return None
+    if bool(payload.get("Ambiguous")) or bool(payload.get("RecoveryRequired")):
+        return None
+    return {
+        "SessionToken": token,
+        "EventID": event_id,
+        "TeamID": team_id,
+        "TeamName": str(payload.get("TeamName", "")),
+        "Ambiguous": False,
+        "RecoveryRequired": False,
+    }
+
+
+def _clear_captain_query_param() -> None:
+    st.query_params.pop("captain_session", None)
+    if "captain_session" in st.query_params:
+        st.query_params["captain_session"] = ""
+
+
+def _write_captain_session_param(token: str) -> None:
+    normalised = _normalise_session_token(token)
+    if not normalised:
+        _clear_captain_query_param()
+        return
+    st.query_params["captain_session"] = normalised
 
 
 def _device_id():
@@ -41,52 +73,47 @@ def _device_id():
     return value
 
 def _set_session(payload):
-    if not _is_valid_login_payload(payload or {}):
+    normalised_session = _normalise_session_payload(payload)
+    if not normalised_session:
         raise RuntimeError("Invalid captain login payload.")
-    st.session_state["race_captain"]=dict(payload);st.query_params["race"]="1"
-    token = _normalise_session_token(payload.get("SessionToken"))
-    if str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging":
+    st.session_state["race_captain"] = normalised_session
+    st.query_params["race"] = "1"
+    token = normalised_session.get("SessionToken", "")
+    if _staging_mode():
         print(
             f"CAPTAIN UUID TRACE | _set_session | rpc/table: captain_session | field: SessionToken | "
             f"is_none: {payload.get('SessionToken') is None} | is_literal_none: {str(payload.get('SessionToken')).strip().lower() == 'none'} | "
             f"is_valid_uuid: {bool(_is_valid_session_token(payload.get('SessionToken')))}"
         )
-    if token:
-        st.query_params["captain_session"]=token
-    else:
-        try:
-            st.query_params.pop("captain_session", None)
-        except Exception:
-            if "captain_session" in st.query_params:
-                st.query_params["captain_session"] = ""
+    _write_captain_session_param(token)
 
 
 def _is_staging_mode() -> bool:
-    return str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging"
+    return _staging_mode()
 
 
 def _build_runtime(runtime_override=None):
     runtime = runtime_override or get_runtime_database()
-    if not _is_staging_mode():
+    if not _staging_mode():
         return runtime
     return FormulaRaceCoreV2StagingAdapter(runtime)
 
 def show_formula_race_captain(runtime_override=None):
     runtime = _build_runtime(runtime_override)
-    if _is_staging_mode() and not runtime.can_publish:
+    if _staging_mode() and not runtime.can_publish:
         st.error("Core v2 staging runtime is unavailable.")
         return
-    if _is_staging_mode() and hasattr(runtime, "_assert_no_legacy_or_sheet_calls"):
+    if _staging_mode() and hasattr(runtime, "_assert_no_legacy_or_sheet_calls"):
         try:
             runtime._assert_no_legacy_or_sheet_calls()
         except RuntimeError as error:
             st.error(str(error))
             return
-    if _is_staging_mode():
+    if _staging_mode():
         st.caption("EXOS CORE V2 — STAGING")
     device=_device_id();session=st.session_state.get("race_captain")
     token=str(st.query_params.get("captain_session",""))
-    if str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging":
+    if _staging_mode():
         raw_token = token
         is_none = raw_token is None
         is_literal_none = str(raw_token).strip().lower() == "none"
@@ -96,13 +123,9 @@ def show_formula_race_captain(runtime_override=None):
             f"is_none: {is_none} | is_literal_none: {is_literal_none} | is_valid_uuid: {bool(normalised)}"
         )
     token=_normalise_session_token(token)
-    if session and not _is_valid_login_payload(session):
-        if str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging":
-            print("CAPTAIN UUID TRACE | session_state_invalid_session | rpc/table: session_state | field: race_captain.SessionToken | is_none: True | is_literal_none: True | is_valid_uuid: False")
-        st.session_state.pop("race_captain",None)
-        if "captain_session" in st.query_params:
-            st.query_params.pop("captain_session",None)
-        session = None
+    session = _normalise_session_payload(session)
+    if not session and token:
+        _clear_captain_query_param()
     if not session and token:
         try:session=runtime.restore_formula_race_captain(token,device)
         except RuntimeDatabaseError:session=None
@@ -110,7 +133,8 @@ def show_formula_race_captain(runtime_override=None):
             try:
                 _set_session(session)
             except RuntimeError:
-                st.session_state.pop("race_captain",None)
+                st.session_state.pop("race_captain", None)
+                _clear_captain_query_param()
                 session=None
     if not session:
         st.title("Formula R.A.C.E.");st.caption("TEAM CAPTAIN ACCESS · ONE TEAM · ONE ACTIVE DEVICE")
@@ -133,15 +157,17 @@ def show_formula_race_captain(runtime_override=None):
             except RuntimeError as error:st.error(str(error));return
             st.rerun()
             return
+    if not session:
+        return
     event_id=str(session.get("EventID",""));team_id=str(session.get("TeamID",""));name=str(session.get("TeamName",""))
-    if not _is_valid_login_payload(session):
+    if not _normalise_session_payload(session):
         if _is_staging_mode():
             print("CAPTAIN UUID TRACE | session_state_rejected_before_workspace | rpc/table: race_captain_session | field: SessionToken | is_none: True | is_literal_none: True | is_valid_uuid: False")
         st.session_state.pop("race_captain",None)
-        if "captain_session" in st.query_params:
-            st.query_params.pop("captain_session",None)
+        _clear_captain_query_param()
         return
-    try:workspace=runtime.formula_race_captain_workspace(session.get("SessionToken",""),device)
+    try:
+        workspace=runtime.formula_race_captain_workspace(str(session.get("SessionToken","")),device)
     except RuntimeDatabaseError as error:
         st.error(str(error));return
     if _is_staging_mode() and hasattr(runtime, "get_staging_call_counts"):
