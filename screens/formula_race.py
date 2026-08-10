@@ -197,7 +197,7 @@ def overview(s):
     ]): col.metric(label,value,delta)
     left,right=st.columns([1.45,1])
     with left:
-        st.subheader("Live Championship"); _team_rows(s,4)
+        st.subheader("Live Championship"); _team_rows(s)
     with right:
         st.subheader("Recent Activity")
         for item in s.activity: st.markdown(f"<div class='race-card'>{item}</div>",unsafe_allow_html=True)
