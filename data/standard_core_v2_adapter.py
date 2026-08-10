@@ -8,10 +8,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import os
 import secrets
 import string
 import uuid
 from typing import Any
+from urllib.parse import urlparse
+
+import streamlit as st
 
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 from engines.programme_duplication import clone_programme_stages
@@ -26,6 +30,17 @@ _V2_TABLES = {
     "score_transactions_v2", "credit_transactions_v2", "audit_log_v2",
     "projector_state_v2", "marketplace_items_v2", "marketplace_transactions_v2",
 }
+_KNOWN_PRODUCTION_HOSTS = {"bqsbkdfzqyiodivhyxnq.supabase.co"}
+
+
+def _deployment_environment() -> str:
+    value = str(os.getenv("EXOS_ENV", "") or "").strip()
+    if value:
+        return value.casefold()
+    try:
+        return str(st.secrets.get("EXOS_ENV", "") or "").strip().casefold()
+    except Exception:
+        return ""
 
 
 def _now() -> str:
@@ -43,6 +58,12 @@ class StandardCoreV2Adapter:
         self._client = runtime or get_runtime_database()
         if not self._client.is_configured:
             raise RuntimeDatabaseError("Core v2 is not configured. SUPABASE_URL and a publishable key are required.")
+        if _deployment_environment() == "staging":
+            host = (urlparse(str(self._client.url)).hostname or "").casefold()
+            if not host or host in _KNOWN_PRODUCTION_HOSTS:
+                raise RuntimeDatabaseError(
+                    f"Staging isolation blocked non-staging Supabase host: {host or 'missing'}"
+                )
         self.runtime = self
         self.legacy_runtime_calls = 0
         self.google_sheets_runtime_calls = 0

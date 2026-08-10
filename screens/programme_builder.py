@@ -943,6 +943,33 @@ def render_programme_first_builder(db):
                 "judging, results, sessions, or runtime state will be copied."
             )
 
+    with st.expander("Start Blank"):
+        st.caption(
+            "Deactivate the current programme configuration and begin with an empty timeline. "
+            "Existing operational history is preserved and no participant data is deleted."
+        )
+        blank_confirmed = st.checkbox(
+            "Confirm Start Blank",
+            key=f"start_blank_confirm_{event_id}",
+        )
+        if st.button(
+            "Start Blank",
+            disabled=not blank_confirmed,
+            key=f"start_blank_{event_id}",
+        ):
+            try:
+                db.save_programme_stages(event_id, [])
+            except Exception as error:
+                _set_programme_save_state(event_id, "SAVE FAILED", error=error)
+                st.error(f"Start Blank failed: {error}")
+            else:
+                st.session_state.pop(f"canonical_programme_preview_{event_id}", None)
+                st.session_state[f"programme_notice_{event_id}"] = (
+                    "Programme configuration cleared. Operational history was preserved."
+                )
+                _set_programme_save_state(event_id, "SAVED")
+                st.rerun()
+
     with st.expander("Import Programme"):
         import_text = st.text_area(
             "Paste programme JSON",

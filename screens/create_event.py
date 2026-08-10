@@ -202,6 +202,15 @@ def _event_form(db, event=None):
             value=str((event or {}).get("JoinCode", "")),
             placeholder="Leave blank to generate automatically",
         ).upper().strip()
+        current_status = str((event or {}).get("Status", "Draft") or "Draft").title()
+        status_options = ["Draft", "Active", "Archived"]
+        if current_status not in status_options:
+            status_options.append(current_status)
+        status = st.selectbox(
+            "Status",
+            status_options,
+            index=status_options.index(current_status),
+        )
         submitted = st.form_submit_button(
             "Save Changes" if editing else "Create Event",
             type="primary",
@@ -234,6 +243,8 @@ def _event_form(db, event=None):
             int(teams),
             facilitator,
         )
+        if status != "Draft":
+            db.update_event(event_id, {"Status": status})
     else:
         existing_teams = db.get_teams(event_id)
         if int(teams) != len(existing_teams):
@@ -263,6 +274,7 @@ def _event_form(db, event=None):
             "ProgrammeType": programme_type,
             "JoinCode": final_join_code,
             "NumberOfTeams": int(teams),
+            "Status": status,
         })
 
     _save_event_metadata(

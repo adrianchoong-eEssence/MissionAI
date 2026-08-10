@@ -1,7 +1,10 @@
 import ast
 from pathlib import Path
 
-from data.runtime_database import SupabaseRuntimeDB
+import pytest
+
+from data.runtime_database import RuntimeDatabaseError, SupabaseRuntimeDB
+from data.standard_core_v2_adapter import StandardCoreV2Adapter
 from engines.programme_hierarchy import activity_details, encode_activity_details
 
 
@@ -31,6 +34,16 @@ def test_standard_adapter_has_strict_core_v2_guard():
     assert '"runtime_events"' not in source
     assert '"runtime_participants"' not in source
     assert '"runtime_submissions"' not in source
+
+
+def test_staging_admin_refuses_known_production_host(monkeypatch):
+    class Runtime:
+        is_configured = True
+        url = "https://bqsbkdfzqyiodivhyxnq.supabase.co"
+
+    monkeypatch.setenv("EXOS_ENV", "staging")
+    with pytest.raises(RuntimeDatabaseError, match="Staging isolation blocked"):
+        StandardCoreV2Adapter(Runtime())
 
 
 def test_standard_runtime_migration_reuses_existing_v2_tables_only():
@@ -65,6 +78,23 @@ def test_builder_exposes_scoring_and_submission_ownership_controls():
     source = (ROOT / "screens/programme_builder.py").read_text()
     for text in ("Scoring mode", "Submission ownership", "Individual activity", "Team activity", "Submission type"):
         assert text in source
+
+
+def test_existing_admin_core_v2_staging_controls_are_explicit():
+    event_home = (ROOT / "screens/events_home.py").read_text()
+    create_event = (ROOT / "screens/create_event.py").read_text()
+    builder = (ROOT / "screens/programme_builder.py").read_text()
+    assert "Refresh Events" in event_home
+    assert 'st.selectbox(\n            "Status"' in create_event
+    assert 'with st.expander("Start Blank")' in builder
+    assert 'db.save_programme_stages(event_id, [])' in builder
+
+
+def test_admin_entrypoint_remains_existing_missionai_app():
+    source = (ROOT / "MissionAI.py").read_text()
+    assert 'if page == "Events":\n    show_events_home()' in source
+    assert 'elif page == "Create Event":\n    show_create_event()' in source
+    assert 'elif page == "Programme Builder":\n    show_programme_builder()' in source
 
 
 def test_activity_configuration_round_trips_scope_and_scoring():

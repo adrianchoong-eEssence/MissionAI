@@ -11,10 +11,14 @@ def show_events_home():
     st.caption("Create a new event or continue from where you left off.")
     db = get_standard_database()
 
-    create_col, open_col = st.columns([1, 2])
+    create_col, refresh_col, open_col = st.columns([1, 1, 2])
     with create_col:
         if st.button("Create New Event", type="primary", width="stretch"):
             request_navigation("Create Event")
+    with refresh_col:
+        if st.button("Refresh Events", width="stretch"):
+            db.clear_cache()
+            st.rerun()
     with open_col:
         search = st.text_input(
             "Find an event",
