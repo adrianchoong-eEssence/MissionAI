@@ -22,9 +22,9 @@ from data.google_drive import (
     upload_evidence_file,
     upload_photo,
 )
-from data.google_sheets import GoogleSheetsDB
+from data.standard_core_v2_adapter import get_standard_database
 from data.mission_media import get_mission_media_url
-from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+from data.runtime_database import RuntimeDatabaseError
 from data.experience_repository import SupabaseExperienceRepository
 from data.upload_safety import upload_error_message
 from engines.programme_hierarchy import (
@@ -109,7 +109,7 @@ def participant_device_id():
 @st.cache_data(ttl=60, show_spinner=False)
 def participant_event_by_code(join_code):
     """One lightweight runtime lookup; no Sheets or Experience content."""
-    return get_runtime_database().get_event_by_join_code(join_code)
+    return get_standard_database().get_event_by_join_code(join_code)
 
 
 def normalise_join_code(value):
@@ -211,7 +211,7 @@ def watch_live_mission_state(session_token):
     """Poll Supabase and rerun the full app when the live stage changes."""
     try:
         runtime_state = (
-            get_runtime_database().get_participant_current_mission(
+            get_standard_database().get_participant_current_mission(
                 session_token
             )
             or {}
@@ -268,7 +268,7 @@ def restore_session_from_query_params(runtime):
                 del st.query_params[key]
         return
 
-    db = GoogleSheetsDB()
+    db = get_standard_database()
     if not event_id or not participant_name:
         return
 
@@ -1596,7 +1596,7 @@ def yes_no_value(value):
 def render_marketplace(session_token):
     st.subheader("🛒 Team Marketplace")
     try:
-        marketplace = get_runtime_database().get_team_wallet(session_token)
+        marketplace = get_standard_database().get_team_wallet(session_token)
     except RuntimeDatabaseError as error:
         st.warning("The marketplace is reconnecting. Please try again shortly.")
         st.caption(str(error))
@@ -1646,7 +1646,7 @@ def render_marketplace(session_token):
                 width="stretch",
             ):
                 try:
-                    purchase = get_runtime_database().purchase_marketplace_item(
+                    purchase = get_standard_database().purchase_marketplace_item(
                         session_token=session_token,
                         item_id=item_id,
                         quantity=int(quantity),
@@ -1931,7 +1931,7 @@ def _road_hunt_team_missions_missing(error):
 
 def render_road_hunt_mission_hub(session_token):
     """Return the mission selected from this team's reached checkpoints."""
-    runtime = get_runtime_database()
+    runtime = get_standard_database()
     try:
         state = runtime.get_road_hunt_unlocked_missions(session_token)
     except RuntimeDatabaseError as error:
@@ -2006,7 +2006,7 @@ def render_road_hunt_mission_hub(session_token):
 
 def render_road_hunt_navigator(session_token):
     """Render the optional navigator-only GPS control for Road Hunt events."""
-    runtime = get_runtime_database()
+    runtime = get_standard_database()
     try:
         state = runtime.get_road_hunt_participant_state(session_token)
     except RuntimeDatabaseError as error:
@@ -2381,7 +2381,7 @@ def render_sync_ai_participant(db, event_id, session_token):
 
     if session_token:
         try:
-            marketplace = get_runtime_database().get_team_wallet(session_token)
+            marketplace = get_standard_database().get_team_wallet(session_token)
             wallet = marketplace.get("Wallet", {}) or {}
             st.metric(
                 "Approved Intelligence Credits",
@@ -2409,7 +2409,7 @@ def render_sync_ai_participant(db, event_id, session_token):
 
 
 def show_participant():
-    runtime = get_runtime_database()
+    runtime = get_standard_database()
     restore_session_from_query_params(runtime)
 
     candidate = st.session_state.get("participant_recovery_candidate")
@@ -2508,7 +2508,7 @@ def show_participant():
                         player.get("Status", "")
                     )
                 else:
-                    db = db or GoogleSheetsDB()
+                    db = db or get_standard_database()
                     player = db.join_player_by_code(
                         pending["join_code"],
                         pending["participant_name"],
@@ -2540,7 +2540,7 @@ def show_participant():
                 st.session_state.pop("participant_join_request", None)
                 st.rerun()
 
-            db = db or GoogleSheetsDB()
+            db = db or get_standard_database()
             ai = db.assign_ai_facilitator(player["Team"]) or {}
 
             if player.get("Rejoined"):
@@ -2571,7 +2571,7 @@ def show_participant():
             if player.get("RecoveryRequired"):
                 st.session_state["participant_recovery_candidate"] = player
                 st.rerun()
-            db = GoogleSheetsDB()
+            db = get_standard_database()
             ai = db.assign_ai_facilitator(player["Team"]) or {}
             restore_participant_identity(player)
             apply_participant_ai_identity(ai, player["EventID"])
@@ -2581,7 +2581,7 @@ def show_participant():
         st.caption(f"Build: {running_build_sha()}")
         return
 
-    db = GoogleSheetsDB()
+    db = get_standard_database()
 
     experience_header(
         experience_title(

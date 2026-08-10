@@ -1,4 +1,5 @@
 import html
+import json
 
 import streamlit as st
 
@@ -67,9 +68,13 @@ DEFAULT_BROADCAST = {
 
 
 def projector_broadcast_state(event):
-    from data.google_sheets import GoogleSheetsDB
-
-    metadata = GoogleSheetsDB.event_metadata(event)
+    metadata = dict((event or {}).get("_EventPayload") or {})
+    if not metadata:
+        try:
+            parsed = json.loads(str((event or {}).get("Notes", "") or "{}"))
+            metadata = parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError):
+            metadata = {}
     stored = metadata.get("ProjectorBroadcast", {}) or {}
     state = dict(DEFAULT_BROADCAST)
     state.update({

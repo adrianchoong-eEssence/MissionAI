@@ -24,7 +24,7 @@ from data.mahb_media_explore import (
     MAHB_MEDIA_EXPLORE_TEAMS,
     install_mahb_media_explore_pack,
 )
-from data.google_sheets import GoogleSheetsDB
+from data.standard_core_v2_adapter import get_standard_database
 from data.runtime_database import RuntimeDatabaseError
 from engines.programme_engine import ProgrammeEngine
 from engines.programme_hierarchy import (
@@ -1510,6 +1510,39 @@ def render_programme_first_builder(db):
                         "Credits", min_value=0, value=details["Credits"],
                         key=f"credits_{event_id}_{index}_{selected_position}",
                     )
+                    scoring_mode = st.selectbox(
+                        "Scoring mode",
+                        ["TEAM_COMPETITIVE", "ENTERPRISE", "NON_SCORING"],
+                        index=(
+                            ["TEAM_COMPETITIVE", "ENTERPRISE", "NON_SCORING"].index(
+                                str(details.get("ScoringMode", "TEAM_COMPETITIVE"))
+                            )
+                            if str(details.get("ScoringMode", "TEAM_COMPETITIVE"))
+                            in {"TEAM_COMPETITIVE", "ENTERPRISE", "NON_SCORING"}
+                            else 0
+                        ),
+                        key=f"scoring_mode_{event_id}_{index}_{selected_position}",
+                    )
+                    participant_scope = st.selectbox(
+                        "Submission ownership",
+                        ["TEAM", "INDIVIDUAL"],
+                        index=1 if str(details.get("ParticipantScope", "TEAM")).upper() == "INDIVIDUAL" else 0,
+                        format_func=lambda value: "Individual activity" if value == "INDIVIDUAL" else "Team activity",
+                        key=f"participant_scope_{event_id}_{index}_{selected_position}",
+                    )
+                    submission_type = st.selectbox(
+                        "Submission type",
+                        ["NONE", "TEXT", "PHOTO", "PIPELINE", "HELIUM", "KEYPUNCH", "CATALYST", "NASI"],
+                        index=(
+                            ["NONE", "TEXT", "PHOTO", "PIPELINE", "HELIUM", "KEYPUNCH", "CATALYST", "NASI"].index(
+                                str(details.get("SubmissionType", "NONE")).upper()
+                            )
+                            if str(details.get("SubmissionType", "NONE")).upper()
+                            in {"NONE", "TEXT", "PHOTO", "PIPELINE", "HELIUM", "KEYPUNCH", "CATALYST", "NASI"}
+                            else 0
+                        ),
+                        key=f"submission_type_{event_id}_{index}_{selected_position}",
+                    )
                     activity_move_col, activity_move_action = st.columns([3, 1])
                     activity_target = activity_move_col.selectbox(
                         "Move To Position",
@@ -1540,6 +1573,9 @@ def render_programme_first_builder(db):
                             "Yes" if activity_status == "Active" else "No"
                         )
                         selected_activity["ParticipantMessage"] = participant_task
+                        selected_activity["ScoringMode"] = scoring_mode
+                        selected_activity["ParticipantScope"] = participant_scope
+                        selected_activity["SubmissionType"] = submission_type
                         selected_activity["FacilitatorInstruction"] = encode_activity_details({
                             "FacilitatorInstructions": facilitator_instructions,
                             "ParticipantNarrative": participant_narrative,
@@ -1564,6 +1600,9 @@ def render_programme_first_builder(db):
                             ),
                             "Questions": questions,
                             "Credits": int(credits),
+                            "ScoringMode": scoring_mode,
+                            "ParticipantScope": participant_scope,
+                            "SubmissionType": submission_type,
                             "Rules": rules,
                             "Objectives": details["Objectives"],
                             "Scoring": details["Scoring"],
@@ -2417,7 +2456,7 @@ def render_recommendation_builder():
 def show_programme_builder():
     st.title("Programme Builder")
     st.caption("Build the event in running order. Open any module to edit it.")
-    db = GoogleSheetsDB()
+    db = get_standard_database()
     render_programme_first_builder(db)
     event_id = str(st.session_state.get(ACTIVE_EVENT_KEY, ""))
     if event_id:

@@ -480,18 +480,38 @@ class SupabaseRuntimeDB:
         if not activity_id:
             seed = f"{module_id or str(event_id)}-ACT-{uuid.uuid4().hex[:8].upper()}"
             activity_id = seed
+        activity_name = str(activity.get("StageName", "") or "").strip() or "Activity"
+        configured_submission_type = str(
+            activity.get("SubmissionType", "")
+            or details.get("SubmissionType", "")
+        ).strip().upper()
+        if not configured_submission_type:
+            normalized_name = activity_name.upper().replace(" ", "")
+            configured_submission_type = next(
+                (kind for kind in ("PIPELINE", "HELIUM", "KEYPUNCH", "CATALYST", "NASI")
+                 if kind in normalized_name),
+                "NONE",
+            )
+        participant_scope = str(
+            activity.get("ParticipantScope", "")
+            or details.get("ParticipantScope", "")
+            or ("INDIVIDUAL" if configured_submission_type == "NASI" else "TEAM")
+        ).strip().upper()
         payload = {
             "event_id": str(event_id),
             "programme_id": programme_id,
             "module_id": module_id,
-            "activity_name": str(activity.get("StageName", "") or "").strip() or "Activity",
+            "activity_name": activity_name,
             "activity_order": int(activity.get("ActivityOrder", activity.get("StageNo", 0)) or 0),
             "duration_seconds": int(float(activity.get("DurationMinutes", 0) or 0) * 60),
             "activity_type": SupabaseRuntimeDB._activity_type_for_row({
                 "ActivityType": str(details.get("ActivityType", "") or ""),
                 "StageType": activity.get("StageType", ""),
             }),
-            "scoring_mode": SupabaseRuntimeDB._scoring_mode_from_row(details),
+            "scoring_mode": SupabaseRuntimeDB._scoring_mode_from_row({
+                **details,
+                "ScoringMode": activity.get("ScoringMode", details.get("ScoringMode", "")),
+            }),
             "is_active": str(activity.get("IsActive", "Yes")).strip().casefold() != "no",
             "activity_id": activity_id,
             "activity_payload": {
@@ -512,6 +532,8 @@ class SupabaseRuntimeDB:
                 "participant_narrative": str(details.get("ParticipantNarrative", "")),
                 "participant_task": str(details.get("ParticipantTask", "")),
                 "evidence_required": bool(details.get("EvidenceRequired", False)),
+                "submission_type": configured_submission_type,
+                "participant_scope": participant_scope,
                 "evidence_requirement": str(details.get("EvidenceRequirement", "")),
                 "content_type": str(content.get("ContentType", "Standard Activity")),
                 "linked_content": str(content.get("LinkedContent", "")),
@@ -556,6 +578,7 @@ class SupabaseRuntimeDB:
                 "programme_id": f"eq.{programme_id}",
                 "select": "module_id,module_name,module_payload,activity_sequence,created_at",
                 "order": "activity_sequence.asc",
+                "is_active": "eq.true",
             },
             admin=True,
         ) or []
@@ -566,6 +589,7 @@ class SupabaseRuntimeDB:
                 "programme_id": f"eq.{programme_id}",
                 "select": "activity_id,module_id,activity_type,scoring_mode,activity_name,activity_order,activity_payload,duration_seconds,is_active,created_at",
                 "order": "activity_order.asc",
+                "is_active": "eq.true",
             },
             admin=True,
         ) or []
@@ -636,6 +660,8 @@ class SupabaseRuntimeDB:
                 "Objectives": str(payload.get("objectives", "")),
                 "Scoring": str(payload.get("scoring", "")),
                 "EvidenceRequired": bool(payload.get("evidence_required", False)),
+                "SubmissionType": str(payload.get("submission_type", "NONE")),
+                "ParticipantScope": str(payload.get("participant_scope", "TEAM")),
                 "ParticipantNarrative": str(payload.get("participant_narrative", "")),
                 "ParticipantTask": str(payload.get("participant_task", "")),
                 "EvidenceRequirement": str(payload.get("evidence_requirement", "")),
@@ -662,6 +688,8 @@ class SupabaseRuntimeDB:
                 "MissionID": str(payload.get("mission_id", "")),
                 "DisplayMode": str(payload.get("display_mode", "Collaboration")),
                 "ParticipantMessage": str(payload.get("participant_message", "")),
+                "SubmissionType": str(payload.get("submission_type", "NONE")),
+                "ParticipantScope": str(payload.get("participant_scope", "TEAM")),
                 "StartTime": str(payload.get("start_time", module.get("StartTime", ""))),
                 "FacilitatorInstruction": encode_activity_details(details),
                 "IsActive": "No" if not activity.get("is_active", True) else "Yes",

@@ -2,7 +2,7 @@ import json
 
 import streamlit as st
 
-from data.google_sheets import GoogleSheetsDB
+from data.standard_core_v2_adapter import StandardCoreV2Adapter, get_standard_database
 from screens.app_state import ACTIVE_EVENT_KEY, request_navigation
 
 
@@ -22,7 +22,7 @@ PROGRAMME_TYPES = [
 
 
 def _event_defaults(event):
-    metadata = GoogleSheetsDB.event_metadata(event)
+    metadata = StandardCoreV2Adapter.event_metadata(event)
     return {
         "DurationHours": float(metadata.get("DurationHours", 8) or 8),
         "ExpectedParticipants": int(
@@ -45,6 +45,31 @@ def _save_event_metadata(db, event_id, duration, participants, team_theme):
     })
 
 
+def _resize_event_teams(event_id, existing_teams, target_count, country_pool=None):
+    """Resize an event roster without leaking event-specific countries into Core."""
+    target_count = int(target_count)
+    pool = [str(value).strip() for value in (country_pool or []) if str(value).strip()]
+    if pool and target_count > len(pool):
+        raise ValueError(
+            f"This event has {len(pool)} unique country identities; "
+            f"choose between 1 and {len(pool)} active teams."
+        )
+    revised = [dict(team) for team in list(existing_teams)[:target_count]]
+    while len(revised) < target_count:
+        position = len(revised) + 1
+        country = pool[position - 1] if pool else f"Team {position}"
+        revised.append({
+            "TeamID": f"{event_id}-TEAM-{position:02d}",
+            "TeamName": country,
+            "Country": country,
+        })
+    if pool:
+        for position, team in enumerate(revised):
+            country = pool[position]
+            team.update({"TeamName": country, "Country": country})
+    return revised
+
+
 def _event_form(db, event=None):
     editing = bool(event)
     defaults = _event_defaults(event or {})
@@ -60,6 +85,10 @@ def _event_form(db, event=None):
             value=str((event or {}).get("EventName", "")),
         )
         venue = st.text_input("Venue", value=str((event or {}).get("Venue", "")))
+        facilitator = st.text_input(
+            "Facilitator",
+            value=str((event or {}).get("Facilitator", "")),
+        )
         event_date = st.date_input(
             "Event date",
             value=(
@@ -139,27 +168,31 @@ def _event_form(db, event=None):
             programme_type,
             final_join_code,
             int(teams),
+            facilitator,
         )
-        db.create_teams(event_id, int(teams))
     else:
         existing_teams = db.get_teams(event_id)
         if int(teams) != len(existing_teams):
             if db.get_participant_count(event_id):
                 st.error("Team count cannot change after participants have joined.")
                 return None
-            revised = list(existing_teams[: int(teams)])
-            while len(revised) < int(teams):
-                position = len(revised) + 1
-                revised.append({
-                    "TeamID": f"TEAM-{position:02d}",
-                    "TeamName": f"Team {position}",
-                })
+            try:
+                revised = _resize_event_teams(
+                    event_id,
+                    existing_teams,
+                    int(teams),
+                    StandardCoreV2Adapter.event_metadata(event).get("CountryPool", []),
+                )
+            except ValueError as error:
+                st.error(str(error))
+                return None
             db.replace_event_teams(event_id, revised)
         db.update_event(event_id, {
             "Client": client,
             "Department": department,
             "EventName": event_name,
             "Venue": venue,
+            "Facilitator": facilitator,
             "EventDate": str(event_date),
             "ProgrammeType": programme_type,
             "JoinCode": final_join_code,
@@ -184,7 +217,7 @@ def _event_form(db, event=None):
 def show_create_event():
     st.title("Create Event")
     st.caption("Enter the event essentials. Programme modules are added next.")
-    db = GoogleSheetsDB()
+    db = get_standard_database()
     active_id = str(st.session_state.get(ACTIVE_EVENT_KEY, ""))
     event = db.get_event(active_id) if active_id else None
 

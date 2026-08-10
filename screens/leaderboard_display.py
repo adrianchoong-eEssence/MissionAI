@@ -2,7 +2,7 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from branding import experience_title
-from data.google_sheets import GoogleSheetsDB
+from data.standard_core_v2_adapter import get_standard_database
 from data.runtime_database import RuntimeDatabaseError
 from engines.programme_hierarchy import friendly_type
 from engines.programme_adapter import CanonicalProgrammeAdapter, ProgrammeIntegrityError
@@ -700,7 +700,7 @@ def display_winner(leaderboard):
 def show_leaderboard_display():
     st.markdown(PROJECTOR_STYLES, unsafe_allow_html=True)
 
-    db = GoogleSheetsDB()
+    db = get_standard_database()
     events = db.get_events()
 
     if not events:

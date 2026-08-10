@@ -1,7 +1,7 @@
 import streamlit as st
 
 from branding import platform_hero
-from data.google_sheets import GoogleSheetsDB
+from data.standard_core_v2_adapter import get_standard_database
 from screens.app_state import remember_active_event, request_navigation
 
 
@@ -9,7 +9,7 @@ def show_events_home():
     platform_hero()
     st.title("Events")
     st.caption("Create a new event or continue from where you left off.")
-    db = GoogleSheetsDB()
+    db = get_standard_database()
 
     create_col, open_col = st.columns([1, 2])
     with create_col:

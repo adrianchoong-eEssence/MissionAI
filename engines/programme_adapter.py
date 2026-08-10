@@ -209,7 +209,11 @@ class CanonicalProgrammeAdapter:
             "LinkedContentHandler": CONTENT_HANDLERS[content_type],
             "Active": active,
             "Superseded": superseded,
-            "RuntimeEligible": active and not superseded,
+            # Breaks remain visible in the authored programme order, but are
+            # schedule markers rather than launchable runtime activities.
+            "RuntimeEligible": (
+                active and not superseded and content_type.casefold() != "break"
+            ),
             "StartRule": str(row.get("StartRule") or "Facilitator"),
             "EndRule": str(row.get("EndRule") or "Facilitator"),
             "FacilitatorNotes": str(details.get("FacilitatorInstructions") or row.get("FacilitatorInstruction") or ""),

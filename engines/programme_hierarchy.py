@@ -81,6 +81,9 @@ def activity_details(stage):
             "ModuleID": "",
             "AdminDisplayName": "",
             "ParticipantDisplayName": "",
+            "ScoringMode": str(stage.get("ScoringMode", "TEAM_COMPETITIVE")),
+            "ParticipantScope": str(stage.get("ParticipantScope", "TEAM")),
+            "SubmissionType": str(stage.get("SubmissionType", "NONE")),
             "ModuleDetails": {},
         }
     import json
@@ -110,6 +113,9 @@ def activity_details(stage):
         "ModuleID": str(value.get("ModuleID", "")),
         "AdminDisplayName": str(value.get("AdminDisplayName", "")),
         "ParticipantDisplayName": str(value.get("ParticipantDisplayName", "")),
+        "ScoringMode": str(value.get("ScoringMode", stage.get("ScoringMode", "TEAM_COMPETITIVE"))),
+        "ParticipantScope": str(value.get("ParticipantScope", stage.get("ParticipantScope", "TEAM"))),
+        "SubmissionType": str(value.get("SubmissionType", stage.get("SubmissionType", "NONE"))),
         "ModuleDetails": (
             value.get("ModuleDetails", {})
             if isinstance(value.get("ModuleDetails", {}), dict)

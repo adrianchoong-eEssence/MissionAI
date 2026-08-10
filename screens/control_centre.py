@@ -6,7 +6,7 @@ import re
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
-from data.google_sheets import GoogleSheetsDB
+from data.standard_core_v2_adapter import get_standard_database
 from data.control_runtime import ControlRuntime
 from data.experience_repository import SupabaseExperienceRepository
 from engines.stage_timer import remaining_seconds
@@ -659,7 +659,7 @@ def show_control_centre():
         """,
         unsafe_allow_html=True,
     )
-    db = GoogleSheetsDB()
+    db = get_standard_database()
     control = ControlRuntime(db)
     events = db.get_events()
     if not events:

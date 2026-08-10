@@ -1,0 +1,651 @@
+"""Standard EXOS application adapter backed exclusively by Core v2.
+
+This is the compatibility boundary for the existing Streamlit screens.  It
+returns the field names those screens already understand while every read and
+write is performed against ``*_v2`` tables or ``exos_v2_*`` RPCs.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+import secrets
+import string
+import uuid
+from typing import Any
+
+from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+from engines.programme_duplication import clone_programme_stages
+from engines.programme_hierarchy import activity_details, build_programme_hierarchy
+from engines.stage_timer import new_timer, transition_timer
+
+
+_V2_TABLES = {
+    "events_v2", "programmes_v2", "modules_v2", "activities_v2", "teams_v2",
+    "participants_v2", "participant_sessions_v2", "activity_runtime_v2",
+    "submissions_v2", "submission_evidence_v2", "reviews_v2",
+    "score_transactions_v2", "credit_transactions_v2", "audit_log_v2",
+    "projector_state_v2", "marketplace_items_v2", "marketplace_transactions_v2",
+}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+class StandardCoreV2Adapter:
+    """Legacy-shaped screen API with a strict Core v2 implementation."""
+
+    def __init__(self, runtime=None):
+        self._client = runtime or get_runtime_database()
+        if not self._client.is_configured:
+            raise RuntimeDatabaseError("Core v2 is not configured. SUPABASE_URL and a publishable key are required.")
+        self.runtime = self
+        self.legacy_runtime_calls = 0
+        self.google_sheets_runtime_calls = 0
+
+    @property
+    def is_configured(self):
+        return self._client.is_configured
+
+    @property
+    def can_publish(self):
+        return self._client.can_publish
+
+    def _guard(self, path: str):
+        bare = path.split("?", 1)[0].strip("/")
+        if bare.startswith("rpc/"):
+            if not bare[4:].startswith("exos_v2_"):
+                self.legacy_runtime_calls += 1
+                raise RuntimeDatabaseError(f"Blocked non-Core-v2 RPC: {bare}")
+            return
+        if bare not in _V2_TABLES:
+            self.legacy_runtime_calls += 1
+            raise RuntimeDatabaseError(f"Blocked non-Core-v2 table: {bare}")
+
+    def _request(self, method, path, payload=None, query=None, admin=True, retries=4):
+        self._guard(path)
+        return self._client._request(method, path, payload=payload, query=query, admin=admin, retries=retries)
+
+    def _rows(self, path, query=None, *, admin=True):
+        result = self._request("GET", path, query=query, admin=admin)
+        return result if isinstance(result, list) else []
+
+    def _one(self, path, query=None, *, admin=True):
+        rows = self._rows(path, query, admin=admin)
+        return rows[0] if rows else {}
+
+    def _rpc(self, name, payload, *, admin=True):
+        result = self._request("POST", f"rpc/{name}", payload=payload, admin=admin)
+        if isinstance(result, list):
+            return result[0] if result else {}
+        return result or {}
+
+    def get_staging_call_counts(self):
+        return {
+            "LEGACY_RUNTIME_CALLS": self.legacy_runtime_calls,
+            "GOOGLE_SHEETS_RUNTIME_CALLS": self.google_sheets_runtime_calls,
+        }
+
+    def assert_core_v2_only(self):
+        counts = self.get_staging_call_counts()
+        if any(counts.values()):
+            raise RuntimeDatabaseError(str(counts))
+        return counts
+
+    # Event administration -------------------------------------------------
+    @staticmethod
+    def event_metadata(event):
+        return _dict((event or {}).get("_EventPayload"))
+
+    @staticmethod
+    def _event(row):
+        payload = _dict(row.get("event_payload"))
+        return {
+            "EventID": str(row.get("event_id", "")),
+            "EventName": str(row.get("event_name", "")),
+            "JoinCode": str(row.get("join_code", "")),
+            "ProgrammeType": str(row.get("programme_type", "STANDARD")),
+            "ScoringMode": str(row.get("scoring_mode", "TEAM_COMPETITIVE")),
+            "Status": str(row.get("lifecycle_status", "DRAFT")).title(),
+            "Client": str(payload.get("Client", "")),
+            "Department": str(payload.get("Department", "")),
+            "EventDate": str(payload.get("EventDate", "")),
+            "Venue": str(payload.get("Venue", "")),
+            "Facilitator": str(payload.get("Facilitator", "")),
+            "NumberOfTeams": int(payload.get("NumberOfTeams", 0) or 0),
+            "_EventPayload": payload,
+        }
+
+    def get_events(self, include_archived=False):
+        rows = self._rows("events_v2", {
+            "select": "event_id,event_name,join_code,event_type,programme_type,scoring_mode,lifecycle_status,event_payload,published_at,created_at,updated_at",
+            "order": "created_at.desc",
+        })
+        events = [self._event(row) for row in rows]
+        return events if include_archived else [e for e in events if e["Status"].upper() != "ARCHIVED"]
+
+    def get_event(self, event_id):
+        row = self._one("events_v2", {
+            "event_id": f"eq.{str(event_id).strip()}",
+            "select": "event_id,event_name,join_code,event_type,programme_type,scoring_mode,lifecycle_status,event_payload,published_at,created_at,updated_at",
+            "limit": "1",
+        })
+        return self._event(row) if row else None
+
+    def get_event_by_join_code(self, join_code):
+        row = self._one("events_v2", {
+            "join_code": f"eq.{str(join_code).strip().upper()}",
+            "select": "event_id,event_name,join_code,event_type,programme_type,scoring_mode,lifecycle_status,event_payload,published_at,created_at,updated_at",
+            "limit": "1",
+        })
+        return self._event(row) if row else None
+
+    def create_new_join_code(self):
+        alphabet = string.ascii_uppercase + string.digits
+        for _ in range(20):
+            code = "".join(secrets.choice(alphabet) for _ in range(6))
+            if not self.get_event_by_join_code(code):
+                return code
+        raise RuntimeDatabaseError("Could not allocate a unique join code.")
+
+    def generate_next_event_id(self):
+        return f"EVT-{datetime.now(timezone.utc):%y%m%d}-{secrets.token_hex(2).upper()}"
+
+    @staticmethod
+    def _team_rows(event_id, count):
+        return [{
+            "team_id": f"{event_id}-TEAM-{position:02d}",
+            "team_name": f"Team {position}",
+            "country": f"Team {position}",
+            "team_flag": "🏳️",
+        } for position in range(1, int(count) + 1)]
+
+    def create_event(self, event_id, client, department, event_name, event_date, venue,
+                     programme_type, join_code, number_of_teams, facilitator=""):
+        teams = self._team_rows(event_id, number_of_teams)
+        result = self._rpc("exos_v2_publish_event", {
+            "p_event_id": event_id, "p_join_code": join_code, "p_event_name": event_name,
+            "p_teams": teams, "p_scoring_mode": "TEAM_COMPETITIVE", "p_event_type": "STANDARD",
+        })
+        self.update_event(event_id, {
+            "Client": client, "Department": department, "EventDate": event_date,
+            "Venue": venue, "Facilitator": facilitator, "ProgrammeType": programme_type,
+            "NumberOfTeams": int(number_of_teams), "Status": "DRAFT",
+        })
+        return result
+
+    def update_event(self, event_id, updates):
+        current = self.get_event(event_id)
+        if not current:
+            raise ValueError(f"Event {event_id} was not found.")
+        updates = dict(updates or {})
+        payload = self.event_metadata(current)
+        column_payload = {}
+        field_map = {
+            "EventName": "event_name", "JoinCode": "join_code", "ProgrammeType": "programme_type",
+            "ScoringMode": "scoring_mode", "Status": "lifecycle_status",
+        }
+        for key, value in updates.items():
+            if key in field_map:
+                column_payload[field_map[key]] = str(value).upper() if key in {"JoinCode", "Status"} else value
+            else:
+                payload[key] = value
+        column_payload["event_payload"] = payload
+        column_payload["updated_at"] = _now()
+        self._request("PATCH", "events_v2", payload=column_payload,
+                      query={"event_id": f"eq.{event_id}"})
+        return self.get_event(event_id)
+
+    def update_event_metadata(self, event_id, updates):
+        current = self.get_event(event_id)
+        payload = self.event_metadata(current)
+        updates = dict(updates or {})
+        control = _dict(payload.get("control_state"))
+        for key in ("StageTimers", "ProjectorBroadcast", "CurrentStageStatus", "RegistrationOpen"):
+            if key in updates:
+                control[key] = updates.pop(key)
+        if control:
+            payload["control_state"] = control
+        payload.update(updates)
+        self._request("PATCH", "events_v2", payload={"event_payload": payload, "updated_at": _now()},
+                      query={"event_id": f"eq.{event_id}"})
+        return payload
+
+    def archive_event(self, event_id):
+        return self.update_event(event_id, {"Status": "ARCHIVED"})
+
+    def restore_event(self, event_id):
+        return self.update_event(event_id, {"Status": "DRAFT"})
+
+    # Teams and participants -----------------------------------------------
+    def get_teams(self, event_id):
+        rows = self._rows("teams_v2", {
+            "event_id": f"eq.{event_id}", "select": "team_id,team_name,country,team_flag,is_active,created_at",
+            "order": "team_id.asc",
+        })
+        return [{"EventID": event_id, "TeamID": r["team_id"], "TeamName": r["team_name"],
+                 "Country": r.get("country", ""), "Flag": r.get("team_flag", ""),
+                 "Status": "Active" if r.get("is_active", True) else "Inactive"} for r in rows]
+
+    get_runtime_teams = get_teams
+
+    def get_team_count(self, event_id):
+        return len(self.get_teams(event_id))
+
+    def get_participant_count(self, event_id):
+        return len(self._rows("participants_v2", {
+            "event_id": f"eq.{event_id}", "is_archived": "eq.false", "select": "participant_id",
+        }))
+
+    def create_teams(self, event_id, count):
+        return self.replace_event_teams(event_id, [
+            {"TeamID": f"{event_id}-TEAM-{i:02d}", "TeamName": f"Team {i}"}
+            for i in range(1, int(count) + 1)
+        ])
+
+    def replace_event_teams(self, event_id, teams):
+        if self.get_participant_count(event_id):
+            raise RuntimeDatabaseError("Teams cannot be replaced after participants register.")
+        event = self.get_event(event_id)
+        payload = []
+        identities = []
+        for i, team in enumerate(teams, 1):
+            country = str(team.get("Country") or team.get("TeamName") or f"Team {i}").strip()
+            identity = country.casefold()
+            if identity in identities:
+                raise RuntimeDatabaseError(
+                    f"Duplicate country assignment is not allowed within an event: {country}"
+                )
+            identities.append(identity)
+            payload.append({
+                "team_id": str(team.get("TeamID") or f"{event_id}-TEAM-{i:02d}"),
+                "team_name": str(team.get("TeamName") or f"Team {i}"),
+                "country": country,
+                "team_flag": str(team.get("Flag") or team.get("TeamFlag") or "🏳️"),
+            })
+        result = self._rpc("exos_v2_publish_event", {
+            "p_event_id": event_id, "p_join_code": event["JoinCode"], "p_event_name": event["EventName"],
+            "p_teams": payload, "p_scoring_mode": event["ScoringMode"], "p_event_type": "STANDARD",
+        })
+        self.update_event_metadata(event_id, {"NumberOfTeams": len(payload)})
+        return result
+
+    @staticmethod
+    def _identity(value):
+        value = _dict(value)
+        if not value:
+            return None
+        value.setdefault("Found", True)
+        value.setdefault("Rejoined", False)
+        return value
+
+    def join_player(self, join_code, participant_name, device_id, requested_team_id=""):
+        return self._identity(self._rpc("exos_v2_join_event_v2", {
+            "p_join_code": join_code, "p_participant_name": participant_name,
+            "p_device_id": device_id, "p_requested_team_id": requested_team_id,
+        }, admin=False))
+
+    def join_player_by_code(self, join_code, name, *, device_id=""):
+        return self.join_player(join_code, name, device_id)
+
+    def restore_join(self, join_code, participant_name, device_id):
+        return self._identity(self._rpc("exos_v2_restore_join", {
+            "p_join_code": join_code, "p_participant_name": participant_name, "p_device_id": device_id,
+        }, admin=False))
+
+    def get_player_by_token(self, session_token):
+        return self._identity(self._rpc("exos_v2_standard_participant_state", {
+            "p_session_token": session_token,
+        }, admin=False))
+
+    def get_player(self, event_id, participant_name):
+        rows = self.get_players(event_id)
+        target = " ".join(str(participant_name).casefold().split())
+        return next((row for row in rows if " ".join(row["Name"].casefold().split()) == target), None)
+
+    def get_players(self, event_id=None):
+        query = {
+            "select": "participant_id,event_id,team_id,display_name,country,flag,participant_status,is_leader,intelligence_credits,created_at,last_seen_at,is_archived",
+            "is_archived": "eq.false", "order": "created_at.asc",
+        }
+        if event_id:
+            query["event_id"] = f"eq.{event_id}"
+        rows = self._rows("participants_v2", query)
+        team_names = {t["TeamID"]: t["TeamName"] for t in self.get_teams(event_id)} if event_id else {}
+        return [{
+            "ParticipantID": str(r["participant_id"]), "EventID": r["event_id"], "TeamID": r["team_id"],
+            "Team": team_names.get(r["team_id"], r["team_id"]), "Name": r["display_name"],
+            "Country": r.get("country", ""), "Flag": r.get("flag", ""),
+            "IsLeader": bool(r.get("is_leader")), "Points": int(r.get("intelligence_credits", 0) or 0),
+            "JoinedAt": r.get("created_at", ""), "LastSeenAt": r.get("last_seen_at", ""),
+        } for r in rows]
+
+    def get_team_roster(self, event_id, team_name):
+        team = next((t for t in self.get_teams(event_id) if t["TeamName"] == team_name or t["TeamID"] == team_name), {})
+        return [p for p in self.get_players(event_id) if p["TeamID"] == team.get("TeamID")]
+
+    def can_participant_submit(self, session_token):
+        return {"Allowed": bool(self.get_player_by_token(session_token)), "Reason": "REGISTERED_PARTICIPANT"}
+
+    def assign_ai_facilitator(self, team_name):
+        return {}
+
+    @staticmethod
+    def _participant_country(status):
+        return ""
+
+    def audit_participant_duplicates(self, event_id):
+        return []
+
+    def identity_migration_audit(self, event_id):
+        return {"EventID": event_id, "DuplicateGroups": 0, "CoreV2": True}
+
+    # Programme configuration ---------------------------------------------
+    def get_programme_stages(self, event_id):
+        return self._client.get_programme_hierarchy(event_id)
+
+    def _safe_save_programme(self, event_id, modules, programme_name=""):
+        event = self.get_event(event_id)
+        if not event:
+            raise RuntimeDatabaseError(f"Event {event_id} is not in Core v2.")
+        programme_id = f"{event_id}-PROGRAMME"
+        existing_programme = self._one("programmes_v2", {"programme_id": f"eq.{programme_id}", "select": "programme_id"})
+        programme_row = {
+            "event_id": event_id, "programme_name": programme_name or event["EventName"],
+            "programme_type": event["ProgrammeType"], "programme_schema_version": 2,
+            "module_count": len(modules), "is_active": True, "published_at": _now(), "updated_at": _now(),
+        }
+        if existing_programme:
+            self._request("PATCH", "programmes_v2", payload=programme_row, query={"programme_id": f"eq.{programme_id}"})
+        else:
+            self._request("POST", "programmes_v2", payload={"programme_id": programme_id, **programme_row})
+
+        old_modules = self._rows("modules_v2", {"programme_id": f"eq.{programme_id}", "select": "module_id"})
+        old_activities = self._rows("activities_v2", {"programme_id": f"eq.{programme_id}", "select": "activity_id,module_id,activity_order"})
+        for row in old_activities:
+            self._request("PATCH", "activities_v2", payload={"activity_order": 50000 + int(row.get("activity_order", 0) or 0)},
+                          query={"activity_id": f"eq.{row['activity_id']}"})
+
+        expected_modules, expected_activities = set(), set()
+        activity_count = 0
+        for module_position, module in enumerate(modules, 1):
+            module = dict(module)
+            module_id = str(module.get("ModuleID") or f"{programme_id}-MOD-{module_position:03d}")
+            expected_modules.add(module_id)
+            module_payload = self._client._normalise_module_payload({**module, "ModuleOrder": module_position})
+            module_row = {
+                "programme_id": programme_id, "module_name": module_payload["module_name"],
+                "activity_sequence": module_position, "module_payload": module_payload["module_payload"],
+                "is_active": True, "updated_at": _now(),
+            }
+            exists = any(r["module_id"] == module_id for r in old_modules)
+            self._request("PATCH" if exists else "POST", "modules_v2",
+                          payload=module_row if exists else {"module_id": module_id, **module_row},
+                          query={"module_id": f"eq.{module_id}"} if exists else None)
+            for activity_position, activity in enumerate(module.get("Activities", []), 1):
+                activity = dict(activity)
+                activity_id = str(activity.get("ActivityID") or f"{module_id}-ACT-{activity_position:03d}")
+                expected_activities.add(activity_id)
+                normal = self._client._normalise_activity_payload(event_id, {**module, "ModuleID": module_id}, {
+                    **activity, "ActivityID": activity_id, "ProgrammeID": programme_id,
+                    "ModuleID": module_id, "ActivityOrder": activity_position,
+                })
+                row = {key: normal[key] for key in (
+                    "programme_id", "module_id", "activity_type", "scoring_mode", "activity_name",
+                    "activity_order", "duration_seconds", "activity_payload", "is_active",
+                )}
+                row["updated_at"] = _now()
+                exists = any(r["activity_id"] == activity_id for r in old_activities)
+                self._request("PATCH" if exists else "POST", "activities_v2",
+                              payload=row if exists else {"activity_id": activity_id, **row},
+                              query={"activity_id": f"eq.{activity_id}"} if exists else None)
+                activity_count += 1
+
+        for row in old_activities:
+            if row["activity_id"] not in expected_activities:
+                self._request("PATCH", "activities_v2", payload={"is_active": False},
+                              query={"activity_id": f"eq.{row['activity_id']}"})
+        for row in old_modules:
+            if row["module_id"] not in expected_modules:
+                self._request("PATCH", "modules_v2", payload={"is_active": False},
+                              query={"module_id": f"eq.{row['module_id']}"})
+        return {"ProgrammeID": programme_id, "EventID": event_id,
+                "ModuleCount": len(expected_modules), "ActivityCount": activity_count}
+
+    def save_programme_stages(self, event_id, stages):
+        return self._safe_save_programme(event_id, build_programme_hierarchy(stages))
+
+    def duplicate_programme_configuration(self, source_event_id, destination_event_id):
+        source = self.get_programme_stages(source_event_id)
+        if not source:
+            raise ValueError("The source event has no programme configuration.")
+        cloned, _ = clone_programme_stages(source, source_event_id, destination_event_id)
+        result = self.save_programme_stages(destination_event_id, cloned)
+        return {**result, "OperationalDataCopied": False, "RuntimeLaunched": False,
+                "SourceEventID": source_event_id, "DestinationEventID": destination_event_id}
+
+    def get_event_missions(self, event_id, include_closed=False):
+        return [self._activity_as_mission(row) for row in self.get_programme_stages(event_id)]
+
+    def get_mission(self, event_id, mission_id):
+        return next((m for m in self.get_event_missions(event_id) if m["MissionID"] == mission_id), None)
+
+    @staticmethod
+    def _activity_as_mission(row):
+        return {"EventID": row.get("EventID", ""), "MissionID": row.get("ActivityID", ""),
+                "Title": row.get("StageName", ""), "Description": row.get("ParticipantMessage", ""),
+                "ParticipantInstructions": row.get("ParticipantMessage", ""),
+                "SubmissionType": str(row.get("StageName", "")).upper().replace(" ", ""), "Status": "ACTIVE"}
+
+    def get_mission_templates(self): return []
+    def get_programme_packs(self): return []
+    def get_programme_pack(self, *args, **kwargs): return None
+    def get_experience_sets(self, event_id): return []
+    def get_assets(self, *args, **kwargs): return []
+    def get_character_portrait(self, *args, **kwargs): return None
+    def upsert_event_mission(self, mission): return mission
+    def build_event_programme(self, *args, **kwargs): raise RuntimeDatabaseError("Use the canonical Programme Builder.")
+    def clear_cache(self): return None
+
+    # Live activity state --------------------------------------------------
+    def set_event_stage(self, event_id, stage):
+        content_type = str(
+            stage.get("ContentType", "")
+            or activity_details(stage).get("ContentType", "")
+        ).strip()
+        if content_type.casefold() == "break":
+            raise RuntimeDatabaseError(
+                "Lunch / Break is a programme marker and cannot be launched."
+            )
+        activity_id = str(stage.get("ActivityID") or stage.get("ProgrammeActivityID") or "")
+        if not activity_id:
+            raise RuntimeDatabaseError("A canonical ActivityID is required for launch.")
+        return self._rpc("exos_v2_standard_launch_activity", {
+            "p_event_id": event_id, "p_activity_id": activity_id, "p_actor": "Facilitator",
+        })
+
+    def get_event_state(self, event_id):
+        event = self.get_event(event_id)
+        return _dict(self.event_metadata(event).get("live_state"))
+
+    def get_event_stage(self, event_id): return self.get_event_state(event_id)
+
+    def get_runtime_control_state(self, event_id):
+        event = self.get_event(event_id)
+        return _dict(self.event_metadata(event).get("control_state"))
+
+    def set_runtime_control_state(self, event_id, key, value):
+        return self.update_event_metadata(event_id, {key: value})
+
+    def get_broadcast_state(self, event_id):
+        return _dict(self.get_runtime_control_state(event_id).get("ProjectorBroadcast"))
+
+    def get_stage_timer(self, event_id, stage_no, duration_minutes=0):
+        timers = _dict(self.get_runtime_control_state(event_id).get("StageTimers"))
+        return _dict(timers.get(str(stage_no))) or new_timer(int(float(duration_minutes or 0) * 60))
+
+    def update_stage_timer(self, event_id, stage_no, action, duration_minutes=0):
+        state = self.get_runtime_control_state(event_id)
+        timers = _dict(state.get("StageTimers"))
+        key = str(stage_no)
+        timers[key] = transition_timer(timers.get(key) or new_timer(int(float(duration_minutes or 0) * 60)),
+                                       action, duration_seconds=int(float(duration_minutes or 0) * 60))
+        self.update_event_metadata(event_id, {"StageTimers": timers})
+        return timers[key]
+
+    def get_participant_current_mission(self, session_token):
+        return self.get_player_by_token(session_token)
+
+    def get_current_mission(self, event_id, session_token=""):
+        state = self.get_player_by_token(session_token) if session_token else {"Stage": self.get_event_state(event_id)}
+        stage = _dict((state or {}).get("Stage"))
+        if not stage:
+            return None
+        mission = {"MissionID": stage.get("ActivityID", ""), "Title": stage.get("StageName", ""),
+                   "Description": stage.get("ParticipantMessage", ""),
+                   "ParticipantInstructions": stage.get("ParticipantMessage", ""),
+                   "SubmissionType": _dict(stage.get("ActivityPayload")).get("submission_type", ""),
+                   "_RuntimeStage": stage}
+        return mission
+
+    # Submissions, reviews and results -------------------------------------
+    @staticmethod
+    def _submission(row):
+        payload = _dict(row.get("submission_payload"))
+        return {
+            "SubmissionID": str(row.get("submission_id", "")), "EventID": row.get("event_id", ""),
+            "TeamID": row.get("team_id", ""), "ParticipantID": str(row.get("participant_id", "")),
+            "MissionID": row.get("activity_id", ""), "ActivityID": row.get("activity_id", ""),
+            "TeamName": payload.get("TeamName", row.get("team_id", "")),
+            "ParticipantName": payload.get("ParticipantName", ""),
+            "SubmissionType": payload.get("SubmissionType", ""), "Metric1": payload.get("Metric1", ""),
+            "Metric2": payload.get("Metric2", ""), "Metric3": payload.get("Metric3", ""),
+            "Remarks": payload.get("Remarks", ""), "ImageURL": payload.get("ImageURL", ""),
+            "DriveFileID": payload.get("DriveFileID", ""), "Status": row.get("submission_status", "SUBMITTED"),
+            "Score": row.get("score", ""), "Judged": "Yes" if row.get("reviewed_at") else "No",
+            "SubmittedAt": row.get("submitted_at", ""),
+        }
+
+    def get_submissions(self, event_id):
+        return [self._submission(r) for r in self._rows("submissions_v2", {
+            "event_id": f"eq.{event_id}",
+            "select": "submission_id,event_id,team_id,participant_id,activity_id,submission_status,submission_payload,submitted_at,reviewed_at,reviewed_by,score",
+            "order": "submitted_at.desc",
+        })]
+
+    get_canonical_submissions = get_submissions
+    get_event_submissions = get_submissions
+
+    def get_team_submission(self, event_id, mission_id, team_name):
+        teams = {t["TeamName"]: t["TeamID"] for t in self.get_teams(event_id)}
+        team_id = teams.get(team_name, team_name)
+        return next((r for r in self.get_submissions(event_id)
+                     if r["ActivityID"] == mission_id and r["TeamID"] == team_id), None)
+
+    def get_participant_submission(self, event_id, mission_id, participant_name, session_token=""):
+        player = self.get_player_by_token(session_token) if session_token else self.get_player(event_id, participant_name)
+        participant_id = str((player or {}).get("ParticipantID", ""))
+        return next((r for r in self.get_submissions(event_id)
+                     if r["ActivityID"] == mission_id and r["ParticipantID"] == participant_id), None)
+
+    def save_submission(self, submission_id="", event_id="", mission_id="", team_name="",
+                        participant_name="", image_url="", drive_file_id="", submitted_at="",
+                        score="", judged="No", remarks="", submission_type="", metric1="",
+                        metric2="", metric3="", status="PENDING", session_token="", canonical_context=None, **kwargs):
+        player = self.get_player_by_token(session_token)
+        if not player:
+            raise RuntimeDatabaseError("Participant session is required.")
+        activity = self._one("activities_v2", {"activity_id": f"eq.{mission_id}", "select": "activity_payload", "limit": "1"})
+        scope = str(_dict(activity.get("activity_payload")).get("participant_scope", "TEAM")).upper()
+        owner = player["ParticipantID"] if scope == "INDIVIDUAL" or submission_type.upper() == "NASI" else player["TeamID"]
+        key = f"{event_id}|{mission_id}|{owner}"
+        payload = {
+            "TeamName": team_name, "ParticipantName": participant_name, "SubmissionType": submission_type,
+            "Metric1": metric1, "Metric2": metric2, "Metric3": metric3, "Remarks": remarks,
+            "ImageURL": image_url, "DriveFileID": drive_file_id, "CanonicalContext": canonical_context or {},
+        }
+        result = self._rpc("exos_v2_standard_submit", {
+            "p_session_token": session_token, "p_activity_id": mission_id,
+            "p_submission_key": key, "p_submission_payload": payload,
+        }, admin=False)
+        return result
+
+    def update_submission_score(self, submission_id, score, remarks="", judged="Yes", status="APPROVED"):
+        decision = "APPROVE" if str(status).upper() == "APPROVED" else "REJECT"
+        return self._rpc("exos_v2_standard_review_submission", {
+            "p_submission_id": submission_id, "p_decision": decision, "p_score": float(score or 0),
+            "p_reviewer": "Facilitator", "p_rationale": remarks,
+            "p_idempotency_key": f"standard-review|{submission_id}",
+        })
+
+    def decide_canonical_submission(self, submission_id, decision, reviewer_id, score=0, credits=0,
+                                    notes="", reason="", idempotency_key="", supersedes_id=""):
+        mapped = "APPROVE" if str(decision).upper() in {"APPROVE", "APPROVED"} else "REJECT"
+        return self._rpc("exos_v2_standard_review_submission", {
+            "p_submission_id": submission_id, "p_decision": mapped, "p_score": float(score or 0),
+            "p_reviewer": reviewer_id, "p_rationale": notes or reason,
+            "p_idempotency_key": idempotency_key or f"standard-review|{submission_id}",
+        })
+
+    def get_canonical_reviews(self, event_id, submission_id=""):
+        query = {"event_id": f"eq.{event_id}", "select": "review_id,event_id,submission_id,reviewer,decision,score_points,rationale,reviewed_at"}
+        if submission_id: query["submission_id"] = f"eq.{submission_id}"
+        return self._rows("reviews_v2", query)
+
+    def get_canonical_leaderboard(self, event_id):
+        teams = {t["TeamID"]: t["TeamName"] for t in self.get_teams(event_id)}
+        totals = {team_id: 0.0 for team_id in teams}
+        for row in self._rows("score_transactions_v2", {
+            "event_id": f"eq.{event_id}", "scoring_mode": "eq.TEAM_COMPETITIVE",
+            "select": "team_id,score_delta",
+        }):
+            totals[row["team_id"]] = totals.get(row["team_id"], 0.0) + float(row.get("score_delta", 0) or 0)
+        return [{"TeamID": team_id, "TeamName": teams.get(team_id, team_id), "Score": score}
+                for team_id, score in sorted(totals.items(), key=lambda item: (-item[1], item[0]))]
+
+    def get_canonical_transaction_report(self, event_id):
+        return {"Leaderboard": self.get_canonical_leaderboard(event_id),
+                "Submissions": self.get_submissions(event_id),
+                "Reviews": self.get_canonical_reviews(event_id)}
+
+    # Optional standard-screen compatibility ------------------------------
+    def get_conversation(self, *args, **kwargs): return []
+    def save_conversation(self, *args, **kwargs): return None
+    def get_ai_conversation(self, *args, **kwargs): return []
+    def advance_ai_hint(self, *args, **kwargs): return {}
+    def claim_team_tracker(self, *args, **kwargs): return {}
+    def submit_team_location(self, *args, **kwargs): return {}
+    def get_road_hunt_participant_state(self, *args, **kwargs): return {}
+    def get_road_hunt_unlocked_missions(self, *args, **kwargs): return []
+    def get_team_wallet(self, *args, **kwargs): return {"Enabled": False, "Balance": 0, "Items": []}
+    def purchase_marketplace_item(self, *args, **kwargs):
+        raise RuntimeDatabaseError("No marketplace is configured for this standard programme.")
+    def set_submission_override(self, *args, **kwargs): return {}
+    def set_scoring_lock(self, *args, **kwargs): return {}
+    def activate_experience_set(self, *args, **kwargs): return {"ExperiencesPublished": 0}
+    def publish_event_to_runtime(self, event_id, reset=False): return self.get_event(event_id)
+    def assign_ai_facilitator(self, team_name): return {}
+    def get_participant_count_warning(self, *args, **kwargs): return ""
+    def ensure_existing_assets_catalogue(self, *args, **kwargs): return []
+    def get_formula_race_checkpoints(self, *args, **kwargs):
+        raise RuntimeDatabaseError("Formula R.A.C.E. uses its dedicated Core v2 application.")
+    def save_formula_race_checkpoints(self, *args, **kwargs):
+        raise RuntimeDatabaseError("Formula R.A.C.E. uses its dedicated Core v2 application.")
+    def join_preassigned_player(self, *args, **kwargs):
+        raise RuntimeDatabaseError("Preassigned R.A.C.E. identity is not part of the standard application.")
+    def install_programme_pack(self, *args, **kwargs):
+        raise RuntimeDatabaseError("Use Template or Duplicate Existing Programme in the canonical builder.")
+    def save_event_as_programme_pack(self, *args, **kwargs):
+        raise RuntimeDatabaseError("Use Duplicate Existing Programme for Core v2 reuse.")
+    def launch_event_mission(self, *args, **kwargs):
+        raise RuntimeDatabaseError("Launch the canonical programme activity from Control Centre.")
+    def send_mission(self, *args, **kwargs):
+        raise RuntimeDatabaseError("Launch the canonical programme activity from Control Centre.")
+
+
+def get_standard_database(runtime=None):
+    return StandardCoreV2Adapter(runtime=runtime)

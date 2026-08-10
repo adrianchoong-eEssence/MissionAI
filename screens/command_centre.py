@@ -3,7 +3,7 @@ import html
 import streamlit as st
 
 from branding import experience_header, experience_title
-from data.google_sheets import GoogleSheetsDB
+from data.standard_core_v2_adapter import get_standard_database
 from data.runtime_database import RuntimeDatabaseError
 from screens.app_state import request_navigation, select_active_event
 
@@ -34,7 +34,7 @@ def show_command_centre():
     st.title("🏠 EXOS Command Centre")
     st.caption("Select one event, confirm readiness, then build or run it.")
 
-    db = GoogleSheetsDB()
+    db = get_standard_database()
     events = db.get_events()
     if not events:
         st.warning("No events found.")
@@ -143,7 +143,7 @@ def show_results_reports():
     st.title("📊 Results & Reports")
     st.caption("Review the selected event before generating client reports.")
 
-    db = GoogleSheetsDB()
+    db = get_standard_database()
     events = db.get_events()
     if not events:
         st.warning("No events found.")
