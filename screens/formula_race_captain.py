@@ -11,6 +11,23 @@ from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 ASSET_ROOT=Path(__file__).resolve().parents[1]/"Assets"/"race_teams"
 TEAM_ASSETS=json.loads((ASSET_ROOT/"manifest.json").read_text())
 
+
+def _is_valid_session_token(value: str) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    try:
+        parsed = uuid.UUID(raw)
+        return str(parsed) == raw.lower()
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
+def _normalise_session_token(value) -> str:
+    raw = str(value or "").strip()
+    return raw if _is_valid_session_token(raw) else ""
+
+
 def _device_id():
     value=str(st.session_state.get("race_captain_device_id", ""))
     if not value:value=str(uuid.uuid4());st.session_state["race_captain_device_id"]=value
@@ -18,7 +35,15 @@ def _device_id():
 
 def _set_session(payload):
     st.session_state["race_captain"]=dict(payload);st.query_params["race"]="1"
-    st.query_params["captain_session"]=payload.get("SessionToken","")
+    token = str(payload.get("SessionToken","")).strip()
+    if _is_valid_session_token(token):
+        st.query_params["captain_session"]=token
+    else:
+        try:
+            st.query_params.pop("captain_session", None)
+        except Exception:
+            if "captain_session" in st.query_params:
+                st.query_params["captain_session"] = ""
 
 
 def _is_staging_mode() -> bool:
@@ -46,6 +71,7 @@ def show_formula_race_captain(runtime_override=None):
         st.caption("EXOS CORE V2 — STAGING")
     device=_device_id();session=st.session_state.get("race_captain")
     token=str(st.query_params.get("captain_session",""))
+    token=_normalise_session_token(token)
     if not session and token:
         try:session=runtime.restore_formula_race_captain(token,device)
         except RuntimeDatabaseError:session=None
@@ -67,8 +93,11 @@ def show_formula_race_captain(runtime_override=None):
                 return
             try:payload=runtime.formula_race_captain_login(join_code,team_map[team],pin,device)
             except RuntimeDatabaseError as error:st.error(str(error));return
+            if not _is_valid_session_token(payload.get("SessionToken","")):
+                st.error("Login did not return a valid session token.")
+                return
             _set_session(payload);st.rerun()
-        return
+            return
     event_id=str(session.get("EventID",""));team_id=str(session.get("TeamID",""));name=str(session.get("TeamName",""))
     try:workspace=runtime.formula_race_captain_workspace(session.get("SessionToken",""),device)
     except RuntimeDatabaseError as error:

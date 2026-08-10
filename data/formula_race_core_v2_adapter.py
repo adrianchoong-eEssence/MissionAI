@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 from datetime import datetime, timezone
+from uuid import UUID
 from typing import Any
 from urllib.parse import urlparse
 
@@ -84,6 +85,14 @@ def _resolve_event_candidates(event_id: str) -> list[str]:
 
 def _uuid_filter_value(value: str) -> str:
     return str(value).strip()
+
+
+def _is_valid_uuid(value: str) -> bool:
+    try:
+        UUID(str(value).strip())
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -529,8 +538,11 @@ class FormulaRaceCoreV2StagingAdapter:
                 "p_device_id": str(device_id).strip(),
             },
         ) or {}
+        token = str(row.get("SessionToken", row.get("session_token", ""))).strip()
+        if not _is_valid_uuid(token):
+            raise RuntimeError("Invalid captain session token returned by login service.")
         return {
-            "SessionToken": str(row.get("session_token", row.get("SessionToken", ""))),
+            "SessionToken": token,
             "EventID": str(row.get("EventID", row.get("event_id", ""))),
             "TeamID": str(row.get("TeamID", row.get("team_id", ""))),
             "TeamName": str(row.get("TeamName", row.get("team_name", ""))),
@@ -539,6 +551,8 @@ class FormulaRaceCoreV2StagingAdapter:
         }
 
     def restore_formula_race_captain(self, session_token: str, device_id: str) -> dict[str, Any]:
+        if not _is_valid_uuid(session_token):
+            raise RuntimeError("Invalid captain session token.")
         row = self._rpc(
             "exos_v2_restore_team_access",
             {
