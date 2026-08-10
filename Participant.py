@@ -35,6 +35,22 @@ def _is_core_v2_race_request() -> bool:
             f"is_literal_none: {captain_session.lower() == 'none'} | is_valid_uuid: {is_valid_uuid}"
         )
     if captain_session:
+        is_uuid = False
+        try:
+            UUID(captain_session)
+            is_uuid = True
+        except Exception:
+            is_uuid = False
+        if not is_uuid:
+            if str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging":
+                print(
+                    f"CAPTAIN UUID TRACE | Participant._is_core_v2_race_request.invalid | rpc/table: query_params | "
+                    f"field: captain_session | is_none: False | is_literal_none: {captain_session.lower() == 'none'} | "
+                    f"is_valid_uuid: {is_uuid}"
+                )
+            if "captain_session" in st.query_params:
+                st.query_params.pop("captain_session", None)
+            return False
         return True
 
     join_code = str(st.query_params.get("join_code", "")).strip().upper()
