@@ -86,6 +86,13 @@ def _uuid_filter_value(value: str) -> str:
     return str(value).strip()
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def _in_filter(values: list[str]) -> str:
     sanitized = [str(value).replace('"', '\"').strip() for value in values if str(value).strip()]
     if not sanitized:
@@ -1128,6 +1135,68 @@ class FormulaRaceCoreV2StagingAdapter:
             except (TypeError, ValueError):
                 pass
         return balance
+
+    def _build_status_payload(self, event_id: str, team_id: str) -> dict[str, Any]:
+        rows = self._get(
+            "build_status_v2",
+            {
+                "event_id": f"eq.{str(event_id).strip()}",
+                "team_id": f"eq.{str(team_id).strip()}",
+                "select": "activity_id,build_status,progress_pct,build_payload,started_at,completed_at,last_updated",
+                "order": "last_updated.desc",
+            },
+        )
+
+        if not rows:
+            return {
+                "status": "NOT_STARTED",
+                "Status": "NOT_STARTED",
+                "Progress": 0,
+                "ActivityID": "",
+                "Activities": [],
+                "ActivityStatus": [],
+                "LastUpdated": "",
+            }
+
+        latest = rows[0]
+        latest_status = str(latest.get("build_status", "NOT_STARTED")).strip().upper().replace(" ", "_")
+        if not latest_status:
+            latest_status = "NOT_STARTED"
+
+        try:
+            latest_progress = int(latest.get("progress_pct", 0) or 0)
+        except (TypeError, ValueError):
+            latest_progress = 0
+
+        return {
+            "status": latest_status,
+            "Status": latest_status,
+            "Progress": latest_progress,
+            "ActivityID": str(latest.get("activity_id", "")),
+            "Activities": [
+                {
+                    "ActivityID": str(row.get("activity_id", "")),
+                    "Status": str(row.get("build_status", "NOT_STARTED")).strip().upper().replace(" ", "_"),
+                    "Progress": _safe_int(row.get("progress_pct", 0)),
+                    "StartedAt": row.get("started_at"),
+                    "CompletedAt": row.get("completed_at"),
+                    "LastUpdated": row.get("last_updated"),
+                    "Payload": _as_dict(row.get("build_payload")),
+                }
+                for row in rows
+            ],
+            "ActivityStatus": [
+                {
+                    "ActivityID": str(row.get("activity_id", "")),
+                    "Status": str(row.get("build_status", "NOT_STARTED")).strip().upper().replace(" ", "_"),
+                    "Progress": _safe_int(row.get("progress_pct", 0)),
+                }
+                for row in rows
+            ],
+            "LastUpdated": latest.get("last_updated", ""),
+            "StartedAt": latest.get("started_at"),
+            "CompletedAt": latest.get("completed_at"),
+        }
 
     def _wallet_payload(self, event_id: str, team_id: str) -> dict[str, Any]:
         return {"Balance": self._wallet_balance(event_id, team_id)}

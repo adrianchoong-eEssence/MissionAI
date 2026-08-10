@@ -107,3 +107,27 @@ def test_race_adapter_debug_get_runtime_teams_tracks_expected_filter():
     assert result["resolved_event_id"] == "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
     assert result["query"]["event_id"] == "eq.CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
     assert len(result["rows"]) == 10
+
+
+def test_race_adapter_captain_workspace_returns_default_build_status_when_empty():
+    with _staging_env():
+        runtime = _fake_runtime_factory()
+        runtime.rows["team_access_sessions_v2"] = [
+            {
+                "team_access_session_id": "SESSION-ONE",
+                "event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F",
+                "team_id": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F",
+                "is_active": True,
+                "device_id": "DEVICE-ONE",
+                "session_token": "TOKEN-ONE",
+                "last_seen_at": "2026-08-10T00:00:00Z",
+                "updated_at": "2026-08-10T00:00:00Z",
+            }
+        ]
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+
+    workspace = adapter.formula_race_captain_workspace("TOKEN-ONE", "DEVICE-ONE")
+    build_status = workspace.get("BuildStatus", {})
+    assert build_status.get("status") == "NOT_STARTED"
+    assert build_status.get("Status") == "NOT_STARTED"
+    assert int(build_status.get("Progress", 0)) == 0
