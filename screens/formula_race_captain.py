@@ -77,6 +77,7 @@ def _set_session(payload):
     if not normalised_session:
         raise RuntimeError("Invalid captain login payload.")
     st.session_state["race_captain"] = normalised_session
+    st.session_state.pop("race_captain_recovery", None)
     st.query_params["race"] = "1"
     token = normalised_session.get("SessionToken", "")
     if _staging_mode():
@@ -138,6 +139,27 @@ def show_formula_race_captain(runtime_override=None):
                 session=None
     if not session:
         st.title("Formula R.A.C.E.");st.caption("TEAM CAPTAIN ACCESS · ONE TEAM · ONE ACTIVE DEVICE")
+        recovery=st.session_state.get("race_captain_recovery")
+        if isinstance(recovery,dict):
+            st.info("This team is already active on another device.")
+            with st.form("race_captain_recovery"):
+                recovery_pin=st.text_input("Team PIN",type="password",key="race_captain_recovery_pin")
+                recover_submit=st.form_submit_button("RECOVER TEAM ACCESS",type="primary",width="stretch")
+            if recover_submit:
+                try:
+                    payload=runtime.formula_race_captain_recover(
+                        str(recovery.get("JoinCode", "")),
+                        str(recovery.get("TeamID", "")),
+                        recovery_pin,
+                        device,
+                    )
+                    payload["TeamName"]=str(recovery.get("TeamName", ""))
+                    _set_session(payload)
+                except RuntimeDatabaseError as error:st.error(str(error));return
+                except RuntimeError as error:st.error(str(error));return
+                st.rerun()
+                return
+            return
         join_code=st.text_input("Event Join Code").upper().strip()
         event=runtime.get_event_by_join_code(join_code) if join_code else None
         teams=runtime.get_runtime_teams(str(event.get("EventID",""))) if event else []
@@ -153,6 +175,15 @@ def show_formula_race_captain(runtime_override=None):
                 return
             try:payload=runtime.formula_race_captain_login(join_code,team_map[team],pin,device)
             except RuntimeDatabaseError as error:st.error(str(error));return
+            if bool(payload.get("RecoveryRequired",False)):
+                st.session_state["race_captain_recovery"]={
+                    "JoinCode":join_code,
+                    "EventID":str(payload.get("EventID", "")),
+                    "TeamID":str(payload.get("TeamID", "")),
+                    "TeamName":team,
+                }
+                st.rerun()
+                return
             try:_set_session(payload)
             except RuntimeError as error:st.error(str(error));return
             st.rerun()

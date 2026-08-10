@@ -650,20 +650,30 @@ class FormulaRaceCoreV2StagingAdapter:
         _trace_captain_login_raw_response(raw_response)
         row = raw_response or {}
         self.last_login_rpc_response = dict(row) if isinstance(row, dict) else {}
-        raw_token = row.get("SessionToken", row.get("session_token", ""))
-        _trace_uuid_context("formula_race_captain_login.response", "rpc/exos_v2_team_access_login", "SessionToken", raw_token)
-        token = _normalise_uuid_value(raw_token)
-        self.last_login_normalized_token = token
         event_id = str(row.get("EventID", row.get("event_id", ""))).strip()
         team_id = str(row.get("TeamID", row.get("team_id", ""))).strip()
         ambiguous = bool(row.get("Ambiguous", False))
         recovery_required = bool(row.get("RecoveryRequired", False))
-        if not token:
-            raise RuntimeError("Invalid captain session token returned by login service.")
         if not event_id or not team_id:
             raise RuntimeError("Login response missing EventID or TeamID.")
-        if ambiguous or recovery_required:
+        if recovery_required:
+            self.last_login_normalized_token = ""
+            return {
+                "SessionToken": "",
+                "EventID": event_id,
+                "TeamID": team_id,
+                "TeamName": str(row.get("TeamName", row.get("team_name", ""))),
+                "RecoveryRequired": True,
+                "Ambiguous": ambiguous,
+            }
+        if ambiguous:
             raise RuntimeError("Login response indicates unresolved captain identity state.")
+        raw_token = row.get("SessionToken", row.get("session_token", ""))
+        _trace_uuid_context("formula_race_captain_login.response", "rpc/exos_v2_team_access_login", "SessionToken", raw_token)
+        token = _normalise_uuid_value(raw_token)
+        self.last_login_normalized_token = token
+        if not token:
+            raise RuntimeError("Invalid captain session token returned by login service.")
         return {
             "SessionToken": token,
             "EventID": event_id,
@@ -671,6 +681,32 @@ class FormulaRaceCoreV2StagingAdapter:
             "TeamName": str(row.get("TeamName", row.get("team_name", ""))),
             "RecoveryRequired": recovery_required,
             "Ambiguous": ambiguous,
+        }
+
+    def formula_race_captain_recover(
+        self, join_code: str, team_id: str, pin: str, device_id: str
+    ) -> dict[str, Any]:
+        row = self._rpc(
+            "exos_v2_recover_team_access",
+            {
+                "p_join_code": str(join_code).strip().upper(),
+                "p_team_id": str(team_id).strip(),
+                "p_pin": str(pin).strip(),
+                "p_device_id": str(device_id).strip(),
+            },
+        ) or {}
+        event_id = str(row.get("EventID", row.get("event_id", ""))).strip()
+        recovered_team_id = str(row.get("TeamID", row.get("team_id", ""))).strip()
+        token = _normalise_uuid_value(row.get("SessionToken", row.get("session_token", "")))
+        if not event_id or not recovered_team_id or not token:
+            raise RuntimeError("Team access recovery could not establish a new session.")
+        return {
+            "SessionToken": token,
+            "EventID": event_id,
+            "TeamID": recovered_team_id,
+            "TeamName": str(row.get("TeamName", row.get("team_name", ""))),
+            "RecoveryRequired": False,
+            "Ambiguous": False,
         }
 
     def restore_formula_race_captain(self, session_token: str, device_id: str) -> dict[str, Any]:
