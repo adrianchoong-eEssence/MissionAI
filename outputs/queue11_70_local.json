@@ -1,0 +1,98 @@
+{
+  "environment": {
+    "mode": "local",
+    "target": "local",
+    "event_id": "EVT-QUE11",
+    "join_code": "LOCAL",
+    "number_of_teams": 8,
+    "worker_preset": {
+      "70": 24
+    }
+  },
+  "generated_at_utc": "2026-08-08T15:55:43Z",
+  "profiles": [
+    70
+  ],
+  "scales": {
+    "70": {
+      "status": "PASS",
+      "profile": {
+        "requested": 70,
+        "participants": 70,
+        "registration": {
+          "success_rate": 1.0,
+          "error_rate": 0.0,
+          "success_count": 70,
+          "error_count": 0,
+          "duplicate_registrations": 0,
+          "duplicate_by_name": 0,
+          "latency_ms": {
+            "p50": 1.118,
+            "p95": 2.961,
+            "p99": 3.596
+          },
+          "errors": {}
+        },
+        "reconnect": {
+          "success_rate": 1.0,
+          "success_count": 70,
+          "requested": 70
+        },
+        "activity_read": {
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.001
+          },
+          "success_count": 210,
+          "requested": 70
+        },
+        "submission": {
+          "requested": 140,
+          "success_rate": 1.0,
+          "success_count": 140,
+          "error_count": 0,
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.002
+          }
+        },
+        "facilitator": {
+          "p50": 0.007,
+          "p95": 0.011,
+          "p99": 0.013,
+          "error_count": 0
+        },
+        "team_distribution": {
+          "Team 07": 8,
+          "Team 08": 8,
+          "Team 04": 9,
+          "Team 01": 9,
+          "Team 05": 9,
+          "Team 03": 9,
+          "Team 06": 9,
+          "Team 02": 9
+        },
+        "team_spread": 1,
+        "team_balance_ok": true,
+        "bottlenecks": []
+      }
+    }
+  },
+  "database_safety": {
+    "schema_checks": [
+      "runtime_participants_event_idx",
+      "runtime_participants_event_name_idx",
+      "runtime_submissions_event_idx",
+      "runtime_submissions_mission_idx"
+    ],
+    "preflight_sql": "supabase/003_runtime_programme.sql",
+    "postflight_sql": "supabase/005_participant_identity.sql",
+    "rollback_verification_sql": "supabase/013_experience_definition_assignment_rollback.sql",
+    "notes": "Use the listed SQL checks only in test/staging. This harness does not execute direct catalog SQL in this repository."
+  },
+  "pass_fail": {
+    "70": "PASS"
+  }
+}

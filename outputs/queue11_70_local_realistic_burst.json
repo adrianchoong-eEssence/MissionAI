@@ -1,0 +1,62 @@
+{
+  "mode": "local-only",
+  "event": "EVT-QUE11",
+  "participants": 70,
+  "registration": {
+    "p50": 0.806,
+    "p95": 1.23,
+    "p99": 1.545,
+    "errors": 0,
+    "success": 70,
+    "requests": 70
+  },
+  "reconnect": {
+    "p50": 0.001,
+    "p95": 0.001,
+    "p99": 0.001,
+    "errors": 0,
+    "success": 70
+  },
+  "activity_read": {
+    "p95": 0.001,
+    "p99": 0.001,
+    "errors": 0,
+    "success": 210
+  },
+  "submission": {
+    "p50": 0.001,
+    "p95": 0.001,
+    "p99": 0.001,
+    "requested": 210,
+    "success": 210,
+    "types": {
+      "text": 70,
+      "photo": 70,
+      "nasi": 70
+    },
+    "errors": 0
+  },
+  "facilitator_read": {
+    "p95": 0.0,
+    "errors": 0,
+    "reads": 20
+  },
+  "checks": {
+    "error_rate": 0.0,
+    "duplicate_participants": 0,
+    "duplicate_team_assignments": 0,
+    "lost_submissions": 0,
+    "team_spread": 1,
+    "db_contention": 0,
+    "cross_event_leakage": 0
+  },
+  "rpc_errors": {
+    "count": 0,
+    "types": {}
+  },
+  "http_errors": {
+    "count": 0,
+    "types": {}
+  },
+  "timeouts_retries": 0
+}

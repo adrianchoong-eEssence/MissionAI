@@ -1,0 +1,167 @@
+{
+  "environment": {
+    "mode": "local",
+    "target": "local",
+    "event_id": "EVT-LOCAL",
+    "join_code": "SCALE",
+    "number_of_teams": 8,
+    "worker_preset": {
+      "70": 24,
+      "260": 80,
+      "800": 160
+    }
+  },
+  "generated_at_utc": "2026-08-08T14:08:26Z",
+  "profiles": [
+    20,
+    80
+  ],
+  "scales": {
+    "20": {
+      "status": "PASS",
+      "profile": {
+        "requested": 20,
+        "participants": 20,
+        "registration": {
+          "success_rate": 1.0,
+          "error_rate": 0.0,
+          "success_count": 20,
+          "error_count": 0,
+          "duplicate_registrations": 0,
+          "duplicate_by_name": 0,
+          "latency_ms": {
+            "p50": 0.382,
+            "p95": 0.968,
+            "p99": 0.991
+          },
+          "errors": {}
+        },
+        "reconnect": {
+          "success_rate": 1.0,
+          "success_count": 20,
+          "requested": 20
+        },
+        "activity_read": {
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.002
+          },
+          "success_count": 60,
+          "requested": 20
+        },
+        "submission": {
+          "requested": 40,
+          "success_rate": 1.0,
+          "success_count": 40,
+          "error_count": 0,
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.002,
+            "p99": 0.002
+          }
+        },
+        "facilitator": {
+          "p50": 0.004,
+          "p95": 0.007,
+          "p99": 0.009,
+          "error_count": 0
+        },
+        "team_distribution": {
+          "Team 06": 2,
+          "Team 03": 3,
+          "Team 04": 3,
+          "Team 05": 2,
+          "Team 02": 3,
+          "Team 01": 3,
+          "Team 07": 2,
+          "Team 08": 2
+        },
+        "team_spread": 1,
+        "team_balance_ok": true,
+        "bottlenecks": []
+      }
+    },
+    "80": {
+      "status": "PASS",
+      "profile": {
+        "requested": 80,
+        "participants": 80,
+        "registration": {
+          "success_rate": 1.0,
+          "error_rate": 0.0,
+          "success_count": 80,
+          "error_count": 0,
+          "duplicate_registrations": 0,
+          "duplicate_by_name": 0,
+          "latency_ms": {
+            "p50": 1.264,
+            "p95": 3.633,
+            "p99": 4.314
+          },
+          "errors": {}
+        },
+        "reconnect": {
+          "success_rate": 1.0,
+          "success_count": 80,
+          "requested": 80
+        },
+        "activity_read": {
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.002
+          },
+          "success_count": 240,
+          "requested": 80
+        },
+        "submission": {
+          "requested": 160,
+          "success_rate": 1.0,
+          "success_count": 160,
+          "error_count": 0,
+          "latency_ms": {
+            "p50": 0.001,
+            "p95": 0.001,
+            "p99": 0.002
+          }
+        },
+        "facilitator": {
+          "p50": 0.007,
+          "p95": 0.015,
+          "p99": 0.018,
+          "error_count": 0
+        },
+        "team_distribution": {
+          "Team 07": 10,
+          "Team 06": 10,
+          "Team 01": 10,
+          "Team 03": 10,
+          "Team 04": 10,
+          "Team 08": 10,
+          "Team 02": 10,
+          "Team 05": 10
+        },
+        "team_spread": 0,
+        "team_balance_ok": true,
+        "bottlenecks": []
+      }
+    }
+  },
+  "database_safety": {
+    "schema_checks": [
+      "runtime_participants_event_idx",
+      "runtime_participants_event_name_idx",
+      "runtime_submissions_event_idx",
+      "runtime_submissions_mission_idx"
+    ],
+    "preflight_sql": "supabase/003_runtime_programme.sql",
+    "postflight_sql": "supabase/005_participant_identity.sql",
+    "rollback_verification_sql": "supabase/013_experience_definition_assignment_rollback.sql",
+    "notes": "Use the listed SQL checks only in test/staging. This harness does not execute direct catalog SQL in this repository."
+  },
+  "pass_fail": {
+    "20": "PASS",
+    "80": "PASS"
+  }
+}

@@ -1,0 +1,53 @@
+Cell,Browser,Scenario,Status,ParticipantID_before,ParticipantID_after,TeamID_before,TeamID_after,Country_Flag_preserved,Leader_rights_preserved,Duplicate_rows,Duplicate_credits,Latency_ms,Evidence
+1,"iOS Safari","Fresh join",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+2,"iOS Safari","Slow join",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+3,"iOS Safari","Repeated Join tap",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+4,"iOS Safari","Refresh",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+5,"iOS Safari","Background 30 seconds",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+6,"iOS Safari","Background 5 minutes",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+7,"iOS Safari","Screen lock and unlock",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+8,"iOS Safari","Browser closed and reopened",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+9,"iOS Safari","Network lost and restored",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+10,"iOS Safari","Same-name re-login",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+11,"iOS Safari","Leader reconnect",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+12,"iOS Safari","Member reconnect",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+13,"iOS Safari","Two concurrent same-participant requests",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+14,"iOS Chrome","Fresh join",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+15,"iOS Chrome","Slow join",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+16,"iOS Chrome","Repeated Join tap",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+17,"iOS Chrome","Refresh",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+18,"iOS Chrome","Background 30 seconds",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+19,"iOS Chrome","Background 5 minutes",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+20,"iOS Chrome","Screen lock and unlock",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+21,"iOS Chrome","Browser closed and reopened",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+22,"iOS Chrome","Network lost and restored",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+23,"iOS Chrome","Same-name re-login",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+24,"iOS Chrome","Leader reconnect",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+25,"iOS Chrome","Member reconnect",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+26,"iOS Chrome","Two concurrent same-participant requests",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+27,"Android Chrome","Fresh join",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+28,"Android Chrome","Slow join",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+29,"Android Chrome","Repeated Join tap",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+30,"Android Chrome","Refresh",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+31,"Android Chrome","Background 30 seconds",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+32,"Android Chrome","Background 5 minutes",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+33,"Android Chrome","Screen lock and unlock",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+34,"Android Chrome","Browser closed and reopened",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+35,"Android Chrome","Network lost and restored",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+36,"Android Chrome","Same-name re-login",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+37,"Android Chrome","Leader reconnect",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+38,"Android Chrome","Member reconnect",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+39,"Android Chrome","Two concurrent same-participant requests",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+40,"Samsung Internet","Fresh join",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+41,"Samsung Internet","Slow join",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+42,"Samsung Internet","Repeated Join tap",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+43,"Samsung Internet","Refresh",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+44,"Samsung Internet","Background 30 seconds",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+45,"Samsung Internet","Background 5 minutes",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+46,"Samsung Internet","Screen lock and unlock",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+47,"Samsung Internet","Browser closed and reopened",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+48,"Samsung Internet","Network lost and restored",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+49,"Samsung Internet","Same-name re-login",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+50,"Samsung Internet","Leader reconnect",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+51,"Samsung Internet","Member reconnect",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable
+52,"Samsung Internet","Two concurrent same-participant requests",BLOCKED,,,,,,UNVERIFIED,UNVERIFIED,UNVERIFIED,UNVERIFIED,,Physical device and production test event unavailable

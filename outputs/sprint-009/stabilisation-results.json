@@ -1,0 +1,163 @@
+{
+  "environment": "local in-memory transactional model; not production",
+  "generated_at_utc": "2026-08-01T10:17:48Z",
+  "passed": true,
+  "scenarios": [
+    {
+      "concurrent_workers": 100,
+      "duplicate_identity_mismatches": 0,
+      "durable_restore_fields": [
+        "ParticipantID",
+        "TeamID",
+        "Team",
+        "Country",
+        "Flag",
+        "IsLeader",
+        "IntelligenceCredits"
+      ],
+      "duration_seconds": 0.0117,
+      "errors": {},
+      "events": 1,
+      "injected_failures_per_request": 0,
+      "latency_ms": {
+        "max": 7.008,
+        "mean": 3.321,
+        "p50": 2.697,
+        "p95": 6.566,
+        "p99": 6.733
+      },
+      "maximum_team_distribution_spread": 1,
+      "participants": 100,
+      "passed": true,
+      "session_restore_failures": 0,
+      "successful": 100,
+      "throughput_joins_per_second": 8572.2,
+      "unique_participants": 100
+    },
+    {
+      "concurrent_workers": 100,
+      "duplicate_identity_mismatches": 0,
+      "durable_restore_fields": [
+        "ParticipantID",
+        "TeamID",
+        "Team",
+        "Country",
+        "Flag",
+        "IsLeader",
+        "IntelligenceCredits"
+      ],
+      "duration_seconds": 0.2522,
+      "errors": {},
+      "events": 1,
+      "injected_failures_per_request": 0,
+      "latency_ms": {
+        "max": 230.228,
+        "mean": 67.406,
+        "p50": 53.383,
+        "p95": 199.985,
+        "p99": 229.732
+      },
+      "maximum_team_distribution_spread": 1,
+      "participants": 250,
+      "passed": true,
+      "session_restore_failures": 0,
+      "successful": 250,
+      "throughput_joins_per_second": 991.2,
+      "unique_participants": 250
+    },
+    {
+      "concurrent_workers": 100,
+      "duplicate_identity_mismatches": 0,
+      "durable_restore_fields": [
+        "ParticipantID",
+        "TeamID",
+        "Team",
+        "Country",
+        "Flag",
+        "IsLeader",
+        "IntelligenceCredits"
+      ],
+      "duration_seconds": 0.1133,
+      "errors": {},
+      "events": 1,
+      "injected_failures_per_request": 0,
+      "latency_ms": {
+        "max": 63.261,
+        "mean": 8.84,
+        "p50": 6.791,
+        "p95": 20.314,
+        "p99": 38.056
+      },
+      "maximum_team_distribution_spread": 1,
+      "participants": 500,
+      "passed": true,
+      "session_restore_failures": 0,
+      "successful": 500,
+      "throughput_joins_per_second": 4411.4,
+      "unique_participants": 500
+    },
+    {
+      "concurrent_workers": 100,
+      "duplicate_identity_mismatches": 0,
+      "durable_restore_fields": [
+        "ParticipantID",
+        "TeamID",
+        "Team",
+        "Country",
+        "Flag",
+        "IsLeader",
+        "IntelligenceCredits"
+      ],
+      "duration_seconds": 0.0401,
+      "errors": {},
+      "events": 2,
+      "injected_failures_per_request": 0,
+      "latency_ms": {
+        "max": 25.574,
+        "mean": 5.776,
+        "p50": 4.757,
+        "p95": 13.239,
+        "p99": 17.076
+      },
+      "maximum_team_distribution_spread": 1,
+      "participants": 200,
+      "passed": true,
+      "session_restore_failures": 0,
+      "successful": 200,
+      "throughput_joins_per_second": 4990.7,
+      "unique_participants": 200
+    },
+    {
+      "concurrent_workers": 100,
+      "duplicate_identity_mismatches": 0,
+      "durable_restore_fields": [
+        "ParticipantID",
+        "TeamID",
+        "Team",
+        "Country",
+        "Flag",
+        "IsLeader",
+        "IntelligenceCredits"
+      ],
+      "duration_seconds": 0.0142,
+      "errors": {},
+      "events": 1,
+      "injected_failures_per_request": 2,
+      "latency_ms": {
+        "max": 11.284,
+        "mean": 4.314,
+        "p50": 4.258,
+        "p95": 8.139,
+        "p99": 10.7
+      },
+      "maximum_team_distribution_spread": 1,
+      "participants": 100,
+      "passed": true,
+      "session_restore_failures": 0,
+      "successful": 100,
+      "throughput_joins_per_second": 7042.2,
+      "unique_participants": 100
+    }
+  ],
+  "suite": "Sprint 009 EXOS deterministic stabilisation harness"
+}

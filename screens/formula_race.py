@@ -5,7 +5,7 @@ import os
 from urllib.parse import urlparse
 import streamlit as st
 
-from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRaceProvider, RaceSnapshot
+from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRaceProvider, RaceSnapshot, Team, Transaction, Submission
 from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
 from data.runtime_database import get_runtime_database
 from data.control_runtime import ControlRuntime
@@ -24,6 +24,56 @@ def _supabase_host(runtime) -> str:
     return (urlparse(str(getattr(runtime, "url", ""))).hostname or "").strip()
 
 
+def _staging_debug_enabled() -> bool:
+    return str(st.query_params.get("debug", "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_join_code(value: str) -> str:
+    return str(value or "").strip().upper()
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_event_id_from_join_code(join_code: str, runtime_host: str) -> str:
+    if not _staging_runtime_enabled():
+        return ""
+    runtime = FormulaRaceCoreV2StagingAdapter(get_runtime_database())
+    event = runtime.get_event_by_join_code(join_code)
+    return str(event.get("EventID", "")).strip()
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_runtime_event(event_id: str, runtime_host: str) -> dict:
+    if not _staging_runtime_enabled():
+        return {}
+    runtime = FormulaRaceCoreV2StagingAdapter(get_runtime_database())
+    return runtime.get_runtime_event(event_id) or {}
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _cached_runtime_teams(event_id: str, runtime_host: str) -> tuple[dict[str, str], ...]:
+    if not _staging_runtime_enabled():
+        return tuple()
+    runtime = FormulaRaceCoreV2StagingAdapter(get_runtime_database())
+    rows = runtime.get_runtime_teams(event_id) or []
+    return tuple(rows)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _cached_programme_hierarchy(event_id: str, runtime_host: str) -> tuple[dict[str, str], ...]:
+    if not _staging_runtime_enabled():
+        return tuple()
+    runtime = FormulaRaceCoreV2StagingAdapter(get_runtime_database())
+    return tuple(runtime.get_programme_hierarchy(event_id) or [])
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_marketplace_items(event_id: str, runtime_host: str) -> tuple[dict[str, str], ...]:
+    if not _staging_runtime_enabled():
+        return tuple()
+    runtime = FormulaRaceCoreV2StagingAdapter(get_runtime_database())
+    return tuple(runtime._marketplace_payload(event_id, "__RACE_SCREEN__").get("items", []))
+
+
 def _resolve_event_from_join_code(runtime, join_code: str) -> str:
     join_code = str(join_code or "").strip().upper()
     if not join_code:
@@ -38,7 +88,10 @@ def _resolve_event_from_join_code(runtime, join_code: str) -> str:
 
 
 def _build_formula_race_runtime():
-    runtime = get_runtime_database()
+    runtime = st.session_state.get("formula_race_runtime")
+    if runtime is None:
+        runtime = get_runtime_database()
+        st.session_state["formula_race_runtime"] = runtime
     if not _staging_runtime_enabled():
         return runtime
     return FormulaRaceCoreV2StagingAdapter(runtime)
@@ -46,7 +99,7 @@ def _build_formula_race_runtime():
 
 def _staging_banner() -> None:
     if _staging_runtime_enabled():
-        st.caption("EXOS CORE V2 — STAGING")
+        st.caption("EXOS CORE v2 — DEMO")
 
 
 def _attach_runtime(db):
@@ -119,8 +172,129 @@ def _staging_diagnostics(runtime, requested_join_code: str, event_id: str) -> No
 
 
 def _snapshot(db, event_id: str):
+    if not event_id:
+        return DemoFormulaRaceProvider().snapshot(event_id)
     if db is None:
         return DemoFormulaRaceProvider().snapshot(event_id or str(st.session_state.get("active_event_id", "")))
+
+    active_view = st.session_state.get("race_nav", "Overview")
+    if active_view == "Overview":
+        event = _cached_runtime_event(event_id, _supabase_host(db.runtime))
+        if not event:
+            raise RuntimeError("Core v2 event lookup did not return an event.")
+
+        raw_teams = _cached_runtime_teams(event_id, _supabase_host(db.runtime))
+        teams_data = list(raw_teams)
+        if not teams_data:
+            raise RuntimeError("Core v2 runtime unavailable for teams.")
+
+        missions = list(_cached_programme_hierarchy(event_id, _supabase_host(db.runtime)))
+        try:
+            submissions_raw = db.runtime.get_canonical_submissions(event_id)
+        except Exception as error:
+            raise RuntimeError("Core v2 runtime unavailable for submissions.") from error
+        if not submissions_raw:
+            submissions_raw = []
+
+        control = {
+            "CurrentStageStatus": str(event.get("Status", "READY")),
+            "Elapsed": "—",
+            "CurrentStageName": "Programme ready",
+        }
+        operations = {}
+        if getattr(db.runtime, "can_publish", False):
+            try:
+                operations = db.runtime.get_formula_race_state(event_id) or {}
+                operations["Checkpoints"] = db.runtime.get_formula_race_checkpoints(event_id)
+            except Exception:
+                operations = {}
+
+        report = {}
+        captain_status = {}
+        if getattr(db.runtime, "can_publish", False):
+            try:
+                report = db.runtime.get_canonical_transaction_report(event_id) or {}
+            except Exception:
+                report = {}
+            try:
+                captain_status = {
+                    str(row.get("TeamID", "")): bool(row.get("Connected", False))
+                    for row in db.runtime.formula_race_team_status(event_id)
+                }
+            except Exception:
+                captain_status = {}
+
+        leaderboard = {str(row.get("TeamID", "")): row for row in report.get("Leaderboard", [])}
+        balances = {
+            str(row.get("team_id", row.get("TeamID", ""))): row
+            for row in report.get("TeamBalances", [])
+        }
+        mapped_teams = []
+        for position, row in enumerate(teams_data, start=1):
+            team_id = str(row.get("TeamID", ""))
+            standing = leaderboard.get(team_id, {})
+            balance = balances.get(team_id, {})
+            completed = sum(
+                1 for item in submissions_raw
+                if str(item.get("TeamID", "")) == team_id
+                and str(item.get("Status", "PENDING")).upper() in {"APPROVED", "AWARDED"}
+            )
+            raw_checkpoint_state = operations.get("Checkpoints", {})
+            checkpoints_snapshot = (
+                raw_checkpoint_state.get("Checkpoints", [])
+                if isinstance(raw_checkpoint_state, dict) else raw_checkpoint_state
+            )
+            checkpoint_total = len(checkpoints_snapshot)
+            build = round(100 * completed / max(checkpoint_total or len(missions), 1))
+            mapped_teams.append(Team(
+                team_id,
+                str(row.get("TeamName", team_id)),
+                str(row.get("Country", "")),
+                "#e31b23",
+                LiveFormulaRaceProvider(db)._number(standing.get("Score", row.get("Score", 0))),
+                LiveFormulaRaceProvider(db)._number(standing.get("AvailableBalance", balance.get("available_balance", 0))),
+                build,
+                LiveFormulaRaceProvider(db)._number(standing.get("Rank", position), position),
+                captain_status.get(team_id, False),
+            ))
+
+        transactions = tuple(Transaction(
+            str(row.get("award_transaction_id", "")), str(row.get("team_id", "")),
+            str(row.get("award_type", "")), int(row.get("amount", 0) or 0),
+            str(row.get("reason", row.get("source", ""))), str(row.get("created_at", "")),
+        ) for row in report.get("AwardTransactions", []))
+        submissions = tuple(Submission(
+            str(row.get("SubmissionID", "")), str(row.get("TeamID", "")),
+            str(row.get("MissionID", row.get("ActivityID", row.get("MissionName", "Checkpoint")))),
+            str(row.get("Status", "PENDING")),
+            str(row.get("SubmittedAt", row.get("Timestamp", ""))),
+            str(row.get("StorageReference", row.get("PhotoURL", row.get("EvidenceType", "Evidence")))),
+        ) for row in submissions_raw)
+        checkpoint_state = operations.get("Checkpoints", {})
+        if isinstance(checkpoint_state, list):
+            checkpoint_state = {"Status": ""}
+        active = str(
+            "LIVE CHECKPOINTS" if str(checkpoint_state.get("Status", "")).upper() == "LIVE" else
+            event.get("StageName", "") or "Programme ready"
+        )
+
+        return RaceSnapshot(
+            event_id=event_id,
+            event_name=str(event.get("EventName", event_id)),
+            source="LIVE",
+            race_status=str(control.get("CurrentStageStatus", event.get("Status", "READY"))),
+            active_checkpoint=active,
+            elapsed=str(control.get("Elapsed", "—")),
+            teams=tuple(sorted(mapped_teams, key=lambda row: (row.rank, row.name))),
+            transactions=transactions,
+            submissions=submissions,
+            stock={},
+            activity=tuple(
+                f"{item.submitted_at} · {item.team_id} · {item.checkpoint} · {item.status}"
+                for item in submissions[-6:][::-1]
+            ),
+            operations=operations,
+        )
 
     return LiveFormulaRaceProvider(db).snapshot(
         event_id,
@@ -411,19 +585,35 @@ def show_formula_race(db=None, event_id=""):
         return
     if db is not None and hasattr(db, "__dict__"):
         db.runtime = runtime
+    st.session_state.setdefault("race_join_code", "")
+    st.session_state.setdefault("active_event_id", "")
+    st.session_state.setdefault("race_nav", NAV[0])
+    st.session_state.setdefault("race_subscreen", "")
+
     requested_join_code = str(st.query_params.get("join_code", "")).strip()
-    if not event_id and requested_join_code:
-        event_id = _resolve_event_from_join_code(runtime, requested_join_code)
+    if requested_join_code:
+        requested_join_code = _normalize_join_code(requested_join_code)
+        cached_event_id = _cached_event_id_from_join_code(requested_join_code, _supabase_host(runtime))
+        st.session_state.race_join_code = requested_join_code
+        if cached_event_id:
+            st.session_state.active_event_id = cached_event_id
+
+    if event_id and event_id != st.session_state.get("active_event_id"):
+        st.session_state.active_event_id = event_id
+
+    if not event_id:
+        event_id = st.session_state.get("active_event_id", "")
     try:
         snapshot = _snapshot(db, event_id)
         _assert_staging_runtime_health(runtime)
     except RuntimeError as error:
         st.error(f"Staging contract violation: {error}")
         if _staging_runtime_enabled():
-            _staging_diagnostics(runtime, requested_join_code, event_id)
+            if _staging_debug_enabled():
+                _staging_diagnostics(runtime, requested_join_code, event_id)
         return
 
-    if _staging_runtime_enabled() and hasattr(runtime, "get_staging_call_counts"):
+    if _staging_runtime_enabled() and hasattr(runtime, "get_staging_call_counts") and _staging_debug_enabled():
         counts = runtime.get_staging_call_counts()
         st.caption(
             f"LEGACY_RUNTIME_CALLS = {counts['LEGACY_RUNTIME_CALLS']} | "
