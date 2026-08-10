@@ -1,21 +1,41 @@
 import os
-import subprocess
-from uuid import UUID
 
 import streamlit as st
 
 from branding import apply_branding, configure_page
-from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
-from data.runtime_database import get_runtime_database
-from screens.formula_race_captain import show_formula_race_captain
 from screens.participant import show_participant
 
 configure_page(layout="centered")
 apply_branding(participant_pwa=True)
 
 
+def _deployment_environment() -> str:
+    value = str(os.getenv("EXOS_ENV", "") or "").strip()
+    if value:
+        return value.casefold()
+    try:
+        return str(st.secrets.get("EXOS_ENV", "") or "").strip().casefold()
+    except Exception:
+        return ""
+
+
+if _deployment_environment() == "staging":
+    show_participant()
+    st.stop()
+
+
+# The existing non-staging Formula R.A.C.E. shell remains isolated from the
+# Standard Core v2 staging application and is loaded only after its hard stop.
+import subprocess
+from uuid import UUID
+
+from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
+from data.runtime_database import get_runtime_database
+from screens.formula_race_captain import show_formula_race_captain
+
+
 def _staging() -> bool:
-    return str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging"
+    return _deployment_environment() == "staging"
 
 
 def _captain_deployed_commit():
@@ -33,10 +53,6 @@ def _captain_deployed_commit():
         ).strip()
     except (OSError, subprocess.SubprocessError):
         return "unknown"
-
-
-if _staging():
-    print(f"CAPTAIN_DEPLOYED_COMMIT={_captain_deployed_commit()}", flush=True)
 
 
 def _is_core_v2_race_request() -> bool:

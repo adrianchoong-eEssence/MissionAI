@@ -134,6 +134,7 @@ def reset_session():
         "participant_team",
         "event_name",
         "session_token",
+        "join_code",
     ]:
         if key in st.query_params:
             del st.query_params[key]
@@ -192,6 +193,19 @@ def render_recovery_candidate(candidate):
         f"{candidate.get('Country', '')}".strip()
     )
     st.write(f"**Team:** {candidate.get('Team', '')}")
+    if candidate.get("RecoveryRequired"):
+        st.warning(
+            candidate.get(
+                "Message",
+                "This identity needs facilitator recovery before it can reconnect.",
+            )
+        )
+        if st.button("Return to Join", width="stretch"):
+            st.session_state.pop("participant_recovery_candidate", None)
+            st.session_state.pop("participant_join_request", None)
+            st.rerun()
+        st.stop()
+
     resume, reject = st.columns(2)
     if resume.button("Resume Expedition", type="primary", width="stretch"):
         restore_participant_identity(candidate)
@@ -245,6 +259,8 @@ def restore_session_from_query_params(runtime):
     event_id = str(st.query_params.get("event_id", "")).strip()
     participant_name = str(st.query_params.get("participant_name", "")).strip()
     session_token = str(st.query_params.get("session_token", "")).strip()
+    join_code = normalise_join_code(st.query_params.get("join_code", ""))
+    device_id = participant_device_id()
 
     if session_token:
         try:
@@ -253,55 +269,38 @@ def restore_session_from_query_params(runtime):
             runtime_player = None
 
         if runtime_player:
+            if join_code:
+                st.session_state["participant_join_code"] = join_code
             restore_participant_identity(runtime_player, session_token)
             return
 
-    if runtime.is_configured:
-        for key in [
-            "event_id",
-            "participant_name",
-            "participant_team",
-            "event_name",
-            "session_token",
-        ]:
-            if key in st.query_params:
-                del st.query_params[key]
-        return
+    try:
+        event = runtime.get_event(event_id) if event_id else None
+    except RuntimeDatabaseError:
+        event = None
+    join_code = join_code or normalise_join_code((event or {}).get("JoinCode", ""))
+    if join_code and participant_name:
+        try:
+            player = runtime.restore_join(join_code, participant_name, device_id)
+        except RuntimeDatabaseError:
+            player = None
+        if player:
+            if event:
+                player.setdefault("EventName", event.get("EventName", "EXOS Event"))
+            st.session_state["participant_join_code"] = join_code
+            if player.get("RecoveryRequired"):
+                st.session_state["participant_recovery_candidate"] = player
+                return
+            restore_participant_identity(player)
+            persist_session_in_query_params()
+            return
 
-    db = get_standard_database()
-    if not event_id or not participant_name:
-        return
-
-    player = db.get_player(event_id, participant_name)
-    if not player:
-        return
-
-    event = next(
-        (
-            row
-            for row in db.get_events()
-            if str(row.get("EventID", "")) == event_id
-        ),
-        {},
-    )
-    team_name = str(
-        player.get("Team", "")
-        or player.get("TeamName", "")
-        or st.query_params.get("participant_team", "")
-    )
-    ai = db.assign_ai_facilitator(team_name) or {}
-
-    st.session_state["participant_event_id"] = event_id
-    st.session_state["participant_name"] = participant_name
-    st.session_state["participant_team"] = team_name
-    st.session_state["participant_country"] = ""
-    st.session_state["participant_points"] = player.get("Points", 0)
-    st.session_state["participant_event_name"] = event.get(
-        "EventName",
-        str(st.query_params.get("event_name", "EXOS Event")),
-    )
-    st.session_state["participant_session_token"] = ""
-    apply_participant_ai_identity(ai, event_id)
+    for key in [
+        "event_id", "participant_name", "participant_team", "event_name",
+        "session_token", "join_code",
+    ]:
+        if key in st.query_params:
+            del st.query_params[key]
 
 
 def persist_session_in_query_params():
@@ -312,8 +311,13 @@ def persist_session_in_query_params():
         "event_name": st.session_state["participant_event_name"],
     }
     session_token = st.session_state.get("participant_session_token", "")
+    join_code = normalise_join_code(
+        st.session_state.get("participant_join_code", "")
+    )
     if session_token:
         desired["session_token"] = session_token
+    if join_code:
+        desired["join_code"] = join_code
     for key, value in desired.items():
         if str(st.query_params.get(key, "")) != str(value):
             st.query_params[key] = value
@@ -2459,7 +2463,7 @@ def show_participant():
             join_event
             and str(join_event.get("EventID", "")) == "EVT-0004"
         )
-        db = None
+        db = runtime
         if is_formula_race_join:
             st.info("Your pre-assigned Formula R.A.C.E. team will open automatically.")
         st.caption("Already registered? Use Check Existing Registration to reconnect.")
@@ -2508,7 +2512,6 @@ def show_participant():
                         player.get("Status", "")
                     )
                 else:
-                    db = db or get_standard_database()
                     player = db.join_player_by_code(
                         pending["join_code"],
                         pending["participant_name"],
@@ -2540,11 +2543,11 @@ def show_participant():
                 st.session_state.pop("participant_join_request", None)
                 st.rerun()
 
-            db = db or get_standard_database()
             ai = db.assign_ai_facilitator(player["Team"]) or {}
 
             if player.get("Rejoined"):
                 st.info("Existing registration found. Reconnecting you to your original team.")
+            st.session_state["participant_join_code"] = pending["join_code"]
             restore_participant_identity(player)
             apply_participant_ai_identity(ai, player["EventID"])
             st.session_state.pop("participant_join_request", None)
@@ -2571,8 +2574,9 @@ def show_participant():
             if player.get("RecoveryRequired"):
                 st.session_state["participant_recovery_candidate"] = player
                 st.rerun()
-            db = get_standard_database()
+            db = runtime
             ai = db.assign_ai_facilitator(player["Team"]) or {}
+            st.session_state["participant_join_code"] = join_code
             restore_participant_identity(player)
             apply_participant_ai_identity(ai, player["EventID"])
             persist_session_in_query_params()
@@ -2581,7 +2585,7 @@ def show_participant():
         st.caption(f"Build: {running_build_sha()}")
         return
 
-    db = get_standard_database()
+    db = runtime
 
     experience_header(
         experience_title(
@@ -2687,9 +2691,7 @@ def show_participant():
             "Description": hierarchy_activity.get("ParticipantTask", ""),
             "SubmissionType": hierarchy_activity.get("SubmissionType", ""),
         })
-        if activity_id and (
-            details["EvidenceRequired"] or programme_submission_type == "NASI"
-        ):
+        if activity_id and programme_submission_type not in {"", "NONE"}:
             programme_mission = {
                 "MissionID": activity_id,
                 "Title": hierarchy_activity.get("ParticipantDisplayName", "Activity"),
