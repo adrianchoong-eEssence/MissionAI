@@ -43,6 +43,11 @@ def test_standard_participant_screen_has_no_hybrid_data_source():
     assert "data.google_sheets" not in source
     assert "get_runtime_database" not in source
     assert "get_standard_database" in source
+    assert "YOUR TEAM" in source
+    assert "TEAM IDENTITY" in source
+    assert "YOUR COUNTRY" not in source
+    assert "Country team" not in source
+    assert "COUNTRY_LANGUAGE_PROMPTS" not in source
 
 
 @pytest.mark.parametrize("join_code,expected", AIA.items())

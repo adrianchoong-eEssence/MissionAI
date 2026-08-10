@@ -56,17 +56,6 @@ def running_build_sha():
         return "unknown"
 
 
-COUNTRY_LANGUAGE_PROMPTS = {
-    "Korea": "Find everyone from your country. Speak the language.",
-    "Japan": "Find your team. You may greet them with: Konnichiwa.",
-    "Malaysia": "Find your team. You may greet them with: Apa khabar.",
-    "France": "Find your team. You may greet them with: Bonjour.",
-    "India": "Find your team. You may greet them with: Namaste.",
-    "Philippines": "Find everyone from your country. Speak the language.",
-    "Thailand": "Find your team. You may greet them with: Sawadee.",
-    "China": "Find your team. You may greet them with: Ni hao.",
-}
-
 SESSION_KEYS = [
     "participant_id",
     "participant_event_id",
@@ -497,14 +486,29 @@ def _normalise_gps_support(mission):
 
 def render_team_assignment_card(db):
     team = st.session_state.get("participant_team", "")
-    country = st.session_state.get("participant_country", "")
-    instruction = COUNTRY_LANGUAGE_PROMPTS.get(
-        country or team,
-        "Find your team members and gather together.",
+    event_id = st.session_state.get("participant_event_id", "")
+    event = db.get_event(event_id) or {}
+    metadata = db.event_metadata(event)
+    identity_config = dict(metadata.get("TeamIdentityConfig", {}) or {})
+    theme_type = str(identity_config.get("ThemeType", event.get("ThemeType", "CUSTOM"))).strip().upper()
+    theme_name = str(identity_config.get("ThemeName", event.get("ThemeName", "Teams"))).strip()
+    configured_teams = db.get_teams(event_id)
+    selected_team = next((
+        row for row in configured_teams
+        if str(row.get("TeamID", "")) == str(st.session_state.get("participant_team_id", ""))
+        or str(row.get("TeamName", "")) == str(team)
+    ), {})
+    team_identity = str(selected_team.get("TeamIdentity") or team or "Team").strip()
+    country = str(selected_team.get("Country", "") or "").strip()
+    emoji = str(selected_team.get("Emoji") or selected_team.get("Icon") or selected_team.get("Flag") or "").strip()
+    image = str(selected_team.get("Image", "") or "").strip()
+    instruction = str(
+        identity_config.get("ParticipantInstruction")
+        or "Find your team members and gather together."
     )
     try:
         roster = db.get_team_roster(
-            st.session_state.get("participant_event_id", ""), team,
+            event_id, team,
         )
     except RuntimeDatabaseError:
         roster = []
@@ -515,28 +519,14 @@ def render_team_assignment_card(db):
     )
     st.session_state["participant_is_leader"] = bool(own_record.get("IsLeader"))
 
-    if str(st.session_state.get("participant_event_id", "")) == "EVT-0004":
-        flags = {
-            "Korea": "🇰🇷", "Japan": "🇯🇵", "Thailand": "🇹🇭",
-            "Philippines": "🇵🇭", "Malaysia": "🇲🇾", "India": "🇮🇳",
-        }
-        flag = flags.get(country, "")
-        st.markdown(
-            f"""
-            <div style="padding:28px;border-radius:22px;background:#082D58;color:white;text-align:center;margin-bottom:18px;">
-              <div style="font-size:18px;font-weight:800;letter-spacing:.18em;">YOUR COUNTRY</div>
-              <div style="font-size:92px;line-height:1.15;margin:10px 0;">{flag}</div>
-              <div style="font-size:42px;font-weight:900;">{country}</div>
-              <div style="font-size:21px;margin-top:18px;line-height:1.5;">
-                Find everyone from your country.<br>Speak the language.<br><br>
-                Once your team has assembled, choose ONE Team Leader.
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
+    if image:
+        st.image(image, width="stretch")
+    optional_country = (
+        f'<div style="font-size:18px;margin-top:6px;">{html.escape(country)}</div>'
+        if theme_type == "COUNTRY" and country else ""
+    )
+    visual = f'<div style="font-size:64px;line-height:1.2;">{html.escape(emoji)}</div>' if emoji else ""
+    st.markdown(
         f"""
         <div style="
             padding:24px;
@@ -546,14 +536,17 @@ def render_team_assignment_card(db):
             text-align:center;
             margin-bottom:18px;
         ">
-            <div style="font-size:18px;opacity:.8;">Your Team</div>
-            <div style="font-size:46px;font-weight:900;margin-top:8px;">{team}</div>
-            <div style="font-size:20px;margin-top:6px;">{country or 'Country team'}</div>
-            <div style="font-size:18px;margin-top:12px;opacity:.9;">{instruction}</div>
+            <div style="font-size:18px;font-weight:800;letter-spacing:.14em;">YOUR TEAM</div>
+            <div style="font-size:15px;opacity:.75;margin-top:8px;">{html.escape(theme_name)}</div>
+            {visual}
+            <div style="font-size:16px;opacity:.75;margin-top:8px;">TEAM IDENTITY</div>
+            <div style="font-size:46px;font-weight:900;margin-top:4px;">{html.escape(team_identity)}</div>
+            {optional_country}
+            <div style="font-size:18px;margin-top:12px;opacity:.9;">{html.escape(instruction)}</div>
         </div>
         """,
         unsafe_allow_html=True,
-        )
+    )
     if roster:
         st.markdown("#### Team Members")
         for member in roster:

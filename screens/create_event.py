@@ -23,114 +23,197 @@ PROGRAMME_TYPES = [
 
 def _event_defaults(event):
     metadata = StandardCoreV2Adapter.event_metadata(event)
+    identity_config = dict(metadata.get("TeamIdentityConfig", {}) or {})
     return {
         "DurationHours": float(metadata.get("DurationHours", 8) or 8),
         "ExpectedParticipants": int(
             metadata.get("ExpectedParticipants", 60) or 60
         ),
-        "TeamTheme": str(
-            metadata.get(
-                "TeamTheme",
-                event.get("ProgrammeType", "Countries") if event else "Countries",
-            )
+        "ThemeType": str(
+            identity_config.get("ThemeType")
+            or metadata.get("ThemeType")
+            or ("COUNTRY" if metadata.get("CountryPool") else "CUSTOM")
         ),
+        "ThemeName": str(identity_config.get("ThemeName", metadata.get("TeamTheme", "Teams"))),
     }
 
 
-def _save_event_metadata(db, event_id, duration, participants, team_theme):
+def _identity_value(team):
+    return str(team.get("TeamIdentity") or team.get("TeamName") or "").strip()
+
+
+def _identity_option(value, position=0):
+    if isinstance(value, dict):
+        row = dict(value)
+    else:
+        row = {"TeamIdentity": str(value)}
+    identity = _identity_value(row)
+    return {
+        "TeamIdentity": identity or f"Team {position or 1}",
+        "Country": str(row.get("Country", "") or "").strip(),
+        "Icon": str(row.get("Icon", "") or "").strip(),
+        "Emoji": str(row.get("Emoji", row.get("Flag", "")) or "").strip(),
+        "Image": str(row.get("Image", "") or "").strip(),
+    }
+
+
+def _identity_pool(metadata, existing_teams=()):
+    config = dict((metadata or {}).get("TeamIdentityConfig", {}) or {})
+    raw = config.get("IdentityPool") or (metadata or {}).get("TeamIdentityPool")
+    if not raw and (metadata or {}).get("CountryPool"):
+        raw = [{"TeamIdentity": value, "Country": value} for value in metadata["CountryPool"]]
+    if not raw:
+        raw = list(existing_teams)
+    return [_identity_option(value, position) for position, value in enumerate(raw or [], 1)]
+
+
+def _identity_lines(identities):
+    return "\n".join(
+        " | ".join([
+            item.get("TeamIdentity", ""), item.get("Emoji", ""),
+            item.get("Image", ""), item.get("Country", ""),
+        ]).rstrip(" |")
+        for item in identities
+    )
+
+
+def _parse_identity_lines(value):
+    identities = []
+    for position, line in enumerate(str(value or "").splitlines(), 1):
+        if not line.strip():
+            continue
+        parts = [part.strip() for part in line.split("|", 3)]
+        parts += [""] * (4 - len(parts))
+        identities.append(_identity_option({
+            "TeamIdentity": parts[0], "Emoji": parts[1],
+            "Image": parts[2], "Country": parts[3],
+        }, position))
+    return identities
+
+
+def _identity_configuration_error(group_count, identities):
+    unique = {_identity_value(item).casefold() for item in identities if _identity_value(item)}
+    if len(unique) < int(group_count):
+        return (
+            f"{int(group_count)} active groups require {int(group_count)} unique team identities. "
+            f"{len(unique)} are currently configured."
+        )
+    if len(unique) != len(identities):
+        return "Every configured team identity must be unique."
+    return ""
+
+
+def _regenerate_generic_identities(team_count_key, identity_pool_key):
+    count = int(st.session_state.get(team_count_key, 1) or 1)
+    st.session_state[identity_pool_key] = _identity_lines([
+        _identity_option(f"Team {position}", position)
+        for position in range(1, count + 1)
+    ])
+
+
+def _save_event_metadata(db, event_id, duration, participants, theme_type,
+                         theme_name, identity_pool, assigned_identities=()):
     db.update_event_metadata(event_id, {
         "DurationHours": float(duration),
         "ExpectedParticipants": int(participants),
-        "TeamTheme": str(team_theme).strip(),
+        "TeamTheme": str(theme_name).strip(),
+        "ThemeType": str(theme_type).strip() or "CUSTOM",
+        "TeamIdentityPool": [dict(item) for item in identity_pool],
+        "TeamIdentityConfig": {
+            "ThemeType": str(theme_type).strip() or "CUSTOM",
+            "ThemeName": str(theme_name).strip() or "Teams",
+            "IdentityPool": [dict(item) for item in identity_pool],
+            "Identities": [{
+                "TeamID": str(item.get("TeamID", "")),
+                **_identity_option(item, position),
+            } for position, item in enumerate(assigned_identities, 1)],
+        },
     })
 
 
-def _resize_event_teams(event_id, existing_teams, target_count, country_pool=None):
-    """Resize an event roster without leaking event-specific countries into Core."""
+def _resize_event_teams(event_id, existing_teams, target_count, identity_pool=None,
+                        theme_type="CUSTOM", theme_name="Teams"):
+    """Assign N unique event-configured identities without programme changes."""
     target_count = int(target_count)
-    pool = [str(value).strip() for value in (country_pool or []) if str(value).strip()]
-    if pool and target_count > len(pool):
-        raise ValueError(
-            f"This event has {len(pool)} unique country identities; "
-            f"choose between 1 and {len(pool)} active teams."
-        )
+    pool = [_identity_option(value, position) for position, value in enumerate(identity_pool or [], 1)]
+    if not pool:
+        pool = [_identity_option(f"Team {position}", position) for position in range(1, target_count + 1)]
+    error = _identity_configuration_error(target_count, pool)
+    if error:
+        raise ValueError(error)
     revised = [dict(team) for team in list(existing_teams)[:target_count]]
     while len(revised) < target_count:
         position = len(revised) + 1
-        country = pool[position - 1] if pool else f"Team {position}"
         revised.append({
             "TeamID": f"{event_id}-TEAM-{position:02d}",
-            "TeamName": country,
-            "Country": country,
         })
-    if pool:
-        for position, team in enumerate(revised):
-            country = pool[position]
-            team.update({"TeamName": country, "Country": country})
+    for position, team in enumerate(revised):
+        identity = pool[position]
+        team.update(identity)
+        team.update({
+            "TeamName": identity["TeamIdentity"],
+            "ThemeType": str(theme_type).strip() or "CUSTOM",
+            "ThemeName": str(theme_name).strip() or "Teams",
+        })
     return revised
 
 
-def _resize_cross_event_teams(db, event, existing_teams, target_count):
-    """Resize one member of a configured event pair without country collisions."""
+def _resize_cross_event_teams(db, event, existing_teams, target_count,
+                              identity_pool=None, theme_type="", theme_name=""):
+    """Apply the optional event-pair uniqueness policy to generic identities."""
     event_id = str(event.get("EventID", ""))
     metadata = StandardCoreV2Adapter.event_metadata(event)
     paired_event_id = str(metadata.get("PairedEventID", "")).strip()
-    pool = [
-        str(value).strip() for value in metadata.get("CountryPool", [])
-        if str(value).strip()
-    ]
-    if not paired_event_id or not pool:
-        return _resize_event_teams(event_id, existing_teams, target_count, pool)
+    raw_pool = identity_pool or _identity_pool(metadata, existing_teams)
+    pool = [_identity_option(value, position) for position, value in enumerate(raw_pool, 1)]
+    paired_unique = bool(
+        metadata.get("CrossEventIdentityUnique")
+        or metadata.get("CountryAllocationGroupID")
+    )
+    if not paired_event_id or not paired_unique:
+        return _resize_event_teams(
+            event_id, existing_teams, target_count, pool,
+            theme_type or metadata.get("ThemeType", "CUSTOM"),
+            theme_name or metadata.get("TeamTheme", "Teams"),
+        )
 
     paired_event = db.get_event(paired_event_id)
     if not paired_event:
         raise ValueError(
-            "The paired event could not be loaded; cross-event country allocation was not changed."
+            "The paired event could not be loaded; cross-event team identity allocation was not changed."
         )
-    if db.get_participant_count(paired_event_id):
+    paired_teams = db.get_teams(paired_event_id)
+    reserved = {_identity_value(team).casefold() for team in paired_teams if _identity_value(team)}
+    available = [item for item in pool if _identity_value(item).casefold() not in reserved]
+    total_groups = int(target_count) + len(paired_teams)
+    if len({_identity_value(item).casefold() for item in pool}) < total_groups:
+        raise ValueError(_identity_configuration_error(total_groups, pool))
+    if len(available) < int(target_count):
+        raise ValueError(
+            f"{total_groups} active groups require {total_groups} unique team identities. "
+            f"{len({_identity_value(item).casefold() for item in pool})} are currently configured."
+        )
+    current = _resize_event_teams(
+        event_id, existing_teams, target_count, available,
+        theme_type or metadata.get("ThemeType", "CUSTOM"),
+        theme_name or metadata.get("TeamTheme", "Teams"),
+    )
+    existing_signature = [_identity_value(team) for team in existing_teams]
+    revised_signature = [_identity_value(team) for team in current]
+    if db.get_participant_count(paired_event_id) and existing_signature != revised_signature:
         raise ValueError(
             "Team allocation cannot change after participants have joined either paired event."
         )
 
-    paired_teams = db.get_teams(paired_event_id)
-    reserved = {
-        str(team.get("Country", "")).strip().casefold()
-        for team in paired_teams if str(team.get("Country", "")).strip()
-    }
-    current = [dict(team) for team in list(existing_teams)[: int(target_count)]]
-    current_identities = {
-        str(team.get("Country", "")).strip().casefold()
-        for team in current if str(team.get("Country", "")).strip()
-    }
-    if reserved & current_identities:
-        raise ValueError("The paired events already contain a duplicate country identity.")
-
-    available = [
-        country for country in pool
-        if country.casefold() not in reserved | current_identities
-    ]
-    required = int(target_count) - len(current)
-    if required > len(available):
-        raise ValueError(
-            f"The paired events can use at most {len(pool)} unique countries in total. "
-            "Reduce the other event's group count before increasing this event."
-        )
-    for country in available[:required]:
-        position = len(current) + 1
-        current.append({
-            "TeamID": f"{event_id}-TEAM-{position:02d}",
-            "TeamName": country,
-            "Country": country,
-        })
-
     combined = [
-        str(team.get("Country", "")).strip()
+        _identity_value(team)
         for team in current + paired_teams
     ]
-    if len(combined) > len(pool) or len({value.casefold() for value in combined}) != len(combined):
-        raise ValueError("Cross-event country allocation must remain unique across both events.")
-    if any(value.casefold() not in {country.casefold() for country in pool} for value in combined):
-        raise ValueError("Every paired-event country must belong to the configured country pool.")
+    if len({value.casefold() for value in combined}) != len(combined):
+        raise ValueError("Cross-event team identities must remain unique across both events.")
+    configured = {_identity_value(item).casefold() for item in pool}
+    if any(value.casefold() not in configured for value in combined):
+        raise ValueError("Every paired-event team identity must belong to the configured identity pool.")
     return current
 
 
@@ -138,6 +221,20 @@ def _event_form(db, event=None):
     editing = bool(event)
     defaults = _event_defaults(event or {})
     event_id = str((event or {}).get("EventID", ""))
+    existing_teams = db.get_teams(event_id) if editing else []
+    metadata = StandardCoreV2Adapter.event_metadata(event or {})
+    default_pool = _identity_pool(metadata, existing_teams)
+    if not default_pool:
+        default_count = int((event or {}).get("NumberOfTeams", 6) or 6)
+        default_pool = [
+            _identity_option(f"Team {position}", position)
+            for position in range(1, default_count + 1)
+        ]
+    state_suffix = event_id or "new"
+    team_count_key = f"event_team_count_{state_suffix}"
+    identity_pool_key = f"event_identity_pool_{state_suffix}"
+    if identity_pool_key not in st.session_state:
+        st.session_state[identity_pool_key] = _identity_lines(default_pool)
     with st.form(f"{'edit' if editing else 'create'}_event_form_{event_id}"):
         client = st.text_input("Client", value=str((event or {}).get("Client", "")))
         department = st.text_input(
@@ -186,16 +283,31 @@ def _event_form(db, event=None):
             value=defaults["ExpectedParticipants"],
             step=1,
         )
-        col3, col4 = st.columns(2)
+        col3, col4, col5 = st.columns(3)
         teams = col3.number_input(
             "Number of teams",
             min_value=1,
             value=int((event or {}).get("NumberOfTeams", 6) or 6),
             step=1,
+            key=team_count_key,
         )
-        team_theme = col4.text_input(
-            "Team theme",
-            value=defaults["TeamTheme"],
+        theme_type = col4.text_input(
+            "Theme type",
+            value=defaults["ThemeType"],
+            placeholder="Country, Animal, F1, Colour, Custom…",
+        )
+        theme_name = col5.text_input(
+            "Theme name",
+            value=defaults["ThemeName"],
+        )
+        identity_text = st.text_area(
+            "Team identity pool",
+            key=identity_pool_key,
+            help=(
+                "One unique identity per line: Team Identity | Emoji/Icon | Image URL | "
+                "Country (optional). Add more lines before increasing group count."
+            ),
+            height=max(140, min(320, len(default_pool) * 30)),
         )
         join_code = st.text_input(
             "Join code",
@@ -211,16 +323,31 @@ def _event_form(db, event=None):
             status_options,
             index=status_options.index(current_status),
         )
-        submitted = st.form_submit_button(
+        regenerate_col, save_col = st.columns(2)
+        regenerated = regenerate_col.form_submit_button(
+            "Regenerate generic team identities",
+            on_click=_regenerate_generic_identities,
+            args=(team_count_key, identity_pool_key),
+            width="stretch",
+        )
+        submitted = save_col.form_submit_button(
             "Save Changes" if editing else "Create Event",
             type="primary",
             width="stretch",
         )
 
+    if regenerated:
+        st.info(f"Generated {int(teams)} editable generic team identities.")
+        return None
     if not submitted:
         return None
     if not client.strip() or not event_name.strip() or not venue.strip():
         st.error("Client, event name and venue are required.")
+        return None
+    identity_pool = _parse_identity_lines(identity_text)
+    identity_error = _identity_configuration_error(int(teams), identity_pool)
+    if identity_error:
+        st.error(identity_error)
         return None
 
     final_join_code = join_code or db.create_new_join_code()
@@ -245,23 +372,38 @@ def _event_form(db, event=None):
         )
         if status != "Draft":
             db.update_event(event_id, {"Status": status})
+        revised = _resize_event_teams(
+            event_id, db.get_teams(event_id), int(teams), identity_pool,
+            theme_type, theme_name,
+        )
+        db.replace_event_teams(event_id, revised)
     else:
-        existing_teams = db.get_teams(event_id)
-        if int(teams) != len(existing_teams):
+        try:
+            revised = _resize_cross_event_teams(
+                db, event, existing_teams, int(teams), identity_pool,
+                theme_type, theme_name,
+            )
+        except ValueError as error:
+            st.error(str(error))
+            return None
+        current_signature = [
+            (_identity_value(team), team.get("Country", ""),
+             team.get("Emoji", ""), team.get("Image", ""))
+            for team in existing_teams
+        ]
+        revised_signature = [
+            (_identity_value(team), team.get("Country", ""),
+             team.get("Emoji", ""), team.get("Image", ""))
+            for team in revised
+        ]
+        if current_signature != revised_signature:
             if db.get_participant_count(event_id):
-                st.error("Team count cannot change after participants have joined.")
-                return None
-            try:
-                revised = _resize_cross_event_teams(
-                    db, event, existing_teams, int(teams)
-                )
-            except ValueError as error:
-                st.error(str(error))
+                st.error("Team identities cannot change after participants have joined.")
                 return None
             db.replace_event_teams(event_id, revised)
             db.update_event_metadata(event_id, {
                 "ActiveTeamCount": len(revised),
-                "AssignedCountries": [team.get("Country", "") for team in revised],
+                "AssignedTeamIdentities": [_identity_value(team) for team in revised],
                 "CrossEventAllocationValidated": True,
             })
         db.update_event(event_id, {
@@ -282,8 +424,30 @@ def _event_form(db, event=None):
         event_id,
         duration,
         expected_participants,
-        team_theme,
+        theme_type,
+        theme_name,
+        identity_pool,
+        revised,
     )
+    paired_event_id = str(metadata.get("PairedEventID", "")).strip()
+    if paired_event_id and (
+        metadata.get("CrossEventIdentityUnique")
+        or metadata.get("CountryAllocationGroupID")
+    ):
+        paired = db.get_event(paired_event_id)
+        paired_metadata = StandardCoreV2Adapter.event_metadata(paired)
+        paired_config = dict(paired_metadata.get("TeamIdentityConfig", {}) or {})
+        paired_config.update({
+            "ThemeType": str(theme_type).strip() or "CUSTOM",
+            "ThemeName": str(theme_name).strip() or "Teams",
+            "IdentityPool": [dict(item) for item in identity_pool],
+        })
+        db.update_event_metadata(paired_event_id, {
+            "TeamTheme": str(theme_name).strip(),
+            "ThemeType": str(theme_type).strip() or "CUSTOM",
+            "TeamIdentityPool": [dict(item) for item in identity_pool],
+            "TeamIdentityConfig": paired_config,
+        })
     st.session_state[ACTIVE_EVENT_KEY] = event_id
     return {
         "EventID": event_id,

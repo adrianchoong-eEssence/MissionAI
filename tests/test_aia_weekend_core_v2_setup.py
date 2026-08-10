@@ -1,10 +1,17 @@
+from pathlib import Path
+
 import pytest
 
 from data.runtime_database import RuntimeDatabaseError
 from data.standard_core_v2_adapter import StandardCoreV2Adapter
 from engines.programme_adapter import CanonicalProgrammeAdapter
 from engines.programme_hierarchy import activity_details, encode_activity_details
-from screens.create_event import _resize_cross_event_teams, _resize_event_teams
+from screens.create_event import (
+    _identity_configuration_error,
+    _parse_identity_lines,
+    _resize_cross_event_teams,
+    _resize_event_teams,
+)
 from scripts.exos_core_v2_prepare_aia_weekend import (
     COUNTRIES,
     PROGRAMME,
@@ -64,19 +71,23 @@ def test_country_pool_is_event_configuration_and_supports_fewer_groups():
     assert len({team["Country"] for team in teams}) == 4
     assert len(COUNTRIES) == 6
     assert [country for country, _ in upper] == ["Korea", "Japan"]
-    with pytest.raises(ValueError, match="cannot exceed six"):
+    with pytest.raises(ValueError, match="7 active groups require 7 unique team identities"):
         allocate_country_pool(3, 4)
+    expanded = COUNTRIES + (("Tiger", "🐯"), ("Eagle", "🦅"))
+    upper, lower = allocate_country_pool(3, 4, expanded)
+    assert len(upper + lower) == 7
 
 
-def test_event_team_resize_preserves_unique_country_pool():
-    pool = [country for country, _ in COUNTRIES]
+def test_event_team_resize_uses_generic_identity_pool_without_six_team_limit():
+    pool = [{"TeamIdentity": country, "Country": country, "Emoji": flag} for country, flag in COUNTRIES]
+    pool += [{"TeamIdentity": "Tiger", "Emoji": "🐯"}, {"TeamIdentity": "Eagle", "Emoji": "🦅"}]
     initial = team_configuration("EVT-AIA", COUNTRIES[:3])
-    expanded = _resize_event_teams("EVT-AIA", initial, 6, pool)
-    assert [team["Country"] for team in expanded] == pool
+    expanded = _resize_event_teams("EVT-AIA", initial, 8, pool, "CUSTOM", "Weekend Teams")
+    assert [team["TeamIdentity"] for team in expanded] == [item["TeamIdentity"] for item in pool]
     reduced = _resize_event_teams("EVT-AIA", expanded, 2, pool)
-    assert [team["Country"] for team in reduced] == pool[:2]
-    with pytest.raises(ValueError, match="unique country identities"):
-        _resize_event_teams("EVT-AIA", initial, 7, pool)
+    assert [team["TeamIdentity"] for team in reduced] == ["Korea", "Japan"]
+    with pytest.raises(ValueError, match="9 active groups require 9 unique team identities"):
+        _resize_event_teams("EVT-AIA", initial, 9, pool)
 
 
 class _PairDB:
@@ -98,7 +109,10 @@ def test_cross_event_resize_preserves_other_event_and_uses_only_unassigned_count
     pool = [country for country, _ in COUNTRIES]
     event = {
         "EventID": "UPPER",
-        "_EventPayload": {"PairedEventID": "LOWER", "CountryPool": pool},
+        "_EventPayload": {
+            "PairedEventID": "LOWER", "CountryPool": pool,
+            "CrossEventIdentityUnique": True,
+        },
     }
     upper = team_configuration("UPPER", COUNTRIES[:2])
     lower = team_configuration("LOWER", COUNTRIES[2:5])
@@ -107,32 +121,105 @@ def test_cross_event_resize_preserves_other_event_and_uses_only_unassigned_count
     assert not ({team["Country"] for team in resized} & {team["Country"] for team in lower})
 
 
-def test_cross_event_resize_rejects_more_than_six_total_or_joined_pair():
+def test_cross_event_resize_requires_pool_expansion_and_blocks_joined_pair():
     pool = [country for country, _ in COUNTRIES]
     event = {
         "EventID": "UPPER",
-        "_EventPayload": {"PairedEventID": "LOWER", "CountryPool": pool},
+        "_EventPayload": {
+            "PairedEventID": "LOWER", "CountryPool": pool,
+            "CrossEventIdentityUnique": True,
+        },
     }
     upper = team_configuration("UPPER", COUNTRIES[:2])
     lower = team_configuration("LOWER", COUNTRIES[2:])
-    with pytest.raises(ValueError, match="at most 6 unique countries"):
+    with pytest.raises(ValueError, match="7 active groups require 7 unique team identities"):
         _resize_cross_event_teams(_PairDB(lower), event, upper, 3)
+    expanded_pool = pool + [{"TeamIdentity": "Tiger"}]
+    resized = _resize_cross_event_teams(
+        _PairDB(lower), event, upper, 3, expanded_pool,
+    )
+    assert [team["TeamIdentity"] for team in resized][-1] == "Tiger"
     with pytest.raises(ValueError, match="either paired event"):
-        _resize_cross_event_teams(_PairDB(lower[:3], paired_participants=1), event, upper, 2)
+        _resize_cross_event_teams(_PairDB(lower[:3], paired_participants=1), event, upper, 3)
 
 
-def test_standard_adapter_rejects_duplicate_countries_before_publish():
+def test_standard_adapter_rejects_duplicate_team_identities_before_publish():
     adapter = object.__new__(StandardCoreV2Adapter)
     adapter.get_participant_count = lambda event_id: 0
     adapter.get_event = lambda event_id: {
         "EventName": "AIA", "JoinCode": "ABC123", "ScoringMode": "TEAM_COMPETITIVE"
     }
     adapter._rpc = lambda *args, **kwargs: pytest.fail("must not publish duplicates")
-    with pytest.raises(RuntimeDatabaseError, match="Duplicate country"):
+    with pytest.raises(RuntimeDatabaseError, match="Duplicate team identity"):
         adapter.replace_event_teams("EVT-AIA", [
-            {"TeamName": "Korea", "Country": "Korea"},
-            {"TeamName": "Korea 2", "Country": "korea"},
+            {"TeamName": "Tiger", "Country": "Korea"},
+            {"TeamName": "tiger", "Country": "Malaysia"},
         ])
+
+
+def test_standard_adapter_round_trips_generic_identity_metadata_without_schema_changes():
+    event = {
+        "EventID": "EVT-THEMED",
+        "EventName": "Animal Teams",
+        "JoinCode": "ANIMAL",
+        "ScoringMode": "TEAM_COMPETITIVE",
+        "_EventPayload": {
+            "TeamIdentityConfig": {
+                "ThemeType": "ANIMAL",
+                "ThemeName": "Jungle",
+                "IdentityPool": [{"TeamIdentity": "Tiger", "Emoji": "🐯"}],
+                "Identities": [{
+                    "TeamID": "EVT-THEMED-TEAM-01",
+                    "TeamIdentity": "Tiger",
+                    "Emoji": "🐯",
+                    "Image": "https://example.test/tiger.png",
+                }],
+            },
+        },
+    }
+    adapter = object.__new__(StandardCoreV2Adapter)
+    adapter.get_event = lambda event_id: event
+    adapter._rows = lambda table, query: [{
+        "team_id": "EVT-THEMED-TEAM-01", "team_name": "Tiger",
+        "country": "", "team_flag": "🐯", "is_active": True,
+    }]
+    teams = adapter.get_teams("EVT-THEMED")
+    assert teams[0] | {
+        "ThemeType": "ANIMAL", "ThemeName": "Jungle",
+        "TeamIdentity": "Tiger", "Emoji": "🐯",
+        "Image": "https://example.test/tiger.png",
+    } == teams[0]
+
+    updates = []
+    adapter.get_participant_count = lambda event_id: 0
+    adapter._rpc = lambda *args, **kwargs: {"ok": True}
+    adapter.update_event_metadata = lambda event_id, fields: updates.append(fields)
+    adapter.replace_event_teams("EVT-THEMED", teams)
+    saved = updates[-1]["TeamIdentityConfig"]
+    assert saved["IdentityPool"] == [{"TeamIdentity": "Tiger", "Emoji": "🐯"}]
+    assert saved["Identities"][0]["Image"].endswith("tiger.png")
+
+
+def test_arbitrary_theme_identity_metadata_uses_existing_event_payload():
+    identities = _parse_identity_lines(
+        "Tiger | 🐯\nEagle | 🦅\nPanther | | https://example.test/panther.png"
+    )
+    assert [row["TeamIdentity"] for row in identities] == ["Tiger", "Eagle", "Panther"]
+    assert identities[0]["Emoji"] == "🐯"
+    assert identities[2]["Image"].endswith("panther.png")
+    assert _identity_configuration_error(4, identities) == (
+        "4 active groups require 4 unique team identities. 3 are currently configured."
+    )
+
+
+def test_theme_changes_do_not_touch_programme_configuration():
+    source = (Path(__file__).resolve().parents[1] / "screens/create_event.py").read_text()
+    assert "TeamIdentityConfig" in source
+    assert "Theme type" in source
+    assert "Team identity pool" in source
+    assert "Regenerate generic team identities" in source
+    assert "save_programme_stages" not in source
+    assert "duplicate_programme" not in source
 
 
 def test_break_cannot_be_launched_through_standard_adapter():

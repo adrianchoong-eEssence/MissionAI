@@ -125,6 +125,7 @@ class StandardCoreV2Adapter:
     @staticmethod
     def _event(row):
         payload = _dict(row.get("event_payload"))
+        identity_config = _dict(payload.get("TeamIdentityConfig"))
         return {
             "EventID": str(row.get("event_id", "")),
             "EventName": str(row.get("event_name", "")),
@@ -138,6 +139,11 @@ class StandardCoreV2Adapter:
             "Venue": str(payload.get("Venue", "")),
             "Facilitator": str(payload.get("Facilitator", "")),
             "NumberOfTeams": int(payload.get("NumberOfTeams", 0) or 0),
+            "ThemeType": str(
+                identity_config.get("ThemeType") or payload.get("ThemeType")
+                or ("COUNTRY" if payload.get("CountryPool") else "CUSTOM")
+            ),
+            "ThemeName": str(identity_config.get("ThemeName", payload.get("TeamTheme", "Teams"))),
             "_CreatedAt": str(row.get("created_at", "")),
             "_UpdatedAt": str(row.get("updated_at", "")),
             "_EventPayload": payload,
@@ -183,8 +189,8 @@ class StandardCoreV2Adapter:
         return [{
             "team_id": f"{event_id}-TEAM-{position:02d}",
             "team_name": f"Team {position}",
-            "country": f"Team {position}",
-            "team_flag": "🏳️",
+            "country": "",
+            "team_flag": "",
         } for position in range(1, int(count) + 1)]
 
     def create_event(self, event_id, client, department, event_name, event_date, venue,
@@ -246,13 +252,38 @@ class StandardCoreV2Adapter:
 
     # Teams and participants -----------------------------------------------
     def get_teams(self, event_id):
+        event = self.get_event(event_id) or {}
+        metadata = self.event_metadata(event)
+        identity_config = _dict(metadata.get("TeamIdentityConfig"))
+        theme_type = str(identity_config.get("ThemeType") or event.get("ThemeType", "CUSTOM"))
+        theme_name = str(identity_config.get("ThemeName") or event.get("ThemeName", "Teams"))
+        configured = {
+            str(item.get("TeamID", "")): _dict(item)
+            for item in identity_config.get("Identities", [])
+            if isinstance(item, dict) and item.get("TeamID")
+        }
         rows = self._rows("teams_v2", {
             "event_id": f"eq.{event_id}", "select": "team_id,team_name,country,team_flag,is_active,created_at",
             "order": "team_id.asc",
         })
-        return [{"EventID": event_id, "TeamID": r["team_id"], "TeamName": r["team_name"],
-                 "Country": r.get("country", ""), "Flag": r.get("team_flag", ""),
-                 "Status": "Active" if r.get("is_active", True) else "Inactive"} for r in rows]
+        output = []
+        for row in rows:
+            team_id = str(row["team_id"])
+            extra = configured.get(team_id, {})
+            identity = str(extra.get("TeamIdentity") or row.get("team_name", ""))
+            output.append({
+                "EventID": event_id, "TeamID": team_id,
+                "TeamName": identity, "TeamIdentity": identity,
+                "ThemeType": theme_type,
+                "ThemeName": theme_name,
+                "Country": str(extra.get("Country", row.get("country", "")) or ""),
+                "Flag": str(extra.get("Emoji", extra.get("Icon", row.get("team_flag", ""))) or ""),
+                "Icon": str(extra.get("Icon", "") or ""),
+                "Emoji": str(extra.get("Emoji", "") or ""),
+                "Image": str(extra.get("Image", "") or ""),
+                "Status": "Active" if row.get("is_active", True) else "Inactive",
+            })
+        return output
 
     get_runtime_teams = get_teams
 
@@ -271,30 +302,53 @@ class StandardCoreV2Adapter:
         ])
 
     def replace_event_teams(self, event_id, teams):
+        teams = [dict(team) for team in teams]
         if self.get_participant_count(event_id):
             raise RuntimeDatabaseError("Teams cannot be replaced after participants register.")
         event = self.get_event(event_id)
         payload = []
         identities = []
         for i, team in enumerate(teams, 1):
-            country = str(team.get("Country") or team.get("TeamName") or f"Team {i}").strip()
-            identity = country.casefold()
+            team_identity = str(
+                team.get("TeamIdentity") or team.get("TeamName") or f"Team {i}"
+            ).strip()
+            identity = team_identity.casefold()
             if identity in identities:
                 raise RuntimeDatabaseError(
-                    f"Duplicate country assignment is not allowed within an event: {country}"
+                    f"Duplicate team identity is not allowed within an event: {team_identity}"
                 )
             identities.append(identity)
+            country = str(team.get("Country", "") or "").strip()
+            emoji = str(team.get("Emoji", team.get("Flag", "")) or "").strip()
+            icon = str(team.get("Icon", "") or "").strip()
             payload.append({
                 "team_id": str(team.get("TeamID") or f"{event_id}-TEAM-{i:02d}"),
-                "team_name": str(team.get("TeamName") or f"Team {i}"),
+                "team_name": team_identity,
                 "country": country,
-                "team_flag": str(team.get("Flag") or team.get("TeamFlag") or "🏳️"),
+                "team_flag": emoji or icon,
             })
         result = self._rpc("exos_v2_publish_event", {
             "p_event_id": event_id, "p_join_code": event["JoinCode"], "p_event_name": event["EventName"],
             "p_teams": payload, "p_scoring_mode": event["ScoringMode"], "p_event_type": "STANDARD",
         })
-        self.update_event_metadata(event_id, {"NumberOfTeams": len(payload)})
+        current_config = _dict(self.event_metadata(event).get("TeamIdentityConfig"))
+        first_team = teams[0] if teams else {}
+        current_config.update({
+            "ThemeType": str(first_team.get("ThemeType", current_config.get("ThemeType", "CUSTOM"))),
+            "ThemeName": str(first_team.get("ThemeName", current_config.get("ThemeName", "Teams"))),
+            "Identities": [{
+                "TeamID": row["team_id"],
+                "TeamIdentity": row["team_name"],
+                "Country": str(team.get("Country", "") or ""),
+                "Icon": str(team.get("Icon", "") or ""),
+                "Emoji": str(team.get("Emoji", team.get("Flag", "")) or ""),
+                "Image": str(team.get("Image", "") or ""),
+            } for row, team in zip(payload, teams)],
+        })
+        self.update_event_metadata(event_id, {
+            "NumberOfTeams": len(payload),
+            "TeamIdentityConfig": current_config,
+        })
         return result
 
     @staticmethod

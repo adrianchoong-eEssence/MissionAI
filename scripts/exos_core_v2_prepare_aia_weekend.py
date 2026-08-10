@@ -53,14 +53,19 @@ def require_staging(db):
         raise RuntimeError("SUPABASE_SECRET_KEY is required for staging event setup.")
 
 
-def allocate_country_pool(upper_count, lower_count):
+def allocate_country_pool(upper_count, lower_count, identity_pool=None):
     upper_count, lower_count = int(upper_count), int(lower_count)
+    pool = tuple(identity_pool or COUNTRIES)
     if upper_count < 1 or lower_count < 1:
         raise ValueError("Each event must have at least one active group.")
-    if upper_count + lower_count > len(COUNTRIES):
-        raise ValueError("The two events cannot exceed six active groups in total.")
-    upper = COUNTRIES[:upper_count]
-    lower = COUNTRIES[upper_count:upper_count + lower_count]
+    if upper_count + lower_count > len(pool):
+        raise ValueError(
+            f"{upper_count + lower_count} active groups require "
+            f"{upper_count + lower_count} unique team identities. "
+            f"{len(pool)} are currently configured."
+        )
+    upper = pool[:upper_count]
+    lower = pool[upper_count:upper_count + lower_count]
     return upper, lower
 
 
@@ -150,10 +155,28 @@ def _create_event(db, event_id, join_code, name, department, event_date, pax,
         "ExpectedParticipants": int(pax),
         "DurationHours": 8.0,
         "TeamTheme": "Countries",
+        "ThemeType": "COUNTRY",
+        "TeamIdentityPool": [{
+            "TeamIdentity": country, "Country": country, "Emoji": flag,
+        } for country, flag in COUNTRIES],
+        "TeamIdentityConfig": {
+            "ThemeType": "COUNTRY",
+            "ThemeName": "AIA Weekend Countries",
+            "IdentityPool": [{
+                "TeamIdentity": country, "Country": country, "Emoji": flag,
+            } for country, flag in COUNTRIES],
+            "Identities": [{
+                "TeamID": f"{event_id}-TEAM-{position:02d}",
+                "TeamIdentity": country, "Country": country, "Emoji": flag,
+            } for position, (country, flag) in enumerate(country_allocation, 1)],
+        },
         "CountryPool": [country for country, _ in COUNTRIES],
         "CountryAllocationGroupID": allocation_group_id,
+        "CrossEventIdentityGroupID": allocation_group_id,
+        "CrossEventIdentityUnique": True,
         "PairedEventID": paired_event_id,
         "AssignedCountries": [country for country, _ in country_allocation],
+        "AssignedTeamIdentities": [country for country, _ in country_allocation],
         "CrossEventAllocationValidated": True,
         "ActiveTeamCount": int(teams),
         "Provisional": True,
