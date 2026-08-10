@@ -828,6 +828,13 @@ def render_race_checkpoint_editor(db, event_id, module):
             except RuntimeDatabaseError as error: st.error(str(error))
 
 
+def _source_stages_for(candidates, source_id):
+    return next(
+        rows for event, rows in candidates
+        if str(event.get("EventID", "")) == str(source_id)
+    )
+
+
 def render_programme_first_builder(db):
     """PowerPoint-like programme editor backed by existing stage storage."""
     events = db.get_events()
@@ -914,10 +921,7 @@ def render_programme_first_builder(db):
                 ),
                 key=f"duplicate_source_{event_id}",
             )
-            source_stages = next(
-                rows for item, rows in candidates
-                if str(item[0].get("EventID", "")) == source_id
-            )
+            source_stages = _source_stages_for(candidates, source_id)
             summary = duplication_summary(source_stages)
             st.write(f"{summary['ModuleCount']} modules · {summary['ActivityCount']} activities")
             st.caption("Modules: " + ", ".join(summary["Modules"]))
@@ -996,7 +1000,10 @@ def render_programme_first_builder(db):
         st.warning(
             "Manual entry starts from an empty timeline; add modules and activities below."
         )
-        if st.button("Create new blank programme", key=f"start_blank_{event_id}"):
+        if st.button(
+            "Create new blank programme",
+            key=f"manual_start_blank_{event_id}",
+        ):
             if _save_modules(db, event_id, []):
                 st.session_state[f"programme_notice_{event_id}"] = (
                     "Manual entry mode started."

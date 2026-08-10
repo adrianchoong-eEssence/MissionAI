@@ -138,6 +138,8 @@ class StandardCoreV2Adapter:
             "Venue": str(payload.get("Venue", "")),
             "Facilitator": str(payload.get("Facilitator", "")),
             "NumberOfTeams": int(payload.get("NumberOfTeams", 0) or 0),
+            "_CreatedAt": str(row.get("created_at", "")),
+            "_UpdatedAt": str(row.get("updated_at", "")),
             "_EventPayload": payload,
         }
 
