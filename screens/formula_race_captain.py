@@ -156,7 +156,7 @@ def show_formula_race_captain(runtime_override=None):
         recovery=st.session_state.get("race_captain_recovery")
         if isinstance(recovery,dict):
             st.info("This team is already active on another device.")
-            with st.form("race_captain_recovery"):
+            with st.form("race_captain_recovery_form"):
                 recovery_pin=st.text_input("Team PIN",type="password",key="race_captain_recovery_pin")
                 recover_submit=st.form_submit_button("RECOVER TEAM ACCESS",type="primary",width="stretch")
             if recover_submit:

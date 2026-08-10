@@ -7,6 +7,7 @@ from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
 
 
 RECOVERY_SQL = (Path(__file__).resolve().parents[1] / "supabase" / "024_exos_core_v2_team_access_recovery.sql").read_text()
+CAPTAIN_SCREEN = (Path(__file__).resolve().parents[1] / "screens" / "formula_race_captain.py").read_text()
 
 
 @contextmanager
@@ -130,3 +131,9 @@ def test_recovery_sql_deactivates_old_session_and_records_the_takeover():
     assert "insert into public.teams_v2" not in RECOVERY_SQL
     assert "delete from public." not in RECOVERY_SQL
     assert "raise exception 'Invalid PIN'" in RECOVERY_SQL
+
+
+def test_recovery_form_key_does_not_collide_with_recovery_context_state():
+    assert 'st.session_state["race_captain_recovery"]' in CAPTAIN_SCREEN
+    assert 'st.form("race_captain_recovery_form")' in CAPTAIN_SCREEN
+    assert 'st.form("race_captain_recovery")' not in CAPTAIN_SCREEN
