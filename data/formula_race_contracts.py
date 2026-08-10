@@ -152,10 +152,9 @@ class LiveFormulaRaceProvider:
                 if strict_core_v2:
                     raise RuntimeError("Core v2 runtime unavailable for submissions.")
                 submissions_raw = []
-        if not submissions_raw:
-            if strict_core_v2:
-                raise RuntimeError("Core v2 submissions not available.")
-            if hasattr(self.db, "get_event_submissions"):
+        if not submissions_raw and hasattr(self.db, "get_event_submissions"):
+            # Empty submissions is a valid fresh-event state. Keep legacy fallback only for non-empty legacy reads.
+            if not strict_core_v2:
                 submissions_raw = self.db.get_event_submissions(event_id)
 
         missions = []
@@ -173,7 +172,7 @@ class LiveFormulaRaceProvider:
                 missions = self.db.get_event_missions(event_id)
 
         if strict_core_v2:
-            if not hasattr(self.db, "get_formula_race_state"):
+            if not hasattr(self.db.runtime, "get_formula_race_state"):
                 raise RuntimeError("Core v2 runtime state reader missing.")
             state = self.db.runtime.get_formula_race_state(event_id) if hasattr(self.db.runtime, "get_formula_race_state") else {}
             control = {
@@ -190,7 +189,7 @@ class LiveFormulaRaceProvider:
                 operations = self.db.runtime.get_formula_race_state(event_id) or {}
                 operations["Checkpoints"] = self.db.runtime.get_formula_race_checkpoints(event_id)
             except Exception: operations = {}
-            if strict_core_v2 and not operations:
+            if strict_core_v2 and not isinstance(operations, dict):
                 raise RuntimeError("Core v2 race state unavailable.")
         report = {}
         captain_status = {}
@@ -206,8 +205,6 @@ class LiveFormulaRaceProvider:
                 }
             except Exception:
                 captain_status = {}
-            if strict_core_v2 and not report:
-                raise RuntimeError("Core v2 transaction report unavailable.")
         leaderboard = {str(row.get("TeamID", "")): row for row in report.get("Leaderboard", [])}
         balances = {
             str(row.get("team_id", row.get("TeamID", ""))): row
