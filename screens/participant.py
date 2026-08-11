@@ -680,6 +680,9 @@ def render_existing_submission(existing_submission):
     status = str(existing_submission.get("Status", "PENDING")).strip().upper()
     if status == "APPROVED":
         st.success("✅ Evidence approved.")
+        approved_score = existing_submission.get("Score", "")
+        if approved_score not in {"", None}:
+            st.metric("Approved score", f"{_credit_number(approved_score)} pts")
     elif status == "REJECTED":
         st.error("Evidence rejected.")
     else:
@@ -2246,7 +2249,10 @@ def render_programme_activity(stage):
         st.markdown("#### Evidence")
         st.write(f"**{evidence or 'Evidence required.'}**")
     if details["Credits"]:
-        st.metric("Credits", details["Credits"])
+        if str(details.get("ScoringMode", "")).upper() == "TEAM_COMPETITIVE":
+            st.caption("Competitive score is finalised after facilitator review.")
+        else:
+            st.metric("Activity credit value", details["Credits"])
 
 
 def render_mission_ai_briefing(db):
