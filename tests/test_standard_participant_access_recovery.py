@@ -3,7 +3,10 @@ from pathlib import Path
 import pytest
 
 from data.standard_core_v2_adapter import StandardCoreV2Adapter
-from screens.participant import hydrate_recovery_candidate
+from screens.participant import (
+    hydrate_recovery_candidate,
+    standard_event_uses_road_hunt,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -153,3 +156,87 @@ def test_ambiguous_join_response_is_never_silently_hydrated():
     assert hydrate_recovery_candidate(
         Runtime(), original, "OXO0DT", "Adrian Choong", "new-device"
     ) is original
+
+
+def test_repeated_device_recovery_preserves_participant_and_team_five_times():
+    adapter = StandardCoreV2Adapter.__new__(StandardCoreV2Adapter)
+    calls = []
+    canonical = {
+        "ParticipantID": "P-LOWER",
+        "EventID": "AIA-WE-260810081110-LOWER",
+        "TeamID": "AIA-WE-260810081110-LOWER-TEAM-01",
+        "Team": "India",
+        "TeamIdentity": "India",
+        "Name": "Adrian Choong",
+    }
+    adapter._rpc = lambda name, payload, admin=True: calls.append(
+        (name, payload, admin)
+    ) or dict(canonical, SessionToken=f"session-{len(calls)}")
+
+    recovered = [
+        adapter.recover_participant_access(
+            "C0OCUS", "Adrian Choong", f"device-{attempt}"
+        )
+        for attempt in range(5)
+    ]
+
+    assert {row["ParticipantID"] for row in recovered} == {"P-LOWER"}
+    assert {row["EventID"] for row in recovered} == {
+        "AIA-WE-260810081110-LOWER"
+    }
+    assert {row["TeamID"] for row in recovered} == {
+        "AIA-WE-260810081110-LOWER-TEAM-01"
+    }
+    assert len(calls) == 5
+    assert all(call[0] == "exos_v2_recover_participant_access" for call in calls)
+
+
+def test_agile_activity_does_not_route_to_road_hunt():
+    class Database:
+        @staticmethod
+        def get_event(_event_id):
+            return {
+                "ProgrammeType": "AGILE",
+                "_EventPayload": {"RoadHuntEnabled": False},
+            }
+
+    assert standard_event_uses_road_hunt(
+        Database(),
+        "AIA-WE-260810081110-LOWER",
+        {"ContentType": "Standard Activity"},
+    ) is False
+
+
+def test_road_hunt_requires_explicit_canonical_configuration():
+    class Database:
+        @staticmethod
+        def get_event(_event_id):
+            return {
+                "ProgrammeType": "STANDARD",
+                "_EventPayload": {"RoadHuntEnabled": True},
+            }
+
+    assert standard_event_uses_road_hunt(Database(), "ROAD-1", {}) is True
+
+
+def test_standard_adapter_road_hunt_placeholder_matches_renderer_contract():
+    adapter = StandardCoreV2Adapter.__new__(StandardCoreV2Adapter)
+    state = adapter.get_road_hunt_unlocked_missions("session-redacted")
+
+    assert isinstance(state, dict)
+    assert state == {
+        "Enabled": False,
+        "AvailableMissions": [],
+        "TotalMissions": 0,
+        "UnlockedMissions": 0,
+        "SubmittedMissions": 0,
+    }
+
+
+def test_recovery_sql_never_reassigns_or_recreates_participant():
+    recovery = SQL.split(
+        "create or replace function public.exos_v2_recover_participant_access", 1
+    )[1]
+    assert "insert into public.participants_v2" not in recovery
+    assert "set team_id" not in recovery
+    assert "insert into public.participant_sessions_v2" in recovery

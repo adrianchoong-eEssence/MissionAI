@@ -713,7 +713,14 @@ class StandardCoreV2Adapter:
     def claim_team_tracker(self, *args, **kwargs): return {}
     def submit_team_location(self, *args, **kwargs): return {}
     def get_road_hunt_participant_state(self, *args, **kwargs): return {}
-    def get_road_hunt_unlocked_missions(self, *args, **kwargs): return []
+    def get_road_hunt_unlocked_missions(self, *args, **kwargs):
+        return {
+            "Enabled": False,
+            "AvailableMissions": [],
+            "TotalMissions": 0,
+            "UnlockedMissions": 0,
+            "SubmittedMissions": 0,
+        }
     def get_team_wallet(self, *args, **kwargs): return {"Enabled": False, "Balance": 0, "Items": []}
     def purchase_marketplace_item(self, *args, **kwargs):
         raise RuntimeDatabaseError("No marketplace is configured for this standard programme.")

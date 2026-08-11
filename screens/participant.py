@@ -1985,6 +1985,25 @@ def _road_hunt_team_missions_missing(error):
     return "PGRST202" in message or "exos_road_hunt_missions" in message
 
 
+def standard_event_uses_road_hunt(db, event_id, participant_activity=None):
+    """Route to Road Hunt only when the canonical event/activity opts in."""
+    participant_activity = participant_activity or {}
+    content_type = str(participant_activity.get("ContentType", "")).strip().upper()
+    if content_type in {"ROAD HUNT", "GPS ROAD HUNT"}:
+        return True
+    try:
+        event = db.get_event(event_id) or {}
+    except RuntimeDatabaseError:
+        return False
+    metadata = event.get("_EventPayload", {}) or {}
+    control = metadata.get("control_state", {}) or {}
+    programme_type = str(event.get("ProgrammeType", "")).strip().upper()
+    enabled = metadata.get("RoadHuntEnabled", control.get("RoadHuntEnabled", False))
+    return programme_type == "ROAD_HUNT" or str(enabled).strip().upper() in {
+        "TRUE", "YES", "1", "ON",
+    }
+
+
 def render_road_hunt_mission_hub(session_token):
     """Return the mission selected from this team's reached checkpoints."""
     runtime = get_standard_database()
@@ -2676,14 +2695,6 @@ def show_participant():
         watch_live_mission_state(
             st.session_state["participant_session_token"]
         )
-        render_road_hunt_navigator(
-            st.session_state["participant_session_token"]
-        )
-        road_hunt_mission, road_hunt_active = (
-            render_road_hunt_mission_hub(
-                st.session_state["participant_session_token"]
-            )
-        )
     live_runtime_state = st.session_state.get(
         "participant_runtime_state",
         {},
@@ -2709,6 +2720,20 @@ def show_participant():
     linked_experience_set = str(
         linked_config.get("LinkedContent", "") or ""
     ).strip()
+
+    if runtime_session and standard_event_uses_road_hunt(
+        db,
+        st.session_state["participant_event_id"],
+        participant_activity,
+    ):
+        render_road_hunt_navigator(
+            st.session_state["participant_session_token"]
+        )
+        road_hunt_mission, road_hunt_active = (
+            render_road_hunt_mission_hub(
+                st.session_state["participant_session_token"]
+            )
+        )
 
     assignment_id = str(
         (live_runtime_state.get("Stage", {}) or {}).get("ExperienceAssignmentID", "")
