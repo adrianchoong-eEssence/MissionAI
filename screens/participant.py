@@ -181,11 +181,23 @@ def render_recovery_candidate(candidate):
     """Require an explicit human choice before resuming a found identity."""
     st.info("Existing expedition record found.")
     st.write(f"**Participant:** {candidate.get('Name', '')}")
-    st.write(
-        f"**Country:** {candidate.get('Flag', '')} "
-        f"{candidate.get('Country', '')}".strip()
-    )
-    st.write(f"**Team:** {candidate.get('Team', '')}")
+    team_identity = str(
+        candidate.get("TeamIdentity")
+        or candidate.get("Team")
+        or candidate.get("TeamName")
+        or ""
+    ).strip()
+    theme_name = str(candidate.get("ThemeName") or "Team").strip()
+    symbol = str(
+        candidate.get("Emoji")
+        or candidate.get("Icon")
+        or candidate.get("Flag")
+        or ""
+    ).strip()
+    image = str(candidate.get("Image") or "").strip()
+    if image:
+        st.image(image, width=160)
+    st.write(f"**{theme_name}:** {symbol} {team_identity}".strip())
     if candidate.get("RecoveryRequired"):
         st.warning(
             candidate.get(
@@ -193,9 +205,33 @@ def render_recovery_candidate(candidate):
                 "This identity needs facilitator recovery before it can reconnect.",
             )
         )
-        if st.button("Return to Join", width="stretch"):
+        if candidate.get("Ambiguous") or not candidate.get("ParticipantID"):
+            if st.button("Return to Join", width="stretch"):
+                st.session_state.pop("participant_recovery_candidate", None)
+                st.session_state.pop("participant_join_request", None)
+                st.rerun()
+            st.stop()
+
+        if st.button(
+            "Return to Expedition", type="primary", width="stretch",
+        ):
+            runtime = get_standard_database()
+            try:
+                player = runtime.recover_participant_access(
+                    candidate.get("JoinCode")
+                    or st.session_state.get("participant_join_code", ""),
+                    candidate.get("Name", ""),
+                    participant_device_id(),
+                )
+            except (RuntimeDatabaseError, ValueError) as error:
+                st.error(str(error))
+                st.stop()
+            restore_participant_identity(player)
+            ai = runtime.assign_ai_facilitator(player["Team"]) or {}
+            apply_participant_ai_identity(ai, player["EventID"])
             st.session_state.pop("participant_recovery_candidate", None)
             st.session_state.pop("participant_join_request", None)
+            persist_session_in_query_params()
             st.rerun()
         st.stop()
 
@@ -282,6 +318,7 @@ def restore_session_from_query_params(runtime):
                 player.setdefault("EventName", event.get("EventName", "EXOS Event"))
             st.session_state["participant_join_code"] = join_code
             if player.get("RecoveryRequired"):
+                player.setdefault("JoinCode", join_code)
                 st.session_state["participant_recovery_candidate"] = player
                 return
             restore_participant_identity(player)
@@ -2543,6 +2580,7 @@ def show_participant():
                 st.error(player.get("Message", "Multiple expedition records match this name."))
                 st.stop()
             if player.get("RecoveryRequired"):
+                player.setdefault("JoinCode", pending["join_code"])
                 st.session_state["participant_recovery_candidate"] = player
                 st.session_state.pop("participant_join_request", None)
                 st.rerun()
@@ -2575,6 +2613,7 @@ def show_participant():
                 st.error(player.get("Message", "Multiple expedition records match this name."))
                 st.stop()
             if player.get("RecoveryRequired"):
+                player.setdefault("JoinCode", join_code)
                 st.session_state["participant_recovery_candidate"] = player
                 st.rerun()
             db = runtime

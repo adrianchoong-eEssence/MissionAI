@@ -374,6 +374,13 @@ class StandardCoreV2Adapter:
             "p_join_code": join_code, "p_participant_name": participant_name, "p_device_id": device_id,
         }, admin=False))
 
+    def recover_participant_access(self, join_code, participant_name, device_id):
+        return self._identity(self._rpc("exos_v2_recover_participant_access", {
+            "p_join_code": join_code,
+            "p_participant_name": participant_name,
+            "p_device_id": device_id,
+        }, admin=False))
+
     def get_player_by_token(self, session_token):
         return self._identity(self._rpc("exos_v2_standard_participant_state", {
             "p_session_token": session_token,
