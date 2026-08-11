@@ -76,6 +76,10 @@ SESSION_KEYS = [
     "participant_runtime_poll_count",
     "participant_runtime_error",
     "participant_device_id",
+    "participant_join_code",
+    "participant_join_code_input",
+    "participant_first_name_input",
+    "participant_last_name_input",
     "participant_join_request",
     "participant_recovery_candidate",
 ]
@@ -2430,13 +2434,19 @@ def show_participant():
         experience_header(experience_title(known_event, fallback="EXOS Experience"))
         device_id = participant_device_id()
         pending = st.session_state.get("participant_join_request") or {}
+        if "participant_join_code_input" not in st.session_state:
+            st.session_state["participant_join_code_input"] = known_join_code
 
         with st.form("participant_join_form", clear_on_submit=False):
             join_code = normalise_join_code(st.text_input(
-                "Join Code", key="participant_join_code",
+                "Join Code", key="participant_join_code_input",
             ))
-            first_name = st.text_input("First / Given Name")
-            last_name = st.text_input("Last / Family Name")
+            first_name = st.text_input(
+                "First / Given Name", key="participant_first_name_input",
+            )
+            last_name = st.text_input(
+                "Last / Family Name", key="participant_last_name_input",
+            )
             submitted = st.form_submit_button(
                 "Joining…" if pending else "🚀 Join Event",
                 disabled=bool(pending),
@@ -2472,6 +2482,7 @@ def show_participant():
                 st.warning("Enter your last / family name")
                 st.stop()
             participant_name = normalise_join_name(first_name, last_name)
+            st.session_state["participant_join_code"] = join_code
             st.session_state["participant_join_request"] = {
                 "join_code": join_code,
                 "participant_name": participant_name,
@@ -2540,7 +2551,6 @@ def show_participant():
 
             if player.get("Rejoined"):
                 st.info("Existing registration found. Reconnecting you to your original team.")
-            st.session_state["participant_join_code"] = pending["join_code"]
             restore_participant_identity(player)
             apply_participant_ai_identity(ai, player["EventID"])
             st.session_state.pop("participant_join_request", None)
