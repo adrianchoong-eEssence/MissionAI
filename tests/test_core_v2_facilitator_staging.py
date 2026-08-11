@@ -162,3 +162,26 @@ def test_standard_facilitator_render_has_only_core_v2_data_routes():
     assert "GoogleSheetsDB" not in control_source
     assert '"LEGACY_RUNTIME_CALLS": self.legacy_runtime_calls' in adapter_source
     assert '"GOOGLE_SHEETS_RUNTIME_CALLS": self.google_sheets_runtime_calls' in adapter_source
+
+
+def test_running_timer_refreshes_only_its_fragment_not_the_full_page():
+    source = (ROOT / "screens/control_centre.py").read_text()
+    timer = source.split("def _render_timer", 1)[0].rsplit("\n\n", 1)[-1]
+
+    assert '@st.fragment(run_every="1s")' in timer
+    assert "st_autorefresh" not in source
+
+
+def test_pipeline_review_actions_are_not_disabled_by_pending_state():
+    source = (ROOT / "screens/live_event_console.py").read_text()
+    review = source.split("def render_review_scoring_widget", 1)[1].split(
+        "def render_credit_wallet_control", 1
+    )[0]
+
+    assert 'f"Approve All Pending ({len(pending)})"' in review
+    assert 'reject.button(\n                "Reject"' in review
+    assert 'revision.button(\n                "Request Revision"' in review
+    assert 'approve.button(\n                "Approve"' in review
+    assert "disabled=bool(pending)" not in review
+    assert "st.form(" not in review
+    assert "st.spinner(" not in review

@@ -4,7 +4,6 @@ import io
 import re
 
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 from data.standard_core_v2_adapter import get_standard_database
 from data.control_runtime import ControlRuntime
@@ -97,16 +96,12 @@ def _start_programme_activity(control, event_id, stage, module):
     return live_stage
 
 
+@st.fragment(run_every="1s")
 def _render_timer(db, control, event_id, stage):
     stage_no = stage.get("StageNo", "")
     duration = stage.get("DurationMinutes", 0)
     timer = db.get_stage_timer(event_id, stage_no, duration)
     remaining = remaining_seconds(timer)
-    if str(timer.get("Status", "")).upper() == "RUNNING":
-        st_autorefresh(
-            interval=1000,
-            key=f"control_timer_refresh_{event_id}_{stage_no}",
-        )
     st.metric("Stage Timer", _format_timer(remaining), timer.get("Status", "READY"))
     start, pause, reset, end = st.columns(4)
     status = str(timer.get("Status", "READY")).upper()
