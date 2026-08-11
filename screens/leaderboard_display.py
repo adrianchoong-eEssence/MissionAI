@@ -13,6 +13,7 @@ from screens.projector_broadcast import (
     DEFAULT_BROADCAST,
     render_projector_broadcast,
 )
+from screens.team_identity import resolve_leaderboard_rows
 
 
 PROJECTOR_STYLES = """
@@ -797,10 +798,10 @@ def show_leaderboard_display():
             canonical_leaderboard = db.runtime.get_canonical_leaderboard(event_id)
         except RuntimeDatabaseError:
             canonical_leaderboard = []
-    leaderboard = (
-        [(row["TeamID"], float(row["Score"])) for row in canonical_leaderboard]
-        if canonical_leaderboard else calculate_leaderboard(submissions)
+    source_rows = (
+        canonical_leaderboard if canonical_leaderboard else calculate_leaderboard(submissions)
     )
+    leaderboard = resolve_leaderboard_rows(source_rows, db.get_teams(event_id))
     mission = db.get_current_mission(event_id)
     teams_count = db.get_team_count(event_id)
     broadcast_state = dict(DEFAULT_BROADCAST)

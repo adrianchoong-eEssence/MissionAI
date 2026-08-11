@@ -28,6 +28,7 @@ from screens.projector_broadcast import (
     DEFAULT_BROADCAST,
     render_broadcast_controller,
 )
+from screens.team_identity import resolve_leaderboard_rows
 
 
 def stage_family(stage):
@@ -353,10 +354,10 @@ def _render_rankings(db, event_id, final=False):
             canonical = db.runtime.get_canonical_leaderboard(event_id)
         except Exception:
             canonical = []
-    leaderboard = (
-        [(row["TeamID"], float(row["Score"])) for row in canonical]
-        if canonical else calculate_leaderboard(db.get_submissions(event_id))
+    source_rows = (
+        canonical if canonical else calculate_leaderboard(db.get_submissions(event_id))
     )
+    leaderboard = resolve_leaderboard_rows(source_rows, db.get_teams(event_id))
     st.subheader("Final Rankings" if final else "Current Ranking")
     if not leaderboard:
         st.info("No approved scores yet.")
