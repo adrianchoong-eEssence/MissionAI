@@ -423,7 +423,7 @@ class StandardCoreV2Adapter:
         return ""
 
     def audit_participant_duplicates(self, event_id):
-        return []
+        return {"EventID": event_id, "DuplicateGroups": []}
 
     def identity_migration_audit(self, event_id):
         return {"EventID": event_id, "DuplicateGroups": 0, "CoreV2": True}

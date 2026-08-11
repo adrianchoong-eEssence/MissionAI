@@ -70,3 +70,61 @@ def test_revision_decision_remains_pending_in_core_v2():
     )
     assert captured["name"] == "exos_v2_standard_review_submission"
     assert captured["payload"]["p_decision"] == "PENDING"
+
+
+def test_duplicate_audit_adapter_returns_canonical_empty_report():
+    adapter = StandardCoreV2Adapter.__new__(StandardCoreV2Adapter)
+    assert adapter.audit_participant_duplicates(
+        "AIA-WE-260810081110-LOWER"
+    ) == {
+        "EventID": "AIA-WE-260810081110-LOWER",
+        "DuplicateGroups": [],
+    }
+
+
+def test_diagnostic_audit_renders_after_operational_sections():
+    source = (ROOT / "screens/control_centre.py").read_text()
+    show = source.split("def show_control_centre", 1)[1]
+
+    submission_view = show.index("_render_stage_widgets(")
+    team_management = show.index("_render_team_management(")
+    emergency = show.index('st.subheader("Emergency Recovery")')
+    scoring = show.index('with st.expander("Scoring Finalisation and Recovery")')
+    diagnostics = show.index("_render_duplicate_audit(")
+
+    assert submission_view < team_management < emergency < scoring < diagnostics
+
+
+def test_lower_pipeline_submission_read_path_uses_canonical_v2_rows():
+    adapter = StandardCoreV2Adapter.__new__(StandardCoreV2Adapter)
+    adapter._rows = lambda path, query, admin=True: [{
+        "submission_id": "SUB-PIPELINE-EXISTING",
+        "event_id": "AIA-WE-260810081110-LOWER",
+        "team_id": "AIA-WE-260810081110-LOWER-TEAM-01",
+        "participant_id": "P-ADRIAN",
+        "activity_id": "AIA-WE-260810081110-LOWER-ACT-002",
+        "submission_status": "SUBMITTED",
+        "submission_payload": {
+            "ParticipantName": "Adrian Choong",
+            "TeamName": "India",
+            "SubmissionType": "PIPELINE",
+            "Metric1": 100,
+            "Metric2": 150,
+            "Metric3": 25,
+        },
+        "submitted_at": "2026-08-11T00:00:00Z",
+        "reviewed_at": None,
+        "reviewed_by": None,
+        "score": None,
+    }]
+
+    submissions = adapter.get_canonical_submissions(
+        "AIA-WE-260810081110-LOWER"
+    )
+
+    assert len(submissions) == 1
+    assert submissions[0]["SubmissionID"] == "SUB-PIPELINE-EXISTING"
+    assert submissions[0]["ParticipantName"] == "Adrian Choong"
+    assert submissions[0]["TeamName"] == "India"
+    assert submissions[0]["ActivityID"].endswith("ACT-002")
+    assert submissions[0]["Status"] == "SUBMITTED"

@@ -180,12 +180,12 @@ def _render_team_management(db, control, event_id):
     st.subheader("Team Management")
     if not runtime.can_publish:
         st.warning("Team Management requires the protected runtime service credential.")
-        return
+        return ""
     participants = runtime.get_players(event_id)
     teams = db.get_teams(event_id)
     if not participants:
         st.info("No runtime participants are registered for this event.")
-        return
+        return ""
 
     actor = st.text_input("Facilitator name", key=f"identity_actor_{event_id}")
     st.caption("Every recovery override is written to the identity audit log.")
@@ -273,6 +273,15 @@ def _render_team_management(db, control, event_id):
             if st.button("Apply team submission policy", key=f"apply_team_override_{event_id}_{team_id}"):
                 control.set_submission_override(event_id, team_id, team_override, actor)
                 st.success("Team submission policy updated and audited.")
+
+    return actor
+
+
+def _render_duplicate_audit(db, control, event_id, actor=""):
+    """Render non-operational identity diagnostics after live controls."""
+    runtime = db.runtime
+    if not runtime.can_publish:
+        return
 
     with st.expander("Duplicate and migration audit"):
         st.warning("Audit only. Records are never merged or deleted automatically.")
@@ -870,7 +879,7 @@ def show_control_centre(db=None):
     else:
         _render_stage_widgets(db, control, event_id, stage_family(stage))
     st.divider()
-    _render_team_management(db, control, event_id)
+    audit_actor = _render_team_management(db, control, event_id)
 
     st.divider()
     st.subheader("Emergency Recovery")
@@ -913,3 +922,6 @@ def show_control_centre(db=None):
                 event_id, "ACTIVITY", stage["ActivityID"], False, lock_actor, lock_reason,
             )
             st.warning("Activity judging reopened by an audited recovery action.")
+
+    st.divider()
+    _render_duplicate_audit(db, control, event_id, audit_actor)
