@@ -117,6 +117,24 @@ def normalise_join_name(first_name, last_name):
     )
 
 
+def hydrate_recovery_candidate(
+    runtime, player, join_code, participant_name, device_id,
+):
+    """Resolve the canonical identity omitted by a minimal join-RPC response."""
+    if (
+        not player
+        or not player.get("RecoveryRequired")
+        or player.get("Ambiguous")
+        or player.get("ParticipantID")
+    ):
+        return player
+    try:
+        restored = runtime.restore_join(join_code, participant_name, device_id)
+    except RuntimeDatabaseError:
+        restored = None
+    return restored or player
+
+
 def reset_session():
     for key in SESSION_KEYS:
         st.session_state.pop(key, None)
@@ -2569,6 +2587,14 @@ def show_participant():
                 st.session_state.pop("participant_join_request", None)
                 st.error(str(error))
                 st.stop()
+
+            player = hydrate_recovery_candidate(
+                runtime,
+                player,
+                pending["join_code"],
+                pending["participant_name"],
+                pending["device_id"],
+            )
 
             if player.get("PreassignedIdentityRequired") and not player.get("Found"):
                 st.session_state.pop("participant_join_request", None)

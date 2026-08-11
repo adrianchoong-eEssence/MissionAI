@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from data.standard_core_v2_adapter import StandardCoreV2Adapter
+from screens.participant import hydrate_recovery_candidate
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,3 +99,57 @@ def test_recovery_rpc_is_standard_core_v2_only_and_token_safe_in_audit():
     audit = SQL.split("insert into public.audit_log_v2", 1)[1]
     assert "session_token" not in audit.lower()
     assert "grant execute on function public.exos_v2_recover_participant_access" in SQL
+
+
+def test_minimal_join_recovery_response_is_hydrated_before_ui_branch():
+    class Runtime:
+        def __init__(self):
+            self.calls = []
+
+        def restore_join(self, join_code, participant_name, device_id):
+            self.calls.append((join_code, participant_name, device_id))
+            return {
+                "RecoveryRequired": True,
+                "Ambiguous": False,
+                "ParticipantID": "P-UPPER",
+                "EventID": "AIA-WE-260810081110-UPPER",
+                "TeamID": "UPPER-TEAM-01",
+                "TeamIdentity": "Korea",
+                "Emoji": "🇰🇷",
+                "Name": "Adrian Choong",
+            }
+
+    runtime = Runtime()
+    candidate = hydrate_recovery_candidate(
+        runtime,
+        {
+            "RecoveryRequired": True,
+            "Ambiguous": False,
+            "EventID": "AIA-WE-260810081110-UPPER",
+            "Name": "Adrian Choong",
+            "Message": "Same name exists for different device/session.",
+        },
+        "OXO0DT",
+        "Adrian Choong",
+        "new-device",
+    )
+
+    assert candidate["ParticipantID"] == "P-UPPER"
+    assert candidate["TeamID"] == "UPPER-TEAM-01"
+    assert candidate["TeamIdentity"] == "Korea"
+    assert runtime.calls == [("OXO0DT", "Adrian Choong", "new-device")]
+
+
+def test_ambiguous_join_response_is_never_silently_hydrated():
+    class Runtime:
+        def restore_join(self, *_):
+            raise AssertionError("ambiguous identity must not be selected")
+
+    original = {
+        "RecoveryRequired": True,
+        "Ambiguous": True,
+        "Name": "Adrian Choong",
+    }
+    assert hydrate_recovery_candidate(
+        Runtime(), original, "OXO0DT", "Adrian Choong", "new-device"
+    ) is original
