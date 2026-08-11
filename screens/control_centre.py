@@ -8,7 +8,6 @@ from streamlit_autorefresh import st_autorefresh
 
 from data.standard_core_v2_adapter import get_standard_database
 from data.control_runtime import ControlRuntime
-from data.experience_repository import SupabaseExperienceRepository
 from engines.stage_timer import remaining_seconds
 from engines.programme_hierarchy import (
     activity_content_config,
@@ -748,27 +747,6 @@ def show_control_centre(db=None):
         if activity.get("ActivityID", "") == selected_activity_id
     )
     stage = dict(current_activity)
-    canonical_assignments = []
-    if db.runtime.can_publish:
-        try:
-            canonical_assignments = [
-                row for row in SupabaseExperienceRepository(db.runtime).assignments(
-                    event_id, current_activity["ActivityID"],
-                )
-                if row.get("Active") and row.get("RuntimeEligible")
-            ]
-        except Exception:
-            canonical_assignments = []
-    if canonical_assignments:
-        assignment_ids = [row["ExperienceAssignmentID"] for row in canonical_assignments]
-        selected_assignment_id = st.selectbox(
-            "Assigned Experience", assignment_ids,
-            format_func=lambda value: next(
-                row["ExperienceDefinitionID"] for row in canonical_assignments
-                if row["ExperienceAssignmentID"] == value
-            ),
-        )
-        stage["ExperienceAssignmentID"] = selected_assignment_id
     index = next(
         position for position, (_, activity) in enumerate(flattened)
         if activity.get("ActivityID", "") == selected_activity_id

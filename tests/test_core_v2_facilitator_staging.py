@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from data.runtime_database import RuntimeDatabaseError
 from data.standard_core_v2_adapter import StandardCoreV2Adapter
 from engines.programme_adapter import CanonicalProgrammeAdapter
 from scripts.exos_core_v2_prepare_aia_weekend import (
@@ -128,3 +129,36 @@ def test_lower_pipeline_submission_read_path_uses_canonical_v2_rows():
     assert submissions[0]["TeamName"] == "India"
     assert submissions[0]["ActivityID"].endswith("ACT-002")
     assert submissions[0]["Status"] == "SUBMITTED"
+
+
+def test_standard_control_centre_does_not_probe_legacy_experience_assignments():
+    source = (ROOT / "screens/control_centre.py").read_text()
+    assert "SupabaseExperienceRepository" not in source
+    assert "event_experience_assignments" not in source
+
+
+def test_blocked_assignment_probe_explains_exact_assertion_counts():
+    adapter = StandardCoreV2Adapter.__new__(StandardCoreV2Adapter)
+    adapter.legacy_runtime_calls = 0
+    adapter.google_sheets_runtime_calls = 0
+
+    with pytest.raises(RuntimeDatabaseError, match="Blocked non-Core-v2 table"):
+        adapter._guard("event_experience_assignments")
+
+    assert adapter.get_staging_call_counts() == {
+        "LEGACY_RUNTIME_CALLS": 1,
+        "GOOGLE_SHEETS_RUNTIME_CALLS": 0,
+    }
+
+
+def test_standard_facilitator_render_has_only_core_v2_data_routes():
+    adapter_source = (ROOT / "data/standard_core_v2_adapter.py").read_text()
+    control_source = (ROOT / "screens/control_centre.py").read_text()
+    for legacy_path in (
+        "runtime_events", "runtime_participants", "runtime_submissions",
+        "event_experience_assignments", "experience_definitions",
+    ):
+        assert legacy_path not in control_source
+    assert "GoogleSheetsDB" not in control_source
+    assert '"LEGACY_RUNTIME_CALLS": self.legacy_runtime_calls' in adapter_source
+    assert '"GOOGLE_SHEETS_RUNTIME_CALLS": self.google_sheets_runtime_calls' in adapter_source
