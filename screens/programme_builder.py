@@ -1557,6 +1557,26 @@ def render_programme_first_builder(db):
                         ),
                         key=f"scoring_mode_{event_id}_{index}_{selected_position}",
                     )
+                    scoring_contract = dict(details.get("ScoringContract", {}) or {})
+                    contract_types = ["DIRECT_SCORE", "TARGET_ACHIEVEMENT_LOSS", "NON_SCORING", "CREDITS_BASED"]
+                    contract_type = st.selectbox(
+                        "Scoring contract",
+                        contract_types,
+                        index=(contract_types.index(scoring_contract.get("Type")) if scoring_contract.get("Type") in contract_types else (2 if scoring_mode == "NON_SCORING" else 0)),
+                        key=f"scoring_contract_{event_id}_{index}_{selected_position}",
+                    )
+                    contract_maximum = st.number_input(
+                        "Maximum / configured target",
+                        min_value=0.0,
+                        value=float(scoring_contract.get("Maximum", credits) or 0),
+                        key=f"scoring_contract_max_{event_id}_{index}_{selected_position}",
+                    )
+                    canonical_score = st.selectbox(
+                        "Canonical ranking value",
+                        ["SCORE", "NET_ACHIEVEMENT", "CREDITS_EARNED"],
+                        index=(["SCORE", "NET_ACHIEVEMENT", "CREDITS_EARNED"].index(scoring_contract.get("CanonicalScore")) if scoring_contract.get("CanonicalScore") in {"SCORE", "NET_ACHIEVEMENT", "CREDITS_EARNED"} else 0),
+                        key=f"scoring_contract_value_{event_id}_{index}_{selected_position}",
+                    )
                     participant_scope = st.selectbox(
                         "Submission ownership",
                         ["TEAM", "INDIVIDUAL"],
@@ -1635,6 +1655,18 @@ def render_programme_first_builder(db):
                             "Questions": questions,
                             "Credits": int(credits),
                             "ScoringMode": scoring_mode,
+                            "ScoringContract": {
+                                "Type": contract_type,
+                                "ScoringMode": scoring_mode,
+                                "Maximum": float(contract_maximum),
+                                "CanonicalScore": canonical_score,
+                                "IncludeWhen": "APPROVED",
+                                "Fields": {
+                                    "Target": "Metric1",
+                                    "Achievement": "Metric2",
+                                    "Loss": "Metric3",
+                                } if contract_type == "TARGET_ACHIEVEMENT_LOSS" else {},
+                            },
                             "ParticipantScope": participant_scope,
                             "SubmissionType": submission_type,
                             "Rules": rules,

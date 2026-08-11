@@ -114,6 +114,11 @@ def activity_details(stage):
         "AdminDisplayName": str(value.get("AdminDisplayName", "")),
         "ParticipantDisplayName": str(value.get("ParticipantDisplayName", "")),
         "ScoringMode": str(value.get("ScoringMode", stage.get("ScoringMode", "TEAM_COMPETITIVE"))),
+        "ScoringContract": (
+            value.get("ScoringContract", {})
+            if isinstance(value.get("ScoringContract", {}), dict)
+            else {}
+        ),
         "ParticipantScope": str(value.get("ParticipantScope", stage.get("ParticipantScope", "TEAM"))),
         "SubmissionType": str(value.get("SubmissionType", stage.get("SubmissionType", "NONE"))),
         "ModuleDetails": (

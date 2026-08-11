@@ -5,6 +5,7 @@ from branding import apply_branding, configure_page, footer
 from data.standard_core_v2_adapter import get_standard_database
 from screens.app_state import ACTIVE_EVENT_KEY
 from screens.control_centre import show_control_centre
+from screens.leaderboard_display import show_leaderboard_display
 
 
 def _deployment_environment():
@@ -25,11 +26,19 @@ requested_event = db.get_event(requested_event_id) if requested_event_id else {}
 
 if _deployment_environment() == "staging":
     st.sidebar.success("EXOS CORE v2 — STAGING")
-    if requested_event_id and requested_event:
-        st.session_state[ACTIVE_EVENT_KEY] = requested_event_id
-    show_control_centre(db=db)
+    if str(st.query_params.get("view", "")).strip().casefold() == "projector":
+        show_leaderboard_display(
+            db=db,
+            event_id=requested_event_id,
+            standalone=True,
+        )
+    else:
+        if requested_event_id and requested_event:
+            st.session_state[ACTIVE_EVENT_KEY] = requested_event_id
+        show_control_centre(db=db)
     db.assert_core_v2_only()
-    footer()
+    if str(st.query_params.get("view", "")).strip().casefold() != "projector":
+        footer()
     st.stop()
 
 # The existing non-staging Formula R.A.C.E. shell stays isolated from the

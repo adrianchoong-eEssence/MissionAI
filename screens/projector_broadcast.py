@@ -1,5 +1,6 @@
 import html
 import json
+from urllib.parse import quote
 
 import streamlit as st
 
@@ -9,6 +10,7 @@ from data.mission_media import (
     upload_library_asset,
 )
 from engines.stage_timer import remaining_seconds
+from engines.canonical_performance import load_performance_snapshot
 
 
 BROADCAST_MODES = [
@@ -64,6 +66,7 @@ DEFAULT_BROADCAST = {
     "LogoReference": "",
     "CharacterReference": "",
     "CustomImageReference": "",
+    "Theme": "Default",
 }
 
 
@@ -86,6 +89,12 @@ def projector_broadcast_state(event):
     if state["Mode"] not in BROADCAST_MODES:
         state["Mode"] = "Welcome"
     state["PresentationMode"] = bool(state.get("PresentationMode", True))
+    branding = dict(metadata.get("ProjectorBranding", {}) or {})
+    if not stored:
+        state["Mode"] = _normalise_mode(branding.get("DefaultBroadcast", state["Mode"]))
+    state["BackgroundReference"] = state.get("BackgroundReference") or branding.get("ProjectorBackground", "")
+    state["LogoReference"] = state.get("LogoReference") or branding.get("ClientLogo") or branding.get("EventLogo", "")
+    state["Theme"] = branding.get("ProjectorTheme", state.get("Theme", "Default"))
     return state
 
 
@@ -112,11 +121,14 @@ def _choice_index(choices, reference):
 
 def render_broadcast_controller(db, event_id, control=None):
     event = db.get_event(event_id) or {}
+    branding = dict((event.get("_EventPayload", {}) or {}).get("ProjectorBranding", {}) or {})
     state = dict(DEFAULT_BROADCAST)
     state.update({
         key: value for key, value in db.get_broadcast_state(event_id).items()
         if key in state
     })
+    if not db.get_broadcast_state(event_id):
+        state["Mode"] = branding.get("DefaultBroadcast", state["Mode"])
     db.ensure_existing_assets_catalogue()
     assets = db.get_assets()
     backgrounds = _asset_choices(
@@ -171,12 +183,12 @@ def render_broadcast_controller(db, event_id, control=None):
             key=f"projector_broadcast_message_{event_id}_{mode}",
         )
 
-    background_reference = str(state.get("BackgroundReference", ""))
-    logo_reference = str(state.get("LogoReference", ""))
+    background_reference = str(state.get("BackgroundReference") or branding.get("ProjectorBackground", ""))
+    logo_reference = str(state.get("LogoReference") or branding.get("ClientLogo") or branding.get("EventLogo", ""))
     character_reference = str(state.get("CharacterReference", ""))
     custom_image_reference = str(state.get("CustomImageReference", ""))
 
-    if mode in {"Welcome", "Instructions", "Results", "Championship"}:
+    if mode in {"Welcome", "Instructions", "Results", "Championship"} and len(backgrounds) > 1:
         background_label = st.selectbox(
             "Background image",
             list(backgrounds),
@@ -184,7 +196,7 @@ def render_broadcast_controller(db, event_id, control=None):
             key=f"projector_background_{event_id}_{mode}",
         )
         background_reference = backgrounds[background_label]
-    if mode == "Welcome":
+    if mode == "Welcome" and len(logos) > 1:
         logo_label = st.selectbox(
             "Client logo",
             list(logos),
@@ -192,7 +204,7 @@ def render_broadcast_controller(db, event_id, control=None):
             key=f"projector_logo_{event_id}",
         )
         logo_reference = logos[logo_label]
-    if mode in {"Instructions", "Results", "Championship"}:
+    if mode in {"Instructions", "Results", "Championship"} and len(characters) > 1:
         character_label = st.selectbox(
             "Character portrait",
             list(characters),
@@ -216,10 +228,24 @@ def render_broadcast_controller(db, event_id, control=None):
     if control is None:
         st.info("Broadcast controls are read-only outside Control Centre.")
         return
-    if st.button(
-        "Apply Broadcast",
-        type="primary",
-        width="stretch",
+    payload = {
+        "Mode": mode,
+        "PresentationMode": bool(presentation_mode),
+        "Title": title,
+        "Message": message,
+        "BackgroundReference": background_reference,
+        "LogoReference": logo_reference,
+        "CharacterReference": character_reference,
+        "CustomImageReference": custom_image_reference,
+        "Theme": branding.get("ProjectorTheme", "Default"),
+    }
+    preview, apply = st.columns(2)
+    if preview.button(
+        "Preview Broadcast", width="stretch", key=f"preview_projector_broadcast_{event_id}",
+    ):
+        st.session_state[f"projector_preview_{event_id}"] = payload
+    if apply.button(
+        "Apply Broadcast", type="primary", width="stretch",
         key=f"apply_projector_broadcast_{event_id}",
     ):
         if uploaded_image is not None:
@@ -228,19 +254,36 @@ def render_broadcast_controller(db, event_id, control=None):
                 f"PROJECTOR-{event_id}",
                 current_reference=custom_image_reference,
             )
-        payload = {
-            "Mode": mode,
-            "PresentationMode": bool(presentation_mode),
-            "Title": title,
-            "Message": message,
-            "BackgroundReference": background_reference,
-            "LogoReference": logo_reference,
-            "CharacterReference": character_reference,
-            "CustomImageReference": custom_image_reference,
-        }
+        payload["CustomImageReference"] = custom_image_reference
         control.broadcast(event_id, payload)
         st.success(f"{mode} is now live on the projector.")
         st.rerun()
+    st.link_button(
+        "Open Projector",
+        f"?view=projector&event_id={quote(str(event_id))}",
+        width="stretch",
+    )
+    preview_state = st.session_state.get(f"projector_preview_{event_id}")
+    if preview_state:
+        st.markdown("#### Broadcast Preview — not live")
+        performance = load_performance_snapshot(db, event_id)
+        preview_leaderboard = [
+            (row["TeamIdentity"], row["TotalScore"]) for row in performance["Teams"]
+        ]
+        mission = db.get_current_mission(event_id)
+        stage = (mission or {}).get("_RuntimeStage", {})
+        timer = db.get_stage_timer(
+            event_id, stage.get("StageNo", ""), stage.get("DurationMinutes", 0),
+        )
+        render_projector_broadcast(
+            preview_state,
+            event=event,
+            mission=mission,
+            leaderboard=preview_leaderboard,
+            wallet_status={},
+            timer=timer,
+            performance_snapshot=performance,
+        )
 
 
 def _media_url(reference):
@@ -277,10 +320,12 @@ def render_projector_broadcast(
     leaderboard,
     wallet_status,
     timer,
+    performance_snapshot=None,
 ):
     mode = str(state.get("Mode", "Welcome"))
     presentation = bool(state.get("PresentationMode", True))
-    presentation_class = " broadcast-presentation" if presentation else ""
+    theme = "".join(character for character in str(state.get("Theme", "Default")).casefold() if character.isalnum() or character == "-")
+    presentation_class = (" broadcast-presentation" if presentation else "") + f" broadcast-theme-{theme or 'default'}"
     event_title = html.escape(
         str(
             event.get("ProgrammeName")
@@ -404,14 +449,15 @@ def render_projector_broadcast(
         return True
 
     if mode == "Leaderboard":
+        performance_teams = (performance_snapshot or {}).get("Teams", [])
         rows = "".join(
             f"""
             <div class="broadcast-ranking">
-              <span>{position}. {html.escape(str(team))}</span>
-              <strong>{html.escape(str(score))} pts</strong>
+              <span>{row.get('Rank', position)}. {html.escape(str(row.get('TeamIdentity', '')))}</span>
+              <strong>{html.escape(str(row.get('TotalScore', 0)))} pts · {html.escape(str(round(row.get('PerformancePercentage'), 1)) if row.get('PerformancePercentage') is not None else '—')}%</strong>
             </div>
             """
-            for position, (team, score) in enumerate(leaderboard[:8], start=1)
+            for position, row in enumerate(performance_teams[:8], start=1)
         ) or '<div class="broadcast-message">No approved scores yet.</div>'
         st.markdown(
             f"""

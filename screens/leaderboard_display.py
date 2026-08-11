@@ -1,5 +1,4 @@
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 from branding import experience_title
 from data.standard_core_v2_adapter import get_standard_database
@@ -11,9 +10,11 @@ from engines.formula_race_checkpoints import is_formula_race_event
 from screens.app_state import select_active_event
 from screens.projector_broadcast import (
     DEFAULT_BROADCAST,
+    projector_broadcast_state,
     render_projector_broadcast,
 )
 from screens.team_identity import resolve_leaderboard_rows
+from engines.canonical_performance import load_performance_snapshot
 
 
 PROJECTOR_STYLES = """
@@ -288,13 +289,6 @@ PROJECTOR_STYLES = """
     }
 </style>
 """
-
-
-def auto_refresh(seconds=5):
-    st_autorefresh(
-        interval=seconds * 1000,
-        key="leaderboard_display_refresh",
-    )
 
 
 def calculate_leaderboard(submissions):
@@ -698,35 +692,28 @@ def display_winner(leaderboard):
     )
 
 
-def show_leaderboard_display():
+@st.fragment(run_every="3s")
+def show_leaderboard_display(db=None, event_id="", standalone=False):
     st.markdown(PROJECTOR_STYLES, unsafe_allow_html=True)
 
-    db = get_standard_database()
+    db = db or get_standard_database()
     events = db.get_events()
 
     if not events:
         st.error("No events found.")
         return
 
-    with st.sidebar:
-        st.title("EXOS Display Control")
-
-        event = select_active_event(
-            events,
-            label="Active Event",
-            key="live_display_event",
-        )
-
-        refresh_seconds = st.selectbox(
-            "Auto Refresh",
-            [2, 5, 10, 15, 30],
-            index=0,
-            key="live_display_refresh_seconds",
-        )
-
-        st.caption("Use browser fullscreen mode for projector display.")
-
-    event_id = event.get("EventID")
+    if event_id:
+        event = next((row for row in events if str(row.get("EventID", "")) == str(event_id)), None)
+        if not event:
+            st.error("Projector event is unavailable.")
+            return
+    else:
+        with st.sidebar:
+            st.title("EXOS Display Control")
+            event = select_active_event(events, label="Active Event", key="live_display_event")
+            st.caption("Use browser fullscreen mode for projector display.")
+        event_id = event.get("EventID")
     state = db.get_event_state(event_id) or {}
     if is_formula_race_event(event) and db.runtime.can_publish:
         try:
@@ -734,7 +721,6 @@ def show_leaderboard_display():
         except RuntimeDatabaseError:
             checkpoint_state = {}
         if str(checkpoint_state.get("Status", "")).upper() in {"LIVE", "PAUSED", "CLOSED"}:
-            auto_refresh(refresh_seconds)
             report = db.runtime.get_canonical_transaction_report(event_id)
             submissions = report.get("Submissions", [])
             balances = {str(row.get("team_id", "")): row for row in report.get("TeamBalances", [])}
@@ -789,8 +775,6 @@ def show_leaderboard_display():
         display_mode = "Current Experience" if mode == "Current Mission" else mode
         st.success(f"Automatic view: {display_mode}")
 
-    auto_refresh(refresh_seconds)
-
     submissions = db.get_submissions(event_id)
     canonical_leaderboard = []
     if db.runtime.can_publish:
@@ -802,10 +786,20 @@ def show_leaderboard_display():
         canonical_leaderboard if canonical_leaderboard else calculate_leaderboard(submissions)
     )
     leaderboard = resolve_leaderboard_rows(source_rows, db.get_teams(event_id))
+    try:
+        performance_snapshot = load_performance_snapshot(db, event_id)
+        leaderboard = [
+            (row["TeamIdentity"], row["TotalScore"])
+            for row in performance_snapshot["Teams"]
+        ]
+    except RuntimeDatabaseError:
+        performance_snapshot = {"Teams": []}
     mission = db.get_current_mission(event_id)
     teams_count = db.get_team_count(event_id)
-    broadcast_state = dict(DEFAULT_BROADCAST)
-    broadcast_state.update(db.get_broadcast_state(event_id))
+    configured_state = projector_broadcast_state(event)
+    stored_broadcast = db.get_broadcast_state(event_id)
+    broadcast_state = dict(configured_state if not stored_broadcast else DEFAULT_BROADCAST)
+    broadcast_state.update(stored_broadcast)
 
     wallet_status = {}
     if (
@@ -829,6 +823,7 @@ def show_leaderboard_display():
         leaderboard=leaderboard,
         wallet_status=wallet_status,
         timer=timer,
+        performance_snapshot=performance_snapshot,
     ):
         return
 

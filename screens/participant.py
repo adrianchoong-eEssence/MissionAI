@@ -33,6 +33,7 @@ from engines.programme_hierarchy import (
 )
 from engines.programme_adapter import CanonicalProgrammeAdapter, ProgrammeIntegrityError
 from engines.experience_library import ExperienceLibraryService, ExperienceResolutionError
+from engines.canonical_performance import load_performance_snapshot
 from components.experience_preview import render_experience_participant
 from screens.mission_setup import cropped_reference_image, mission_module_name
 
@@ -2255,6 +2256,61 @@ def render_programme_activity(stage):
             st.metric("Activity credit value", details["Credits"])
 
 
+def _performance_number(value):
+    if value is None:
+        return "—"
+    number = float(value)
+    return str(int(number)) if number.is_integer() else f"{number:.1f}"
+
+
+@st.fragment(run_every="5s")
+def render_participant_performance(db, event_id, team_id):
+    """Scoped live projection; participant inputs and the full page never rerun."""
+    try:
+        snapshot = load_performance_snapshot(db, event_id)
+    except RuntimeDatabaseError:
+        st.caption("Live performance is reconnecting.")
+        return
+    team = next((row for row in snapshot["Teams"] if row["TeamID"] == team_id), None)
+    if not team:
+        return
+    with st.expander("YOUR PERFORMANCE", expanded=False):
+        for activity in team["Activities"]:
+            st.markdown(f"**{activity['ActivityName']}** · {activity['Status']}")
+            if activity["Status"] == "Approved / Scored":
+                target = activity.get("Target")
+                score = activity.get("NetAchievement") if target else activity.get("Score")
+                if target:
+                    st.write(f"{_performance_number(score)} / {_performance_number(target)} pts")
+                else:
+                    st.write(f"{_performance_number(score)} pts")
+                if activity.get("PerformancePercentage") is not None:
+                    st.caption(f"{_performance_number(activity['PerformancePercentage'])}%")
+    with st.expander("OVERALL TEAM PERFORMANCE", expanded=True):
+        rank, total, performance = st.columns(3)
+        rank.metric("Rank", f"{team['Rank']} of {team['TeamCount']}")
+        total.metric(
+            "Total Score",
+            f"{_performance_number(team['TotalScore'])} / {_performance_number(team['TotalTarget'])} pts"
+            if team["TotalTarget"] else f"{_performance_number(team['TotalScore'])} pts",
+        )
+        performance.metric(
+            "Overall Performance",
+            f"{_performance_number(team['PerformancePercentage'])}%"
+            if team["PerformancePercentage"] is not None else "—",
+        )
+    with st.expander("LIVE STANDINGS", expanded=False):
+        for row in snapshot["Teams"]:
+            percent = (
+                f" · {_performance_number(row['PerformancePercentage'])}%"
+                if row["PerformancePercentage"] is not None else ""
+            )
+            st.write(
+                f"{row['Rank']}. {row['TeamIdentity']} — "
+                f"{_performance_number(row['TotalScore'])} pts{percent}"
+            )
+
+
 def render_mission_ai_briefing(db):
     portrait = bayu_ai_portrait_reference(db)
     st.markdown("## Mission AI Briefing")
@@ -2690,6 +2746,12 @@ def show_participant():
     st.caption(st.session_state["participant_event_name"])
     render_team_assignment_card(db)
     participant_install_experience()
+    st.divider()
+    render_participant_performance(
+        db,
+        st.session_state.get("participant_event_id", ""),
+        st.session_state.get("participant_team_id", ""),
+    )
     st.divider()
 
     runtime_session = bool(

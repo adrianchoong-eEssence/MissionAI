@@ -37,6 +37,22 @@ PROGRAMME = (
     ("NASI", "NASI", "INDIVIDUAL", "NON_SCORING", 15, "Debrief"),
 )
 
+SCORING_CONTRACTS = {
+    "Pipeline": {
+        "Type": "TARGET_ACHIEVEMENT_LOSS",
+        "ScoringMode": "TEAM_COMPETITIVE",
+        "CanonicalScore": "NET_ACHIEVEMENT",
+        "IncludeWhen": "APPROVED",
+        "Fields": {"Target": "Metric1", "Achievement": "Metric2", "Loss": "Metric3"},
+    },
+    "Key Punch": {
+        "Type": "DIRECT_SCORE",
+        "ScoringMode": "TEAM_COMPETITIVE",
+        "Maximum": 100,
+        "IncludeWhen": "APPROVED",
+    },
+}
+
 
 def next_saturday(today=None):
     today = today or date.today()
@@ -110,6 +126,12 @@ def agile_programme(event_id):
                 else f"Brief, launch and monitor {name}."
             ),
             "Credits": 100 if scoring == "TEAM_COMPETITIVE" else 0,
+            "ScoringContract": SCORING_CONTRACTS.get(name, {
+                "Type": "NON_SCORING" if scoring == "NON_SCORING" else "DIRECT_SCORE",
+                "ScoringMode": scoring,
+                "Maximum": 0,
+                "IncludeWhen": "APPROVED",
+            }),
             "RuntimeEligible": content_type != "Break",
         }
         stage_type = "Lunch / Break" if content_type == "Break" else "Activity"

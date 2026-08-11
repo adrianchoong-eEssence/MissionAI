@@ -112,7 +112,8 @@ def _regenerate_generic_identities(team_count_key, identity_pool_key):
 
 
 def _save_event_metadata(db, event_id, duration, participants, theme_type,
-                         theme_name, identity_pool, assigned_identities=()):
+                         theme_name, identity_pool, assigned_identities=(),
+                         projector_branding=None):
     db.update_event_metadata(event_id, {
         "DurationHours": float(duration),
         "ExpectedParticipants": int(participants),
@@ -128,6 +129,7 @@ def _save_event_metadata(db, event_id, duration, participants, theme_type,
                 **_identity_option(item, position),
             } for position, item in enumerate(assigned_identities, 1)],
         },
+        "ProjectorBranding": dict(projector_branding or {}),
     })
 
 
@@ -223,6 +225,7 @@ def _event_form(db, event=None):
     event_id = str((event or {}).get("EventID", ""))
     existing_teams = db.get_teams(event_id) if editing else []
     metadata = StandardCoreV2Adapter.event_metadata(event or {})
+    projector_branding = dict(metadata.get("ProjectorBranding", {}) or {})
     default_pool = _identity_pool(metadata, existing_teams)
     if not default_pool:
         default_count = int((event or {}).get("NumberOfTeams", 6) or 6)
@@ -308,6 +311,19 @@ def _event_form(db, event=None):
                 "Country (optional). Add more lines before increasing group count."
             ),
             height=max(140, min(320, len(default_pool) * 30)),
+        )
+        st.markdown("#### Projector branding")
+        client_logo = st.text_input("Client logo reference", value=str(projector_branding.get("ClientLogo", "")))
+        event_logo = st.text_input("Event logo reference", value=str(projector_branding.get("EventLogo", "")))
+        projector_background = st.text_input("Projector background reference", value=str(projector_branding.get("ProjectorBackground", "")))
+        projector_theme = st.text_input("Projector theme", value=str(projector_branding.get("ProjectorTheme", "Default")))
+        default_broadcast = st.selectbox(
+            "Default broadcast", ["Welcome", "Current Activity", "Leaderboard", "Scores", "Timer", "Instructions", "Results", "Blank"],
+            index=["Welcome", "Current Activity", "Leaderboard", "Scores", "Timer", "Instructions", "Results", "Blank"].index(
+                projector_branding.get("DefaultBroadcast", "Welcome")
+                if projector_branding.get("DefaultBroadcast", "Welcome") in ["Welcome", "Current Activity", "Leaderboard", "Scores", "Timer", "Instructions", "Results", "Blank"]
+                else "Welcome"
+            ),
         )
         join_code = st.text_input(
             "Join code",
@@ -428,6 +444,13 @@ def _event_form(db, event=None):
         theme_name,
         identity_pool,
         revised,
+        {
+            "ClientLogo": client_logo.strip(),
+            "EventLogo": event_logo.strip(),
+            "ProjectorBackground": projector_background.strip(),
+            "ProjectorTheme": projector_theme.strip() or "Default",
+            "DefaultBroadcast": default_broadcast,
+        },
     )
     paired_event_id = str(metadata.get("PairedEventID", "")).strip()
     if paired_event_id and (

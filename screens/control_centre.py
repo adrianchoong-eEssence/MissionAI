@@ -8,6 +8,7 @@ import streamlit as st
 from data.standard_core_v2_adapter import get_standard_database
 from data.control_runtime import ControlRuntime
 from engines.stage_timer import remaining_seconds
+from engines.canonical_performance import load_performance_snapshot
 from engines.programme_hierarchy import (
     activity_content_config,
     activity_details,
@@ -364,6 +365,38 @@ def _render_rankings(db, event_id, final=False):
         return
     for position, (team, score) in enumerate(leaderboard, start=1):
         st.metric(f"{position}. {team}", f"{format_score(score)} pts")
+
+
+@st.fragment(run_every="5s")
+def _render_live_performance(db, event_id):
+    try:
+        snapshot = load_performance_snapshot(db, event_id)
+    except Exception:
+        st.caption("Live team performance is reconnecting.")
+        return
+    st.subheader("Live Programme Performance")
+    summary = []
+    for team in snapshot["Teams"]:
+        summary.append({
+            "Rank": team["Rank"],
+            "Team": team["TeamIdentity"],
+            "Total Score": team["TotalScore"],
+            "Total Target": team["TotalTarget"],
+            "Performance %": team["PerformancePercentage"],
+        })
+    st.dataframe(summary, width="stretch", hide_index=True)
+    for team in snapshot["Teams"]:
+        with st.expander(f"{team['Rank']}. {team['TeamIdentity']} · activity breakdown"):
+            for activity in team["Activities"]:
+                score = activity.get("NetAchievement") if activity.get("Target") else activity.get("Score")
+                line = f"**{activity['ActivityName']}** · {activity['Status']}"
+                if score is not None:
+                    line += f" · {format_score(score)}"
+                    if activity.get("Target") is not None:
+                        line += f" / {format_score(activity['Target'])}"
+                    if activity.get("PerformancePercentage") is not None:
+                        line += f" · {format_score(activity['PerformancePercentage'])}%"
+                st.write(line)
 
 
 _NASI_LABEL_PATTERNS = [
@@ -852,6 +885,7 @@ def show_control_centre(db=None):
         st.info("This is a non-runtime programme marker. No launch or submission controls apply.")
     else:
         _render_stage_widgets(db, control, event_id, stage_family(stage))
+    _render_live_performance(db, event_id)
     st.divider()
     audit_actor = _render_team_management(db, control, event_id)
 
