@@ -529,6 +529,7 @@ def render_review_scoring_widget(
             f"{submission.get('TeamName') or submission.get('TeamID', 'Team')} · "
             f"{submission.get('MissionID') or submission.get('ExperienceAssignmentID', '')} · "
             f"{submission.get('Status', 'PENDING')}",
+            expanded=len(rows) == 1,
         ):
             render_submission_details(submission)
             st.caption(formula)

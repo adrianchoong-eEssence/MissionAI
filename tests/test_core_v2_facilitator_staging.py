@@ -55,6 +55,16 @@ def test_control_review_reads_programme_through_core_v2_adapter():
     assert StandardCoreV2Adapter.get_programme_hierarchy is StandardCoreV2Adapter.get_programme_stages
 
 
+def test_single_submission_opens_its_individual_review_controls():
+    source = (ROOT / "screens/live_event_console.py").read_text()
+    review_widget = source.split("def render_review_scoring_widget", 1)[1]
+    expander = review_widget.split("with st.expander(", 1)[1].split("):", 1)[0]
+
+    assert "expanded=len(rows) == 1" in expander
+    assert 'review["label"]' in review_widget
+    assert 'control.review_submission(' in review_widget
+
+
 def test_revision_decision_remains_pending_in_core_v2():
     adapter = StandardCoreV2Adapter.__new__(StandardCoreV2Adapter)
     captured = {}
