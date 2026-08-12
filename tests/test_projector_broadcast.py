@@ -114,6 +114,17 @@ def test_current_activity_mode_uses_current_experience_without_mutating_it():
     assert mission == original
 
 
+def test_preview_uses_same_renderer_with_scaled_presentation_class():
+    with patch("screens.projector_broadcast.st.markdown") as markdown:
+        render_projector_broadcast(
+            {"Mode": "Welcome", "PresentationMode": True},
+            event={"EventName": "Preview Event"},
+            mission={}, leaderboard=[], wallet_status={}, timer={},
+            preview=True,
+        )
+    assert "broadcast-preview" in markdown.call_args.args[0]
+
+
 def test_control_centre_no_longer_writes_projector_copy_to_participants():
     source = (ROOT / "screens" / "control_centre.py").read_text()
 

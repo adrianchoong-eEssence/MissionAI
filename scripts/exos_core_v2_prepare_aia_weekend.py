@@ -41,6 +41,7 @@ SCORING_CONTRACTS = {
     "Pipeline": {
         "Type": "TARGET_ACHIEVEMENT_LOSS",
         "ScoringMode": "TEAM_COMPETITIVE",
+        "Target": 0,
         "CanonicalScore": "NET_ACHIEVEMENT",
         "IncludeWhen": "APPROVED",
         "Fields": {"Target": "Metric1", "Achievement": "Metric2", "Loss": "Metric3"},

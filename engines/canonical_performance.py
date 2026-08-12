@@ -29,7 +29,7 @@ def activity_scoring_contract(activity):
     """Resolve an extensible scoring contract from canonical activity configuration."""
     activity = dict(activity or {})
     details = activity_details(activity)
-    payload = activity.get("ActivityPayload", {})
+    payload = activity.get("ActivityPayload", activity.get("activity_payload", {}))
     payload = payload if isinstance(payload, dict) else {}
     module_details = details.get("ModuleDetails", {})
     module_details = module_details if isinstance(module_details, dict) else {}
@@ -54,6 +54,7 @@ def activity_scoring_contract(activity):
     return {
         "Type": contract_type,
         "ScoringMode": scoring_mode,
+        "Target": _number(configured.get("Target", configured.get("Maximum", 0))),
         "Maximum": _number(configured.get("Maximum", details.get("Credits", 0))),
         "CanonicalScore": str(configured.get("CanonicalScore", "SCORE")).upper(),
         "IncludeWhen": str(configured.get("IncludeWhen", "APPROVED")).upper(),
@@ -99,7 +100,9 @@ def evaluate_activity(activity, submission=None):
         return result
     if contract["Type"] == "TARGET_ACHIEVEMENT_LOSS":
         fields = {"Target": "Metric1", "Achievement": "Metric2", "Loss": "Metric3", **contract["Fields"]}
-        target = _number(submission.get(fields["Target"]))
+        # The official denominator is facilitator/programme-authored. Participant
+        # evidence may contain a reported target, but it cannot define ranking.
+        target = _number(contract.get("Target"))
         achievement = _number(submission.get(fields["Achievement"]))
         loss = _number(submission.get(fields["Loss"]))
         net = achievement - loss
@@ -119,7 +122,7 @@ def evaluate_activity(activity, submission=None):
             "Target": maximum if maximum > 0 else None,
             "NetAchievement": result["Score"],
             "PerformancePercentage": (result["Score"] / maximum * 100) if maximum > 0 else None,
-            "Included": maximum > 0,
+            "Included": True,
         })
     return result
 
@@ -142,8 +145,9 @@ def build_performance_snapshot(programme, submissions, teams, canonical_leaderbo
             submission = next((row for row in submissions if str(row.get("TeamID", "")) == team_id and str(row.get("ActivityID") or row.get("MissionID", "")) == activity_id), None)
             breakdown.append(evaluate_activity(activity, submission))
         included = [row for row in breakdown if row["Included"]]
-        total_target = sum(_number(row["Target"]) for row in included)
-        total_net = sum(_number(row["NetAchievement"]) for row in included)
+        target_rows = [row for row in included if row["Target"] is not None]
+        total_target = sum(_number(row["Target"]) for row in target_rows)
+        total_net = sum(_number(row["NetAchievement"]) for row in target_rows)
         score = ledger.get(team_id, sum(_number(row["Score"]) for row in included))
         output.append({
             "TeamID": team_id,

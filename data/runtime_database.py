@@ -529,6 +529,11 @@ class SupabaseRuntimeDB:
                 "objectives": str(details.get("Objectives", "")),
                 "credits": int(details.get("Credits", 0) or 0),
                 "scoring": str(details.get("Scoring", "")),
+                "scoring_contract": (
+                    dict(details.get("ScoringContract", {}))
+                    if isinstance(details.get("ScoringContract", {}), dict)
+                    else {}
+                ),
                 "participant_narrative": str(details.get("ParticipantNarrative", "")),
                 "participant_task": str(details.get("ParticipantTask", "")),
                 "evidence_required": bool(details.get("EvidenceRequired", False)),
@@ -659,6 +664,11 @@ class SupabaseRuntimeDB:
                 "Rules": str(payload.get("rules", "")),
                 "Objectives": str(payload.get("objectives", "")),
                 "Scoring": str(payload.get("scoring", "")),
+                "ScoringContract": (
+                    dict(payload.get("scoring_contract", {}))
+                    if isinstance(payload.get("scoring_contract", {}), dict)
+                    else {}
+                ),
                 "EvidenceRequired": bool(payload.get("evidence_required", False)),
                 "SubmissionType": str(payload.get("submission_type", "NONE")),
                 "ParticipantScope": str(payload.get("participant_scope", "TEAM")),

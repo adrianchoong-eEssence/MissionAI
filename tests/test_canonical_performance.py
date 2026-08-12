@@ -21,6 +21,7 @@ def _activity(activity_id, name, contract):
 def test_target_achievement_loss_preserves_components_and_net_score():
     activity = _activity("A1", "Configured Challenge", {
         "Type": "TARGET_ACHIEVEMENT_LOSS",
+        "Target": 125,
         "CanonicalScore": "NET_ACHIEVEMENT",
         "Fields": {"Target": "Metric1", "Achievement": "Metric2", "Loss": "Metric3"},
     })
@@ -37,9 +38,10 @@ def test_target_achievement_loss_preserves_components_and_net_score():
 def test_overall_percentage_is_weighted_by_targets_not_average_percentages():
     programme = [{"Activities": [
         _activity("A1", "One", {"Type": "TARGET_ACHIEVEMENT_LOSS", "CanonicalScore": "NET_ACHIEVEMENT"}),
-        _activity("A2", "Two", {"Type": "TARGET_ACHIEVEMENT_LOSS", "CanonicalScore": "NET_ACHIEVEMENT"}),
+        _activity("A2", "Two", {"Type": "TARGET_ACHIEVEMENT_LOSS", "Target": 75, "CanonicalScore": "NET_ACHIEVEMENT"}),
         _activity("A3", "Reflection", {"Type": "NON_SCORING", "ScoringMode": "NON_SCORING"}),
     ]}]
+    programme[0]["Activities"][0]["ScoringContract"]["Target"] = 125
     submissions = [
         {"TeamID": "T1", "ActivityID": "A1", "Status": "APPROVED", "Metric1": 125, "Metric2": 120, "Metric3": 5, "Score": 115},
         {"TeamID": "T1", "ActivityID": "A2", "Status": "APPROVED", "Metric1": 75, "Metric2": 65, "Metric3": 5, "Score": 60},
@@ -66,6 +68,33 @@ def test_unapproved_activity_does_not_distort_denominator_and_status_is_visible(
     team = build_performance_snapshot(programme, rows, [{"TeamID": "T1", "TeamName": "Red"}], [{"TeamID": "T1", "Score": 80}])["Teams"][0]
     assert team["TotalTarget"] == 100
     assert team["Activities"][1]["Status"] == "Awaiting Review"
+
+
+def test_participant_reported_target_cannot_control_official_denominator():
+    activity = _activity("A1", "Configured Challenge", {
+        "Type": "TARGET_ACHIEVEMENT_LOSS", "Target": 125,
+        "CanonicalScore": "NET_ACHIEVEMENT",
+    })
+    result = evaluate_activity(activity, {
+        "Status": "APPROVED", "Metric1": 1, "Metric2": 120, "Metric3": 5, "Score": 115,
+    })
+    assert result["Target"] == 125
+    assert result["PerformancePercentage"] == 92
+
+
+def test_existing_direct_score_has_no_fake_target_or_none_percentage_display():
+    activity = _activity("A1", "Existing AIA Pipeline", {"Type": "DIRECT_SCORE", "Maximum": 0})
+    team = build_performance_snapshot(
+        [{"Activities": [activity]}],
+        [{"TeamID": "T1", "ActivityID": "A1", "Status": "APPROVED", "Score": 118}],
+        [{"TeamID": "T1", "TeamName": "India"}],
+        [{"TeamID": "T1", "Score": 118}],
+    )["Teams"][0]
+    assert team["TotalScore"] == 118
+    assert team["TotalTarget"] == 0
+    assert team["PerformancePercentage"] is None
+    assert team["Activities"][0]["Score"] == 118
+    assert team["Activities"][0]["Target"] is None
 
 
 def test_ties_are_deterministic_and_points_credits_wallet_stay_separate():
@@ -123,3 +152,35 @@ def test_programme_builder_exposes_reusable_activity_scoring_contracts():
     assert '"DIRECT_SCORE"' in source
     assert '"CREDITS_BASED"' in source
     assert '"CanonicalScore": canonical_score' in source
+    assert '"Target": float(contract_maximum)' in source
+
+
+def test_preview_and_standalone_use_same_styles_and_clean_shell():
+    preview = (ROOT / "screens/projector_broadcast.py").read_text()
+    projector = (ROOT / "screens/leaderboard_display.py").read_text()
+    styles = (ROOT / "screens/projector_presentation.py").read_text()
+    facilitator = (ROOT / "Facilitator.py").read_text()
+    assert "from screens.projector_presentation import PROJECTOR_STYLES" in preview
+    assert "SHARED_PROJECTOR_STYLES" in projector
+    assert "PROJECTOR_STANDALONE_STYLES" in projector
+    assert "broadcast-preview" in styles
+    assert '.stApp { background:#082b50 !important' in styles
+    assert '.block-container { padding:0 !important' in styles
+    assert 'initial_sidebar_state="collapsed" if projector_request else "auto"' in facilitator
+    assert "if not projector_request:\n    apply_branding()" in facilitator
+    assert "st.file_uploader" not in preview
+
+
+def test_scoring_contract_round_trips_through_canonical_activity_payload():
+    runtime = (ROOT / "data/runtime_database.py").read_text()
+    assert '"scoring_contract": (' in runtime
+    assert '"ScoringContract": (' in runtime
+    assert 'payload.get("scoring_contract", {})' in runtime
+
+
+def test_admin_projector_entry_uses_selected_event_id():
+    source = (ROOT / "MissionAI.py").read_text()
+    assert 'if requested_view == "projector":' in source
+    assert 'event_id = str(st.query_params.get("event_id", "")).strip()' in source
+    assert 'show_leaderboard_display(event_id=event_id, standalone=True)' in source
+    assert 'f"?view=projector&event_id={selected_event_id}"' in source

@@ -14,10 +14,17 @@ from screens.participant import show_participant
 from screens.programme_builder import show_programme_builder
 
 
-if str(st.query_params.get("view", "")).strip().casefold() == "participant":
+requested_view = str(st.query_params.get("view", "")).strip().casefold()
+if requested_view == "participant":
     configure_page(layout="centered")
     apply_branding(participant_pwa=True)
     show_participant()
+    st.stop()
+
+if requested_view == "projector":
+    configure_page(layout="wide", initial_sidebar_state="collapsed")
+    event_id = str(st.query_params.get("event_id", "")).strip()
+    show_leaderboard_display(event_id=event_id, standalone=True)
     st.stop()
 
 
@@ -75,7 +82,16 @@ elif page == "Programme Builder":
 elif page == "Control Centre":
     show_control_centre()
 elif page == "Projector":
-    show_leaderboard_display()
+    selected_event_id = str(st.session_state.get(ACTIVE_EVENT_KEY, "")).strip()
+    if selected_event_id:
+        st.link_button(
+            "Open Selected Event Projector",
+            f"?view=projector&event_id={selected_event_id}",
+            width="stretch",
+        )
+        show_leaderboard_display(event_id=selected_event_id)
+    else:
+        show_leaderboard_display()
 elif page == "Reports":
     show_results_reports()
 elif page == "Administration":

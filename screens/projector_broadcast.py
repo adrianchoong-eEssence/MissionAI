@@ -7,10 +7,10 @@ import streamlit as st
 from branding import PLATFORM_EXPANSION, PLATFORM_TAGLINE
 from data.mission_media import (
     get_mission_media_url,
-    upload_library_asset,
 )
 from engines.stage_timer import remaining_seconds
 from engines.canonical_performance import load_performance_snapshot
+from screens.projector_presentation import PROJECTOR_STYLES
 
 
 BROADCAST_MODES = [
@@ -213,18 +213,6 @@ def render_broadcast_controller(db, event_id, control=None):
         )
         character_reference = characters[character_label]
 
-    uploaded_image = None
-    if mode in {"Current Activity", "Instructions", "Results", "Championship"}:
-        uploaded_image = st.file_uploader(
-            "Optional projector image",
-            type=["jpg", "jpeg", "png", "webp", "heic"],
-            key=f"projector_custom_image_{event_id}_{mode}",
-        )
-        if custom_image_reference:
-            preview = get_mission_media_url(custom_image_reference)
-            if preview:
-                st.image(preview, width="stretch")
-
     if control is None:
         st.info("Broadcast controls are read-only outside Control Centre.")
         return
@@ -248,13 +236,6 @@ def render_broadcast_controller(db, event_id, control=None):
         "Apply Broadcast", type="primary", width="stretch",
         key=f"apply_projector_broadcast_{event_id}",
     ):
-        if uploaded_image is not None:
-            custom_image_reference = upload_library_asset(
-                uploaded_image,
-                f"PROJECTOR-{event_id}",
-                current_reference=custom_image_reference,
-            )
-        payload["CustomImageReference"] = custom_image_reference
         control.broadcast(event_id, payload)
         st.success(f"{mode} is now live on the projector.")
         st.rerun()
@@ -266,6 +247,7 @@ def render_broadcast_controller(db, event_id, control=None):
     preview_state = st.session_state.get(f"projector_preview_{event_id}")
     if preview_state:
         st.markdown("#### Broadcast Preview — not live")
+        st.markdown(PROJECTOR_STYLES, unsafe_allow_html=True)
         performance = load_performance_snapshot(db, event_id)
         preview_leaderboard = [
             (row["TeamIdentity"], row["TotalScore"]) for row in performance["Teams"]
@@ -283,6 +265,7 @@ def render_broadcast_controller(db, event_id, control=None):
             wallet_status={},
             timer=timer,
             performance_snapshot=performance,
+            preview=True,
         )
 
 
@@ -321,11 +304,12 @@ def render_projector_broadcast(
     wallet_status,
     timer,
     performance_snapshot=None,
+    preview=False,
 ):
     mode = str(state.get("Mode", "Welcome"))
     presentation = bool(state.get("PresentationMode", True))
     theme = "".join(character for character in str(state.get("Theme", "Default")).casefold() if character.isalnum() or character == "-")
-    presentation_class = (" broadcast-presentation" if presentation else "") + f" broadcast-theme-{theme or 'default'}"
+    presentation_class = (" broadcast-presentation" if presentation else "") + f" broadcast-theme-{theme or 'default'}" + (" broadcast-preview" if preview else "")
     event_title = html.escape(
         str(
             event.get("ProgrammeName")
@@ -454,7 +438,7 @@ def render_projector_broadcast(
             f"""
             <div class="broadcast-ranking">
               <span>{row.get('Rank', position)}. {html.escape(str(row.get('TeamIdentity', '')))}</span>
-              <strong>{html.escape(str(row.get('TotalScore', 0)))} pts · {html.escape(str(round(row.get('PerformancePercentage'), 1)) if row.get('PerformancePercentage') is not None else '—')}%</strong>
+              <strong>{html.escape(str(row.get('TotalScore', 0)))} pts{(' · ' + html.escape(str(round(row.get('PerformancePercentage'), 1))) + '%') if row.get('PerformancePercentage') is not None else ''}</strong>
             </div>
             """
             for position, row in enumerate(performance_teams[:8], start=1)

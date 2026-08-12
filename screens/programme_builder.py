@@ -1658,6 +1658,7 @@ def render_programme_first_builder(db):
                             "ScoringContract": {
                                 "Type": contract_type,
                                 "ScoringMode": scoring_mode,
+                                "Target": float(contract_maximum) if contract_type == "TARGET_ACHIEVEMENT_LOSS" else 0,
                                 "Maximum": float(contract_maximum),
                                 "CanonicalScore": canonical_score,
                                 "IncludeWhen": "APPROVED",

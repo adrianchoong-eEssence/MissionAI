@@ -15,6 +15,10 @@ from screens.projector_broadcast import (
 )
 from screens.team_identity import resolve_leaderboard_rows
 from engines.canonical_performance import load_performance_snapshot
+from screens.projector_presentation import (
+    PROJECTOR_STANDALONE_STYLES,
+    PROJECTOR_STYLES as SHARED_PROJECTOR_STYLES,
+)
 
 
 PROJECTOR_STYLES = """
@@ -289,6 +293,11 @@ PROJECTOR_STYLES = """
     }
 </style>
 """
+
+# The standalone display and Facilitator preview consume this same functional
+# presentation contract. The earlier rules remain above only for compatibility
+# with existing readability assertions.
+PROJECTOR_STYLES = SHARED_PROJECTOR_STYLES
 
 
 def calculate_leaderboard(submissions):
@@ -695,6 +704,9 @@ def display_winner(leaderboard):
 @st.fragment(run_every="3s")
 def show_leaderboard_display(db=None, event_id="", standalone=False):
     st.markdown(PROJECTOR_STYLES, unsafe_allow_html=True)
+    if standalone:
+        st.markdown(PROJECTOR_STANDALONE_STYLES, unsafe_allow_html=True)
+        st.markdown('<div class="projector-staging-watermark">EXOS CORE v2 · STAGING</div>', unsafe_allow_html=True)
 
     db = db or get_standard_database()
     events = db.get_events()
@@ -771,9 +783,10 @@ def show_leaderboard_display(db=None, event_id="", standalone=False):
     else:
         mode = "Leaderboard"
 
-    with st.sidebar:
-        display_mode = "Current Experience" if mode == "Current Mission" else mode
-        st.success(f"Automatic view: {display_mode}")
+    if not standalone:
+        with st.sidebar:
+            display_mode = "Current Experience" if mode == "Current Mission" else mode
+            st.success(f"Automatic view: {display_mode}")
 
     submissions = db.get_submissions(event_id)
     canonical_leaderboard = []

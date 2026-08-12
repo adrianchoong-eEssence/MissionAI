@@ -7,13 +7,12 @@ from screens.leaderboard_display import (
 
 
 def test_projector_styles_are_widescreen_and_distance_readable():
-    assert "max-width: 1600px" in PROJECTOR_STYLES
-    assert "font-size: clamp(84px, 8vw, 132px)" in PROJECTOR_STYLES
-    assert "font-size: clamp(38px, 3.25vw, 54px)" in PROJECTOR_STYLES
-    assert "line-height: 1.55" in PROJECTOR_STYLES
-    assert "overflow-wrap: break-word" in PROJECTOR_STYLES
-    assert "background: #061f3d" in PROJECTOR_STYLES
-    assert "color: #ffffff" in PROJECTOR_STYLES
+    assert "min-height:100vh" in PROJECTOR_STYLES
+    assert "font-size:clamp(64px,8vw,136px)" in PROJECTOR_STYLES
+    assert "font-size:clamp(38px,3.5vw,62px)" in PROJECTOR_STYLES
+    assert "line-height:1.45" in PROJECTOR_STYLES
+    assert "background-color:#082b50" in PROJECTOR_STYLES
+    assert "color:#fff" in PROJECTOR_STYLES
 
 
 def test_current_experience_uses_non_shrinking_wrapped_text_classes():

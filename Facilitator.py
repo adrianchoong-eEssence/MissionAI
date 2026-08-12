@@ -17,16 +17,22 @@ def _deployment_environment():
     except Exception:
         return ""
 
-configure_page(layout="wide")
-apply_branding()
+projector_request = str(st.query_params.get("view", "")).strip().casefold() == "projector"
+configure_page(
+    layout="wide",
+    initial_sidebar_state="collapsed" if projector_request else "auto",
+)
+if not projector_request:
+    apply_branding()
 
 db = get_standard_database()
 requested_event_id = str(st.query_params.get("event_id", "")).strip()
 requested_event = db.get_event(requested_event_id) if requested_event_id else {}
 
 if _deployment_environment() == "staging":
-    st.sidebar.success("EXOS CORE v2 — STAGING")
-    if str(st.query_params.get("view", "")).strip().casefold() == "projector":
+    if not projector_request:
+        st.sidebar.success("EXOS CORE v2 — STAGING")
+    if projector_request:
         show_leaderboard_display(
             db=db,
             event_id=requested_event_id,
@@ -37,7 +43,7 @@ if _deployment_environment() == "staging":
             st.session_state[ACTIVE_EVENT_KEY] = requested_event_id
         show_control_centre(db=db)
     db.assert_core_v2_only()
-    if str(st.query_params.get("view", "")).strip().casefold() != "projector":
+    if not projector_request:
         footer()
     st.stop()
 

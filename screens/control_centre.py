@@ -381,8 +381,11 @@ def _render_live_performance(db, event_id):
             "Rank": team["Rank"],
             "Team": team["TeamIdentity"],
             "Total Score": team["TotalScore"],
-            "Total Target": team["TotalTarget"],
-            "Performance %": team["PerformancePercentage"],
+            "Total Target": team["TotalTarget"] or "—",
+            "Performance %": (
+                round(team["PerformancePercentage"], 1)
+                if team["PerformancePercentage"] is not None else "—"
+            ),
         })
     st.dataframe(summary, width="stretch", hide_index=True)
     for team in snapshot["Teams"]:
