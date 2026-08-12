@@ -97,18 +97,10 @@ def test_recovery_returns_a_valid_new_session_for_the_same_team():
     assert runtime.calls[0][1] == "rpc/exos_v2_recover_team_access"
 
 
-def test_checkpoint_submission_accepts_text_activity_id_and_bootstraps_captain_identity():
+def test_checkpoint_submission_uses_explicit_race_captain_contract_without_standard_join():
     token = str(uuid.uuid4())
-    participant_id = str(uuid.uuid4())
     submission_id = str(uuid.uuid4())
-    runtime = _Runtime([
-        [{"event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F", "team_id": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F"}],
-        [],
-        [{"join_code": "RACE4CF0CE"}],
-        {"ParticipantID": participant_id, "TeamID": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F"},
-        {"submission_id": submission_id},
-        {},
-    ])
+    runtime = _Runtime([{"SubmissionID": submission_id, "EventID": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F", "TeamID": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F", "Status": "SUBMITTED"}])
     with _staging_env():
         result = FormulaRaceCoreV2StagingAdapter(runtime).formula_race_submit_checkpoint(
             token,
@@ -117,10 +109,9 @@ def test_checkpoint_submission_accepts_text_activity_id_and_bootstraps_captain_i
             "checkpoint proof",
             "",
             "submission-key",
-        )
+    )
     assert result["SubmissionID"] == submission_id
-    assert runtime.calls[3][1] == "rpc/exos_v2_join_event_v2"
-    assert runtime.calls[4][2]["activity_id"] == "CORE-V2-RACE-UAT-CP-01-4CF0CEAF5F"
+    assert runtime.calls[0][1] == "rpc/exos_v2_formula_race_submit_checkpoint"
 
 
 def test_recovery_sql_deactivates_old_session_and_records_the_takeover():

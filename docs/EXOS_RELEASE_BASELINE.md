@@ -54,6 +54,10 @@ currently present or healthy in any database:
   depends on the `race_results_v2` table from 020.
 - `024_exos_core_v2_team_access_recovery.sql` — Captain cross-device team access
   recovery; depends on 022. It is not a Standard participant recovery migration.
+- `027_formula_race_core_v2_atomic_operations.sql` — R.A.C.E.-only function
+  patch for explicit Captain technical actors, idempotent checkpoint approval,
+  atomic purchases, and deterministic final-result locking; depends on 020,
+  022, 023, and 024. It does not alter the frozen Standard runtime.
 
 ### Rollback, verification, and diagnostics
 

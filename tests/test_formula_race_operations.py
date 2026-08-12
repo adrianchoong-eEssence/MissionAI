@@ -17,10 +17,10 @@ def test_marketplace_prevents_overspend_negative_stock_and_bad_quantity():
 
 def test_final_ranking_and_tie_break_are_deterministic():
     teams=[{"TeamID":"T2","TeamName":"Bolt"},{"TeamID":"T1","TeamName":"Apex"}]
-    awards=[{"TeamID":"T1","Amount":10},{"TeamID":"T2","Amount":10}]
-    rows=final_standings(teams,awards,[],[])
+    rows=final_standings(teams,[],[],[{"TeamID":"T2","time_ms":1000,"penalty_ms":50,"verified":True},{"TeamID":"T1","time_ms":1000,"penalty_ms":50,"verified":True}])
     assert [row["TeamName"] for row in rows]==["Apex","Bolt"]
     assert [row["Rank"] for row in rows]==[1,2]
+    assert [row["AdjustedRaceTimeMs"] for row in rows]==[1050,1050]
 
 def test_build_status_vocabulary_is_locked():
     assert BUILD_STATUSES==("Not Started","Collecting Parts","Building","Painting","Ready to Race","Completed")

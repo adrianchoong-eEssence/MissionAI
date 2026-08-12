@@ -355,8 +355,8 @@ def _team_rows(snapshot, limit=None):
         c1.markdown(f"<span class='rank'>{t.rank:02}</span>", unsafe_allow_html=True)
         connection = "🟢 CONNECTED" if t.connected else "⚪ NOT CONNECTED"
         c2.markdown(f"<div><b>{t.name.upper()}</b> <span class='muted'>· {t.country}</span><br><small>{connection}</small><div class='bar'><i style='width:{t.build}%'></i></div></div>", unsafe_allow_html=True)
-        c3.metric("Score", t.score)
-        c4.metric("Credits", t.balance)
+        c3.metric("Championship score", t.score)
+        c4.metric("Wallet", t.balance)
 
 
 def overview(s):
@@ -378,7 +378,8 @@ def overview(s):
     c1,c2=st.columns(2)
     with c1:
         st.subheader("Review Queue")
-        for x in s.submissions[:2]: st.markdown(f"<div class='race-card'><h3>{x.checkpoint}</h3><p>{x.team_id} · {x.evidence} · {x.submitted_at}</p><span class='accent'>{x.status}</span></div>",unsafe_allow_html=True)
+        identities = {team.id: team.name for team in s.teams}
+        for x in s.submissions[:2]: st.markdown(f"<div class='race-card'><h3>{x.checkpoint}</h3><p>{identities.get(x.team_id, x.team_id)} · {x.evidence} · {x.submitted_at}</p><span class='accent'>{x.status}</span></div>",unsafe_allow_html=True)
     with c2:
         st.subheader("System & Stock")
         for n,q in s.stock.items(): st.progress(min(q/70,1),text=f"{n} · {q} available")
@@ -442,9 +443,10 @@ def checkpoints(s):
 
 def reviews(s, control=None):
     _title("Submission and Award Pipeline", "RACE Review Queue", "Approve through the canonical review and CreditTransaction pipeline.")
+    team_identity={team.id:team.name for team in s.teams}
     for x in s.submissions:
         with st.container(border=True):
-            c1,c2=st.columns([4,1]); c1.markdown(f"### {x.checkpoint}\n{x.team_id} · {x.evidence} · submitted {x.submitted_at}"); c2.markdown(f"**{x.status}**")
+            c1,c2=st.columns([4,1]); c1.markdown(f"### {x.checkpoint}\n{team_identity.get(x.team_id,x.team_id)} · {x.evidence} · submitted {x.submitted_at}"); c2.markdown(f"**{x.status}**")
             actor=st.text_input("Facilitator identity",key=f"review_actor_{x.id}") if control else ""
             notes=st.text_input("Notes / rejection reason",key=f"review_notes_{x.id}") if control else ""
             pending=x.status.upper() in {"PENDING","PENDING_REVIEW","SUBMITTED"}
@@ -520,7 +522,7 @@ def drag_results(s, control=None):
     rows=[]
     for i,t in enumerate(s.teams):
         live=next((r for r in live_rows if str(r.get("team_id",""))==t.id),{})
-        rows.append({"Pos":i+1,"Team":t.name,"Time ms":live.get("finish_time_ms","—"),"Penalty ms":live.get("penalty_ms",0),"Bonus":live.get("bonus_credits",0),"Verified":live.get("verified",False)})
+        rows.append({"Pos":live.get("position",i+1),"Team":t.name,"Time ms":live.get("time_ms",live.get("finish_time_ms","—")),"Penalty ms":live.get("penalty_ms",0),"Bonus":live.get("bonus_credits",0),"Verified":live.get("verified",False),"Locked":live.get("locked",False)})
     st.dataframe(rows,width="stretch",hide_index=True)
     if not control: st.markdown("<div class='race-card'><h3>Fastest Lap</h3><p>Velocity · 12.18 seconds</p><span class='accent'>+25 BONUS POINTS</span></div>",unsafe_allow_html=True)
     if control:
@@ -528,6 +530,8 @@ def drag_results(s, control=None):
         actor=st.text_input("Facilitator identity",key="race_result_actor");reason=st.text_input("Result or correction reason",key="race_result_reason")
         if st.button("Save Race Result",disabled=not actor or not reason,width="stretch"):
             selected=next(t for t in s.teams if t.name==team);control.save_race_result(s.event_id,selected.id,time_ms,penalty,bonus,verified,reason,actor);st.success("Race result saved with audit history.")
+        if st.button("LOCK FINAL RESULTS",type="primary",disabled=not actor or not reason,width="stretch"):
+            control.lock_race_results(s.event_id,actor,reason);st.success("Final race positions are locked.");st.rerun()
 
 
 def build_status(s, control=None):

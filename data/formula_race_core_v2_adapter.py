@@ -572,22 +572,45 @@ class FormulaRaceCoreV2StagingAdapter:
         scores = self._get("score_transactions_v2", {"event_id": f"eq.{str(event_id).strip()}", "select": "team_id,score_delta,reason,created_at"})
 
         balances: dict[str, float] = defaultdict(float)
+        credits_earned: dict[str, float] = defaultdict(float)
+        credits_spent: dict[str, float] = defaultdict(float)
         for row in tx_rows:
             team_id = str(row.get("team_id", ""))
             try:
-                balances[team_id] += float(row.get("amount", 0) or 0)
+                amount = float(row.get("amount", 0) or 0)
+                balances[team_id] += amount
+                if amount > 0:
+                    credits_earned[team_id] += amount
+                elif amount < 0:
+                    credits_spent[team_id] += -amount
             except (TypeError, ValueError):
                 pass
+
+        championship_scores: dict[str, float] = defaultdict(float)
+        for row in scores:
+            team_id = str(row.get("team_id", ""))
+            try:
+                championship_scores[team_id] += float(row.get("score_delta", 0) or 0)
+            except (TypeError, ValueError):
+                pass
+        team_ids = {str(row.get("TeamID", "")) for row in self.get_runtime_teams(event_id)}
+        team_ids = sorted((team_ids | set(balances) | set(championship_scores)) - {""})
+        ranked_team_ids = sorted(team_ids, key=lambda team_id: (-championship_scores[team_id], team_id))
+        live_ranks = {team_id: index for index, team_id in enumerate(ranked_team_ids, start=1)}
 
         leaderboard = [
             {
                 "TeamID": team_id,
                 "teamId": team_id,
-                "Score": amount,
-                "AvailableBalance": amount,
-                "Rank": idx + 1,
+                "ChampionshipScore": championship_scores[team_id],
+                "Score": championship_scores[team_id],
+                "CreditsEarned": credits_earned[team_id],
+                "CreditsSpent": credits_spent[team_id],
+                "WalletBalance": balances[team_id],
+                "AvailableBalance": balances[team_id],
+                "Rank": live_ranks[team_id],
             }
-            for idx, (team_id, amount) in enumerate(sorted(balances.items(), key=lambda item: (-item[1], item[0])))
+            for team_id in ranked_team_ids
         ]
 
         return {
@@ -609,6 +632,8 @@ class FormulaRaceCoreV2StagingAdapter:
                 {
                     "team_id": team_id,
                     "teamId": team_id,
+                    "credits_earned": credits_earned[team_id],
+                    "credits_spent": credits_spent[team_id],
                     "available_balance": amount,
                 }
                 for team_id, amount in sorted(balances.items(), key=lambda item: item[0])
@@ -750,7 +775,7 @@ class FormulaRaceCoreV2StagingAdapter:
                     status = "APPROVED"
                 elif mapped in {"REVIEW", "UNDER_REVIEW"}:
                     status = "UNDER REVIEW"
-                elif mapped == "LIVE":
+                elif mapped in {"LIVE", "LAUNCH"}:
                     status = "ACTIVE"
                 else:
                     status = mapped
@@ -812,12 +837,22 @@ class FormulaRaceCoreV2StagingAdapter:
 
         session_status = "LIVE" if any(row.get("Status") in {"LIVE", "OPEN", "ACTIVE"} for row in checkpoint_state) else "READY"
 
+        report = self.get_canonical_transaction_report(event_id)
+        standing = next((entry for entry in report.get("Leaderboard", []) if str(entry.get("TeamID", "")) == team_id), {})
+        team = next((entry for entry in self.get_runtime_teams(event_id) if str(entry.get("TeamID", "")) == team_id), {})
+        wallet = self._wallet_payload(event_id, team_id)
         return {
             "EventID": event_id,
             "TeamID": team_id,
+            "TeamIdentity": str(team.get("TeamIdentity", team.get("TeamName", team_id))),
+            "ChampionshipScore": standing.get("ChampionshipScore", 0),
+            "ChampionshipRank": standing.get("Rank", 0),
+            "CreditsEarned": wallet.get("CreditsEarned", 0),
+            "CreditsSpent": wallet.get("CreditsSpent", 0),
             "Checkpoints": checkpoint_state,
+            "CurrentCheckpoint": next((checkpoint for checkpoint in checkpoint_state if str(checkpoint.get("Status", "")).upper() not in {"APPROVED", "SUBMITTED", "UNDER REVIEW"}), checkpoint_state[0] if checkpoint_state else {}),
             "CheckpointRuntime": {"status": session_status},
-            "Wallet": self._wallet_payload(event_id, team_id),
+            "Wallet": wallet,
             "BuildStatus": self._build_status_payload(event_id, team_id),
             "Marketplace": self._marketplace_payload(event_id, team_id).get("items", []),
             "Purchases": self._marketplace_payload(event_id, team_id).get("purchases", []),
@@ -850,350 +885,6 @@ class FormulaRaceCoreV2StagingAdapter:
         return {"ok": True}
 
     # ---------------------------
-    # Submissions / review / rewards
-    # ---------------------------
-    def _team_participant(self, event_id: str, team_id: str) -> str | None:
-        _trace_uuid_context("_team_participant.request", "participants_v2", "event_id", event_id)
-        _trace_uuid_context("_team_participant.request", "participants_v2", "team_id", team_id)
-        rows = self._get(
-            "participants_v2",
-            {
-                "event_id": f"eq.{event_id}",
-                "team_id": f"eq.{team_id}",
-                "select": "participant_id",
-                "limit": "1",
-            },
-        )
-        participant_id = _normalise_uuid_value(
-            rows[0].get("participant_id") if rows else None
-        )
-        _trace_uuid_context("_team_participant.response", "participants_v2", "participant_id", participant_id)
-        return participant_id or None
-
-    def _ensure_team_participant(self, event_id: str, team_id: str) -> str:
-        participant_id = self._team_participant(event_id, team_id)
-        if participant_id:
-            return participant_id
-
-        event_rows = self._get(
-            "events_v2",
-            {
-                "event_id": f"eq.{str(event_id).strip()}",
-                "select": "join_code",
-                "limit": "1",
-            },
-        )
-        join_code = str(event_rows[0].get("join_code", "")).strip() if event_rows else ""
-        if not join_code:
-            raise RuntimeError("Captain participant identity could not be established.")
-
-        identity = self._rpc(
-            "exos_v2_join_event_v2",
-            {
-                "p_join_code": join_code,
-                "p_participant_name": f"Captain {team_id}",
-                "p_device_id": f"TEAM_ACCESS:{team_id}",
-                "p_requested_team_id": str(team_id).strip(),
-            },
-            admin=False,
-        ) or {}
-        participant_id = _normalise_uuid_value(
-            identity.get("ParticipantID", identity.get("participant_id", ""))
-        )
-        if (
-            not participant_id
-            or str(identity.get("TeamID", identity.get("team_id", ""))).strip()
-            != str(team_id).strip()
-        ):
-            raise RuntimeError("Captain participant identity could not be established.")
-        return participant_id
-
-    def _submission_event_id(self, submission_id: str) -> str:
-        submission_id = _require_uuid(submission_id, "submission_id")
-        _trace_uuid_context("_submission_event_id", "submissions_v2", "submission_id", submission_id)
-        rows = self._get("submissions_v2", {"submission_id": f"eq.{submission_id}", "select": "event_id", "limit": "1"})
-        return str(rows[0].get("event_id", "")) if rows else ""
-
-    def _submission_team_id(self, submission_id: str) -> str:
-        submission_id = _require_uuid(submission_id, "submission_id")
-        _trace_uuid_context("_submission_team_id", "submissions_v2", "submission_id", submission_id)
-        rows = self._get("submissions_v2", {"submission_id": f"eq.{submission_id}", "select": "team_id", "limit": "1"})
-        return str(rows[0].get("team_id", "")) if rows else ""
-
-    def formula_race_submit_checkpoint(
-        self,
-        session_token: str,
-        device_id: str,
-        activity_id: str,
-        text_response: str = "",
-        storage_reference: str = "",
-        idempotency_key: str = "",
-    ) -> dict[str, Any]:
-        token = _require_uuid(session_token, "session_token")
-        _trace_uuid_context("formula_race_submit_checkpoint.request", "team_access_sessions_v2", "session_token", token)
-        _trace_uuid_context("formula_race_submit_checkpoint.request", "team_access_sessions_v2", "device_id", device_id)
-        activity_id = str(activity_id or "").strip()
-        if not activity_id:
-            raise RuntimeError("Invalid activity id.")
-        rows = self._get(
-            "team_access_sessions_v2",
-            {
-                "session_token": f"eq.{token}",
-                "device_id": f"eq.{str(device_id).strip()}",
-                "is_active": "eq.true",
-                "select": "event_id,team_id",
-                "limit": "1",
-            },
-        )
-        if not rows:
-            raise RuntimeError("Invalid captain session.")
-        event_id = str(rows[0].get("event_id", ""))
-        team_id = str(rows[0].get("team_id", ""))
-        participant_id = self._ensure_team_participant(event_id, team_id)
-
-        submission_key = str(idempotency_key or f"{event_id}:{team_id}:{activity_id}:{_now_iso()}")
-        _trace_uuid_context("formula_race_submit_checkpoint.payload", "participants_v2", "participant_id", participant_id)
-        submission = self._post(
-            "submissions_v2",
-            {
-                "event_id": event_id,
-                "team_id": team_id,
-                "participant_id": participant_id,
-                "activity_id": activity_id,
-                "submission_key": submission_key,
-                "submission_status": "SUBMITTED",
-                "submission_payload": {
-                    "text_response": str(text_response),
-                    "storage_reference": str(storage_reference),
-                },
-            },
-        )
-        if not submission:
-            # Supabase may return null if not using return=representation
-            submission_lookup = self._get("submissions_v2", {"submission_key": f"eq.{submission_key}", "select": "submission_id", "limit": "1"})
-            if not submission_lookup:
-                raise RuntimeError("Submission write failed.")
-            submission_id = str(submission_lookup[0].get("submission_id"))
-        else:
-            if isinstance(submission, list):
-                submission_id = str(submission[0].get("submission_id", ""))
-            else:
-                submission_id = str(submission.get("submission_id", ""))
-
-        evidence_payload = {
-            "text": str(text_response).strip(),
-            "uri": str(storage_reference).strip(),
-        }
-        if storage_reference:
-            evidence_payload["evidence_type"] = "PHOTO"
-        else:
-            evidence_payload["evidence_type"] = "TEXT"
-
-        self._post(
-            "submission_evidence_v2",
-            {
-                "submission_id": submission_id,
-                "evidence_type": "PHOTO" if storage_reference else "TEXT",
-                "evidence_uri": str(storage_reference),
-                "evidence_payload": evidence_payload,
-                "captured_by": "captain",
-                "captured_at": _now_iso(),
-            },
-        )
-
-        return {"SubmissionID": submission_id, "EventID": event_id, "TeamID": team_id, "Status": "SUBMITTED"}
-
-    def formula_race_purchase(self, session_token: str, device_id: str, item_id: str, quantity: int = 1, idempotency_key: str = "") -> dict[str, Any]:
-        token = _require_uuid(session_token, "session_token")
-        _trace_uuid_context("formula_race_purchase.request", "team_access_sessions_v2", "session_token", token)
-        _trace_uuid_context("formula_race_purchase.request", "team_access_sessions_v2", "device_id", device_id)
-        item_id = str(item_id or "").strip()
-        if not item_id:
-            raise RuntimeError("Invalid marketplace item id.")
-        item_filter = f"eq.{item_id}"
-        rows = self._get(
-            "team_access_sessions_v2",
-            {
-                "session_token": f"eq.{token}",
-                "device_id": f"eq.{str(device_id).strip()}",
-                "is_active": "eq.true",
-                "select": "event_id,team_id",
-                "limit": "1",
-            },
-        )
-        if not rows:
-            raise RuntimeError("Invalid captain session.")
-
-        event_id = str(rows[0].get("event_id", ""))
-        team_id = str(rows[0].get("team_id", ""))
-        qty = int(quantity or 0)
-        if qty <= 0:
-            raise RuntimeError("Quantity must be at least 1.")
-
-        item_rows = self._get(
-            "marketplace_items_v2",
-            {
-                "event_id": f"eq.{event_id}",
-                "item_id": item_filter,
-                "select": "item_id,item_name,unit_cost_credits,stock_limit,is_active",
-                "limit": "1",
-            },
-        )
-        if not item_rows:
-            raise RuntimeError("Invalid marketplace item.")
-        item = item_rows[0]
-        if not item.get("is_active", True):
-            raise RuntimeError("Marketplace item is not active.")
-
-        cost = int(item.get("unit_cost_credits", 0) or 0) * qty
-        existing = self._get(
-            "marketplace_transactions_v2",
-            {
-                "event_id": f"eq.{event_id}",
-                "team_id": f"eq.{team_id}",
-                "item_id": item_filter,
-                "select": "quantity",
-            },
-        )
-        purchased = sum(int(x.get("quantity", 0) or 0) for x in existing)
-        stock_limit = item.get("stock_limit")
-        if stock_limit is not None and purchased + qty > int(stock_limit):
-            raise RuntimeError("Insufficient stock.")
-
-        balance = self._wallet_balance(event_id, team_id)
-        if int(balance) < cost:
-            raise RuntimeError("Insufficient credits.")
-
-        participant_id = self._ensure_team_participant(event_id, team_id)
-        _trace_uuid_context("formula_race_purchase.participant", "participants_v2", "participant_id", participant_id)
-        tx_key = str(idempotency_key or f"{event_id}:{team_id}:{item_id}:{_now_iso()}")
-        participant_id = _normalise_uuid_value(participant_id)
-        if not participant_id:
-            raise RuntimeError("Invalid participant id.")
-        credit = self._rpc(
-            "exos_v2_ledger_credit",
-            {
-                "p_event_id": event_id,
-                "p_team_id": team_id,
-                "p_participant_id": participant_id,
-                "p_transaction_type": "PURCHASE",
-                "p_amount": -int(cost),
-                "p_reason": str(item.get("item_name", "Marketplace purchase")),
-                "p_idempotency_key": tx_key,
-            },
-        )
-        credit_txn_id = ""
-        if isinstance(credit, dict):
-            credit_txn_id = _normalise_uuid_value(
-                credit.get("credit_transaction_id", "")
-            )
-        elif isinstance(credit, str):
-            credit_txn_id = _normalise_uuid_value(credit)
-        if not credit_txn_id:
-            raise RuntimeError("Credit transaction could not be recorded.")
-
-        purchase = self._post(
-            "marketplace_transactions_v2",
-            {
-                "event_id": event_id,
-                "team_id": team_id,
-                "item_id": item_filter.replace("eq.", "", 1),
-                "credit_transaction_id": credit_txn_id,
-                "quantity": qty,
-                "amount_paid": int(cost),
-                "status": "COMPLETED",
-                "idempotency_key": f"marketplace-{tx_key}",
-            },
-        )
-
-        if not purchase:
-            return {"PurchaseResult": "FAILED", "Balance": balance}
-        return {"PurchaseResult": "SUCCESS", "Balance": self._wallet_balance(event_id, team_id)}
-
-    def formula_race_review_checkpoint(self, submission_id: str, decision: str, reviewer_id: str, notes: str = "", reason: str = "", idempotency_key: str = "") -> dict[str, Any]:
-        mapped = str(decision or "").strip().upper()
-        submission_id = _require_uuid(submission_id, "submission_id")
-        _trace_uuid_context("formula_race_review_checkpoint.request", "submissions_v2", "submission_id", submission_id)
-        _trace_uuid_context("formula_race_review_checkpoint.request", "reviews_v2", "reviewer_id", reviewer_id)
-        if mapped in {"APPROVE", "APPROVED"}:
-            decision_value = "APPROVE"
-            score_points = 0
-        elif mapped in {"REJECT", "REQUEST_RESUBMISSION", "RESUBMISSION"}:
-            decision_value = "REJECT"
-            score_points = 0
-        else:
-            decision_value = "PENDING"
-            score_points = 0
-
-        existing = self._get(
-            "reviews_v2",
-            {
-                "submission_id": f"eq.{submission_id}",
-                "reviewer": f"eq.{str(reviewer_id).strip()}",
-                "select": "review_id",
-                "limit": "1",
-            },
-        )
-
-        payload = {
-            "event_id": self._submission_event_id(submission_id),
-            "submission_id": submission_id,
-            "reviewer": str(reviewer_id or "facilitator"),
-            "decision": decision_value,
-            "score_points": score_points,
-            "rationale": str(reason or notes or ""),
-            "reviewed_at": _now_iso(),
-        }
-        review_id = ""
-
-        if existing:
-            review_id = str(existing[0].get("review_id", ""))
-            _trace_uuid_context("formula_race_review_checkpoint.patch", "reviews_v2", "review_id", review_id)
-            updated = self._patch(
-                "reviews_v2",
-                {"review_id": f"eq.{review_id}"},
-                payload,
-            )
-            review_id = str(_as_dict(updated).get("review_id", review_id))
-        else:
-            created = self._post("reviews_v2", payload)
-            if isinstance(created, list):
-                created = created[0] if created else {}
-            if isinstance(created, dict):
-                review_id = str(created.get("review_id", ""))
-
-        if decision_value == "APPROVE":
-            event_id = str(self._submission_event_id(submission_id))
-            team_id = str(self._submission_team_id(submission_id))
-            if event_id and team_id:
-                _trace_uuid_context("formula_race_review_checkpoint.rpc", "exos_v2_ledger_score", "p_submission_id", submission_id)
-                self._rpc(
-                    "exos_v2_ledger_score",
-                    {
-                        "p_event_id": event_id,
-                        "p_team_id": team_id,
-                        "p_submission_id": submission_id,
-                        "p_amount": 10,
-                        "p_reason": "Checkpoint approved",
-                        "p_scoring_mode": "TEAM_COMPETITIVE",
-                        "p_idempotency_key": str(idempotency_key or f"score:{submission_id}:{_now_iso()}"),
-                    },
-                )
-                self._patch(
-                    "submissions_v2",
-                    {"submission_id": f"eq.{submission_id}"},
-                    {"submission_status": "APPROVED", "reviewed_at": _now_iso(), "reviewed_by": str(reviewer_id or "facilitator")},
-                )
-        else:
-            self._patch(
-                "submissions_v2",
-                {"submission_id": f"eq.{submission_id}"},
-                {"submission_status": "REJECTED", "reviewed_at": _now_iso(), "reviewed_by": str(reviewer_id or "facilitator")},
-            )
-
-        return {"ReviewID": review_id, "SubmissionID": submission_id}
-
-    # ---------------------------
     # Control-plane writes from Control Runtime
     # ---------------------------
     def set_formula_race_checkpoint_runtime(self, event_id: str, module_id: str, action: str, actor: str):
@@ -1207,13 +898,11 @@ class FormulaRaceCoreV2StagingAdapter:
 
         for team in team_rows:
             team_id = str(team.get("TeamID", ""))
-            participants = self._get(
-                "participants_v2",
-                {"event_id": f"eq.{str(event_id)}", "team_id": f"eq.{team_id}", "select": "participant_id", "limit": "1"},
-            )
-            if not participants:
-                continue
-            participant_id = str(participants[0].get("participant_id"))
+            captain_actor = self._rpc(
+                "exos_v2_formula_race_captain_actor",
+                {"p_event_id": str(event_id), "p_team_id": team_id},
+            ) or {}
+            participant_id = _require_uuid(captain_actor.get("ParticipantID", captain_actor.get("participant_id", captain_actor)), "race captain technical actor")
             _trace_uuid_context("set_formula_race_checkpoint_runtime.participant", "participants_v2", "participant_id", participant_id)
 
             for row in activity_rows:
@@ -1343,10 +1032,12 @@ class FormulaRaceCoreV2StagingAdapter:
                 "team_id": f"eq.{str(team_id)}",
                 "activity_id": f"eq.{activity_id}",
                 "checkpoint": "eq.Race Final",
-                "select": "race_result_id",
+                "select": "race_result_id,locked",
                 "limit": "1",
             },
         )
+        if existing and bool(existing[0].get("locked", False)):
+            raise RuntimeError("Race result is locked and immutable until explicit unlock.")
         if existing:
             return self._patch("race_results_v2", {"race_result_id": f"eq.{existing[0].get('race_result_id')}"}, payload) or {}
         return self._post("race_results_v2", payload) or {}
@@ -1390,6 +1081,60 @@ class FormulaRaceCoreV2StagingAdapter:
                 }
             )
         return out
+
+    # Queue 2 authoritative R.A.C.E. mutation boundary. These definitions
+    # intentionally supersede the compatibility implementations above.
+    def formula_race_submit_checkpoint(self, session_token: str, device_id: str, activity_id: str, text_response: str = "", storage_reference: str = "", idempotency_key: str = "") -> dict[str, Any]:
+        token = _require_uuid(session_token, "session_token")
+        if not str(activity_id).strip():
+            raise RuntimeError("Invalid activity id.")
+        return self._rpc(
+            "exos_v2_formula_race_submit_checkpoint",
+            {
+                "p_session_token": token,
+                "p_device_id": str(device_id).strip(),
+                "p_activity_id": str(activity_id).strip(),
+                "p_text_response": str(text_response),
+                "p_storage_reference": str(storage_reference),
+                "p_idempotency_key": str(idempotency_key).strip(),
+            },
+        ) or {}
+
+    def formula_race_purchase(self, session_token: str, device_id: str, item_id: str, quantity: int = 1, idempotency_key: str = "") -> dict[str, Any]:
+        token = _require_uuid(session_token, "session_token")
+        if not str(item_id).strip():
+            raise RuntimeError("Invalid marketplace item id.")
+        if not str(idempotency_key).strip():
+            raise RuntimeError("A stable purchase idempotency key is required.")
+        return self._rpc(
+            "exos_v2_formula_race_purchase",
+            {
+                "p_session_token": token,
+                "p_device_id": str(device_id).strip(),
+                "p_item_id": str(item_id).strip(),
+                "p_quantity": int(quantity or 0),
+                "p_idempotency_key": str(idempotency_key).strip(),
+            },
+        ) or {}
+
+    def formula_race_review_checkpoint(self, submission_id: str, decision: str, reviewer_id: str, notes: str = "", reason: str = "", idempotency_key: str = "") -> dict[str, Any]:
+        return self._rpc(
+            "exos_v2_formula_race_review_checkpoint",
+            {
+                "p_submission_id": _require_uuid(submission_id, "submission_id"),
+                "p_decision": str(decision).strip().upper(),
+                "p_reviewer": str(reviewer_id).strip(),
+                "p_notes": str(notes),
+                "p_reason": str(reason),
+                "p_idempotency_key": str(idempotency_key).strip(),
+            },
+        ) or {}
+
+    def lock_formula_race_results(self, event_id: str, actor: str, reason: str) -> dict[str, Any]:
+        return self._rpc(
+            "exos_v2_formula_race_lock_final_results",
+            {"p_event_id": str(event_id), "p_actor": str(actor).strip(), "p_reason": str(reason).strip()},
+        ) or {}
 
     # ---------------------------
     # Internal helpers
@@ -1476,7 +1221,13 @@ class FormulaRaceCoreV2StagingAdapter:
         }
 
     def _wallet_payload(self, event_id: str, team_id: str) -> dict[str, Any]:
-        return {"Balance": self._wallet_balance(event_id, team_id)}
+        rows = self._get(
+            "credit_transactions_v2",
+            {"event_id": f"eq.{str(event_id)}", "team_id": f"eq.{str(team_id)}", "select": "amount"},
+        )
+        earned = sum(_safe_int(row.get("amount", 0)) for row in rows if _safe_int(row.get("amount", 0)) > 0)
+        spent = sum(-_safe_int(row.get("amount", 0)) for row in rows if _safe_int(row.get("amount", 0)) < 0)
+        return {"CreditsEarned": earned, "CreditsSpent": spent, "Balance": earned - spent}
 
     def _marketplace_payload(self, event_id: str, team_id: str) -> dict[str, Any]:
         item_rows = self._get("marketplace_items_v2", {"event_id": f"eq.{str(event_id)}", "select": "item_id,item_name,unit_cost_credits,stock_limit,is_active"})

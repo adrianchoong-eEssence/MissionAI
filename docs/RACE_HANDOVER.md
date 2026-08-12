@@ -65,6 +65,7 @@ patches:
 - 022 Core-v2 team/Captain access
 - 023 Core-v2 race-results locking
 - 024 Core-v2 Captain team-access recovery
+- 027 Core-v2 R.A.C.E. atomic operations (depends on 020, 022, 023, and 024)
 
 020’s rollback is not a R.A.C.E. forward migration. The older 015–019 Formula
 R.A.C.E. migration series, its rollbacks, seeds, and verification scripts have
@@ -98,6 +99,23 @@ Never collapse R.A.C.E. championship score, credits earned, and wallet balance
 into one Standard score/credit field. Never apply Standard participant recovery
 or Standard programme scoring assumptions to Captain access without an explicit
 R.A.C.E. design and test.
+
+## Queue 2 canonical R.A.C.E. contracts
+
+- Championship Score is the event/team sum of `score_transactions_v2.score_delta`.
+- Credits Earned is the positive event/team sum of `credit_transactions_v2.amount`.
+  Credits Spent is the absolute negative sum; Wallet Balance is their signed sum.
+- A checkpoint approval reads separate `activity_payload.score_award` or existing
+  `max_score`, and `credit_award` or existing `credits`, with stable submission
+  idempotency keys so the values need not be equal.
+- `participants_v2` may contain one labelled `RACE_CAPTAIN_TECHNICAL_ACTOR` per
+  event/team only to satisfy Core-v2 activity and submission foreign keys. It is
+  not Standard participant registration; Captain authority remains Team PIN plus
+  team-access session.
+- Live Championship Rank is Championship Score descending with TeamID ascending.
+  Final locked rank is verified `time_ms + penalty_ms`, then TeamID ascending,
+  persisted in `race_results_v2.ranking_position`. Current configuration does
+  not make judging or bonus credits final-rank inputs.
 
 ## Legacy shell warning
 

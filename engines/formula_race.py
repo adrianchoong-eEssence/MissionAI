@@ -19,20 +19,22 @@ def wallet_projection(transactions,event_id,team_id):
     return {"Earned":earned,"Spent":spent,"Balance":earned-spent,"Transactions":rows}
 
 def final_standings(teams,awards,judging,race_results,config=None):
-    config=dict(config or {})
-    by_team=defaultdict(lambda:{"DayOneCredits":0.0,"BuildScore":0.0,"PhotoScore":0.0,"RaceScore":0.0})
-    for row in awards:
-        team=str(row.get("TeamID",row.get("team_id","")));kind=str(row.get("Component",row.get("component","DayOneCredits")))
-        if kind in by_team[team]:by_team[team][kind]+=float(row.get("Amount",row.get("amount",0)) or 0)
-    for row in judging:by_team[str(row.get("TeamID",row.get("team_id","")))]["BuildScore"]=float(row.get("Total",row.get("total_score",0)) or 0)
-    for row in race_results:by_team[str(row.get("TeamID",row.get("team_id","")))]["RaceScore"]=float(row.get("BonusCredits",row.get("bonus_credits",0)) or 0)
-    result=[]
+    """Project verified final R.A.C.E. positions from adjusted race time.
+
+    The committed R.A.C.E. config specifies race-time ascending with stable
+    TeamID tie-breaking. Judging and bonus credits remain persisted but are not
+    configured final-rank inputs, so this function does not invent a formula.
+    """
+    by_team={str(row.get("TeamID",row.get("team_id",""))):row for row in race_results if bool(row.get("verified",row.get("Verified",False)))}
+    rows=[]
     for team in teams:
-        team_id=str(team.get("TeamID",team.get("id","")));parts=by_team[team_id]
-        total=sum(parts.values());result.append({"TeamID":team_id,"TeamName":team.get("TeamName",team.get("name",team_id)),**parts,"OverallTotal":round(total,2)})
-    result.sort(key=lambda row:(-row["OverallTotal"],row["TeamName"]))
-    for index,row in enumerate(result,1):row["Rank"]=index
-    return result
+        team_id=str(team.get("TeamID",team.get("id","")));result=by_team.get(team_id,{})
+        time_ms=result.get("time_ms",result.get("finish_time_ms"));penalty=int(result.get("penalty_ms",0) or 0)
+        adjusted=None if time_ms is None else int(time_ms or 0)+penalty
+        rows.append({"TeamID":team_id,"TeamName":team.get("TeamName",team.get("name",team_id)),"RaceTimeMs":time_ms,"PenaltyMs":penalty,"AdjustedRaceTimeMs":adjusted,"BonusCredits":result.get("bonus_credits",result.get("bonus",0)),"Judging":"informational"})
+    rows.sort(key=lambda row:(row["AdjustedRaceTimeMs"] is None,row["AdjustedRaceTimeMs"] or 0,row["TeamID"]))
+    for index,row in enumerate(rows,1):row["Rank"]=index
+    return rows
 
 def validate_purchase(balance,stock,price,quantity):
     quantity=int(quantity)

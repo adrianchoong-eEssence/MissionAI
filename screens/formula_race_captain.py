@@ -84,6 +84,22 @@ def _device_id():
     st.query_params["captain_device"]=value
     return value
 
+def _submission_idempotency_key(event_id: str, team_id: str, activity_id: str) -> str:
+    key_name=f"race_submission_key:{event_id}:{team_id}:{activity_id}"
+    key=str(st.session_state.get(key_name,""))
+    if not key:
+        key=f"race-captain-submit:{event_id}:{team_id}:{activity_id}:{uuid.uuid4()}"
+        st.session_state[key_name]=key
+    return key
+
+def _purchase_idempotency_key(event_id: str, team_id: str, item_id: str, quantity: int) -> str:
+    key_name=f"race_purchase_key:{event_id}:{team_id}:{item_id}:{int(quantity)}"
+    key=str(st.session_state.get(key_name,""))
+    if not key:
+        key=f"race-captain-purchase:{event_id}:{team_id}:{item_id}:{int(quantity)}:{uuid.uuid4()}"
+        st.session_state[key_name]=key
+    return key
+
 def _set_session(payload):
     normalised_session = _normalise_session_payload(payload)
     if not normalised_session:
@@ -241,12 +257,13 @@ def show_formula_race_captain(runtime_override=None):
     ]
     asset=ASSET_ROOT/TEAM_ASSETS.get(name,"")
     if asset.is_file():st.image(str(asset),width=96)
-    st.title(name);st.caption(f"{event_id} · {team_id}")
+    team_identity=str(workspace.get("TeamIdentity",name or "Your Team"))
+    st.title(team_identity);st.caption(event_id)
     checkpoints=list(workspace.get("Checkpoints",[]))
     checkpoint_runtime=dict(workspace.get("CheckpointRuntime",{}))
     approved=sum(str(r.get("Status","")).upper()=="APPROVED" for r in checkpoints)
     wallet=dict(workspace.get("Wallet",{}));build=dict(workspace.get("BuildStatus",{}))
-    a,b,c=st.columns(3);a.metric("RACE Checkpoints",f"{approved} / {len(checkpoints) or 4}");b.metric("Build status",build.get("status","Not Started"));c.metric("Wallet",wallet.get("Balance",0))
+    a,b,c,d,e,f=st.columns(6);a.metric("Championship rank",workspace.get("ChampionshipRank","—"));b.metric("Championship score",workspace.get("ChampionshipScore",0));c.metric("Credits earned",workspace.get("CreditsEarned",wallet.get("CreditsEarned",0)));d.metric("Credits spent",workspace.get("CreditsSpent",wallet.get("CreditsSpent",0)));e.metric("Wallet",wallet.get("Balance",0));f.metric("Build status",build.get("status","Not Started"))
     one,two,three=st.tabs(["RACE Checkpoints","Wallet & Marketplace","Submissions"])
     with one:
         st.markdown("<style>.race-checkpoint{background:#0b1725;border:1px solid #253950;border-left:5px solid #ff5555;border-radius:16px;padding:18px;margin:10px 0;color:#f3f6fa}.race-checkpoint h3{margin:0;color:#fff}.race-checkpoint .credits{color:#ffca3a;font-weight:800}.race-checkpoint .status{letter-spacing:.08em;font-size:.78rem;font-weight:900}</style>",unsafe_allow_html=True)
@@ -267,8 +284,9 @@ def show_formula_race_captain(runtime_override=None):
                             storage_path=f"{event_id}/{team_id}/{checkpoint.get('ActivityID')}/{uuid.uuid4()}-{uploaded.name}"
                             runtime.upload_submission_image(storage_path,uploaded.getvalue(),uploaded.type or "image/jpeg")
                             storage_reference="supabase://exos-submissions/"+storage_path
+                        activity_id=str(checkpoint.get("ActivityID", ""))
                         runtime.formula_race_submit_checkpoint(session.get("SessionToken",""),device,
-                            checkpoint.get("ActivityID",""),answer,storage_reference,str(uuid.uuid4()))
+                            activity_id,answer,storage_reference,_submission_idempotency_key(event_id,team_id,activity_id))
                         st.success("Proof submitted for facilitator review.");st.rerun()
                     except RuntimeDatabaseError as error:st.error(str(error))
                     except RuntimeError as error:st.error(str(error))
@@ -283,8 +301,9 @@ def show_formula_race_captain(runtime_override=None):
                 buy=st.form_submit_button("Confirm Purchase",type="primary",width="stretch")
             if buy:
                 try:
+                    item_id=labels[selected].get("ItemID","")
                     result=runtime.formula_race_purchase(session.get("SessionToken",""),device,
-                        labels[selected].get("ItemID",""),quantity,str(uuid.uuid4()))
+                        item_id,quantity,_purchase_idempotency_key(event_id,team_id,item_id,int(quantity)))
                     st.success(f"Purchase confirmed. Balance: {result.get('Balance',0)} Credits");st.rerun()
                 except RuntimeDatabaseError as error:st.error(str(error))
                 except RuntimeError as error:st.error(str(error))
@@ -292,7 +311,11 @@ def show_formula_race_captain(runtime_override=None):
         if purchases:st.dataframe(purchases,width="stretch",hide_index=True)
     with three:
         if submissions:
-            st.dataframe(submissions,width="stretch",hide_index=True)
+            st.dataframe(
+                [{key: value for key, value in submission.items() if key != "TeamID"} for submission in submissions],
+                width="stretch",
+                hide_index=True,
+            )
         else:
             st.info("No submissions yet for this team.")
     if st.button("Log out",width="stretch"):
