@@ -1,76 +1,94 @@
-# EXOS Standard Core v2 Release Baseline (Frozen)
+# EXOS Standard Core v2 Release Baseline
 
 ## Baseline identity
 
-- Branch: `feature/exos-core-v2`
-- Head commit: `41cb91e91a75a36001daef72e0943e7bc84eb81e`
-- Commit date: `Wed, 12 Aug 2026 17:59:00 +0800`
-- Environment: Standard Core v2 staging (`EXOS_ENV=staging`)
-- State: feature-frozen baseline
+- Frozen Standard runtime commit:
+  `41cb91e91a75a36001daef72e0943e7bc84eb81e`
+- Runtime commit date: 2026-08-12 17:59:00 +0800
+- Branch at freeze: `feature/exos-core-v2`
+- Repository-memory documentation commit: `fe0faf76b9b4fcdd071d5851eebfc93272637fda`
 
-## Staging URLs
+The documentation commit is deliberately separate from the runtime baseline.
+When a checkout has later commits or a dirty working tree, compare it with
+`41cb91e` before describing it as frozen Standard behavior.
 
+## Environment and reference identifiers
+
+- Intended environment: Standard Core v2 staging (`EXOS_ENV=staging`)
 - Admin: https://exos-master2.streamlit.app/
 - Facilitator: https://missionai-faci2.streamlit.app/
 - Participant: https://missionai-parti2.streamlit.app/
-- Projector (event-scoped): `https://missionai-faci2.streamlit.app/?view=projector&event_id=<EVENT_ID>`
+- Projector: `https://missionai-faci2.streamlit.app/?view=projector&event_id=<EVENT_ID>`
 
-## Canonical AIA UAT events
+The following are UAT reference identifiers, not a claim that the events are
+currently present or healthy in any database:
 
-- Upper South  
-  - EventID: `AIA-WE-260810081110-UPPER`  
-  - Join code: `OXO0DT`
-- Lower South  
-  - EventID: `AIA-WE-260810081110-LOWER`  
-  - Join code: `C0OCUS`
+- Upper South: `AIA-WE-260810081110-UPPER` / `OXO0DT`; teams Korea, Japan
+- Lower South: `AIA-WE-260810081110-LOWER` / `C0OCUS`; teams India, Malaysia,
+  Philippines, Thailand
+- R.A.C.E. staging reference:
+  `CORE-V2-RACE-UAT-EVT-4CF0CEAF5F` / `RACE4CF0CE`
 
-## Canonical team identities (snapshot)
+## Core v2 SQL inventory and order
 
-- Upper South teams: `Korea`, `Japan`
-- Lower South teams: `India`, `Malaysia`, `Philippines`, `Thailand`
+### Standard forward migration chain
 
-## Core v2 SQL migrations required at this baseline
+1. `supabase/020_exos_core_v2_schema.sql` — schema foundation and initial Core
+   v2 functions. Clean-room only; it fails if legacy runtime objects exist.
+2. `supabase/021_exos_core_v2_pgcrypto_fix.sql` — function-only patch replacing
+   the join function with explicit `extensions.digest`/`gen_random_uuid`
+   resolution. Depends on 020.
+3. `supabase/025_standard_programme_runtime.sql` — function-only Standard
+   activity launch/state/submit/review contract. Depends on 020 (and the 021
+   corrected join foundation in the release chain). It creates no tables.
+4. `supabase/026_standard_participant_access_recovery.sql` — function-only
+   Standard identity/restore/cross-device recovery patch. Depends on the Core
+   schema and `extensions.digest`; it creates no tables or columns and never
+   changes participant/team assignment.
 
-- `supabase/020_exos_core_v2_schema.sql`
-- `supabase/020_exos_core_v2_schema_rollback.sql` (rollback companion)
-- `supabase/021_exos_core_v2_pgcrypto_fix.sql`
-- `supabase/024_exos_core_v2_team_access_recovery.sql` **(installed recovery migration)**
-- `supabase/025_standard_programme_runtime.sql` **(installed recovery migration)**
-- `supabase/026_standard_participant_access_recovery.sql` **(installed recovery migration)**
-- `supabase/verification/exos_core_v2_preflight.sql`
-- `supabase/verification/exos_core_v2_postflight.sql`
-- `supabase/verification/exos_core_v2_rollback_verify.sql`
+### R.A.C.E.-specific migrations, not Standard recovery migrations
 
-## Env vars required (no values stored)
+- `022_exos_core_v2_team_access.sql` — team PIN/access/session schema and
+  functions for Captain access; depends on 020.
+- `023_exos_core_v2_race_results_locking.sql` — R.A.C.E. result-lock trigger;
+  depends on the `race_results_v2` table from 020.
+- `024_exos_core_v2_team_access_recovery.sql` — Captain cross-device team access
+  recovery; depends on 022. It is not a Standard participant recovery migration.
+
+### Rollback, verification, and diagnostics
+
+- `020_exos_core_v2_schema_rollback.sql` is the guarded rollback companion to
+  020; it is not a forward migration.
+- `supabase/verification/exos_core_v2_preflight.sql`,
+  `exos_core_v2_postflight.sql`, and `exos_core_v2_rollback_verify.sql` are
+  verification scripts, not forward migrations.
+- Other files in `supabase/verification/`, including reset/cleanup/readiness
+  utilities, are diagnostics or controlled test helpers. Classify them by their
+  own header before use; never add them to a deployment chain by filename alone.
+
+### Staging installation status
+
+The repository contains no Supabase migration-history export or credentialed
+staging query result. Therefore the installed status of 020, 021, 025, and 026
+is **UNKNOWN from repository evidence**. The release incident record says 026
+was manually installed during Standard recovery UAT, but that is not a durable
+database-history artifact. Verify the target database before applying or
+reapplying any file. Do not describe 024 as an installed Standard migration.
+
+## Secrets and configuration
+
+No secret values belong in Git or documentation. Runtime reads:
 
 - `EXOS_ENV`
 - `SUPABASE_URL`
-- `SUPABASE_PUBLISHABLE_KEY`
-- `SUPABASE_SECRET_KEY`
+- `SUPABASE_PUBLISHABLE_KEY` (or `SUPABASE_ANON_KEY`)
+- `SUPABASE_SECRET_KEY` (or `SUPABASE_SERVICE_ROLE_KEY` for service operations)
 
-## Formula R.A.C.E. canonical staging reference
+## Release boundaries
 
-- EventID: `CORE-V2-RACE-UAT-EVT-4CF0CEAF5F`
-- Join code: `RACE4CF0CE`
-
-From staged scripts:
-- `scripts/exos_core_v2_create_staging_race_uat_event.py`
-- `scripts/exos_core_v2_patch_race_uat_roster.py`
-- `scripts/exos_core_v2_staging_cleanup.py`
-
-## Required future-coding agent bootstrap protocol
-
-Before changing EXOS:
-
-1. Read:
-   - `docs/EXOS_ARCHITECTURE.md`
-   - `docs/EXOS_INVARIANTS.md`
-   - `docs/EXOS_RELEASE_BASELINE.md`
-   - `docs/EXOS_UAT_STATUS.md`
-   - `docs/EXOS_DECISIONS.md`
-2. Check git branch and HEAD.
-3. Check `git status` and working tree.
-4. Verify affected scope (`Admin`, `Facilitator`, `Participant`, `Projector`, `Core`, `RACE`).
-5. Identify relevant invariants before coding.
-6. Do not change architecture to satisfy a local test.
-7. If architectural change occurs, update this documentation set in the same change.
+- This baseline freezes Standard Core v2 runtime behavior only; it does not
+  certify every historical Admin/legacy screen as Core-v2-only.
+- It is staging/UAT evidence, not production certification.
+- It is not a 250-concurrent-participant readiness or load certification.
+- Formula R.A.C.E. has its own staging adapter, migrations, operational model,
+  and UAT gate. Read `docs/RACE_HANDOVER.md`.

@@ -1,99 +1,123 @@
-# EXOS Core v2 Standard Architecture (Frozen Baseline)
+# EXOS Core v2 Standard Architecture
 
-This document is the canonical architecture record for Standard EXOS at the frozen baseline.
+## Authority and scope
 
-## FOUR PRIMARY SURFACES
+This is the architecture record for the frozen Standard runtime at
+`41cb91e91a75a36001daef72e0943e7bc84eb81e`. The repository-memory documents
+were added afterwards in `fe0faf7`; they are not runtime code and must never be
+mistaken for the frozen runtime baseline.
 
-### ADMIN
-Implemented in `MissionAI.py` workspace tabs.
+“Standard Core v2” means the canonical Standard event journey: Core-v2 event
+authoring, programme configuration, participant registration/recovery,
+facilitation, submission/review/score, and projector/broadcast. It does not
+mean every historical screen in this repository is already Core-v2-only.
 
-Responsibilities:
-- Event creation and visibility (`events_home`, `create_event`)
-- Programme and activity configuration (`programme_builder`)
-- Team identity/theme configuration (`TeamIdentityConfig`, country/identity pools)
-- Programme duplication (`duplicate_programme_configuration`) limited to content structure
-- Event metadata update (`update_event`, `update_event_metadata`)
+## Primary surfaces
 
-### FACILITATOR
-Implemented in `Facilitator.py` + `screens/control_centre.py`.
+### Admin / authoring
 
-Responsibilities:
-- Event selection and restoration
-- Activity runtime launch and stop
-- Team management and identity recovery tooling
-- Submission review and scoring controls
-- Broadcast lifecycle (preview + apply)
-- Projector control and display routing
-- Runtime diagnostics (non-operational audit)
+`MissionAI.py` routes Standard authoring to `screens/events_home.py`,
+`screens/create_event.py`, `screens/programme_builder.py`, reports, Control
+Centre, and the projector route. Standard event, team, and programme changes
+use `StandardCoreV2Adapter`.
 
-### PARTICIPANT
-Implemented in `Participant.py` + `screens/participant.py`.
+`screens/administration.py` and `screens/asset_library.py` still instantiate
+`GoogleSheetsDB`. They are legacy utilities visible in the broad MissionAI
+shell, outside the frozen Standard Core v2 journey. They are not evidence that
+the Standard staging journey is Sheets-free, and must not be used as a Standard
+Core v2 fallback.
 
-Responsibilities:
-- Join flow and participant registration
-- Pending and restored identity display
-- Device/session recovery and recovery prompts
-- Current mission display and submission entry
-- Review status, performance, and ranking visibility
+### Facilitator
 
-### PROJECTOR
-Implemented as display route (`view=projector`) in `MissionAI.py` and rendered via `screens/leaderboard_display.py`.
+`Facilitator.py` in `EXOS_ENV=staging` constructs `StandardCoreV2Adapter`,
+renders `screens/control_centre.py` (or its standalone projector route), then
+calls `assert_core_v2_only()`. The staging branch stops before the non-staging
+Formula R.A.C.E./Google Sheets shell.
 
-Responsibilities:
-- Event-scoped presentation only (no operations)
-- Ranking and live mission rendering
-- Broadcast-controlled presentation mode
-- No stage launch/review/score writes
+Responsibilities include event selection, activity launch, team display,
+submission review/score, broadcast preview/apply, and operational diagnostics.
+Diagnostics are non-operational and must not block the control flow.
 
-## Canonical adapter/runtime flow
+### Participant
 
-- The canonical mutable path is `data/standard_core_v2_adapter.StandardCoreV2Adapter` against Supabase Core v2.
-- `data/runtime_database.py` owns HTTP transport and secret/key handling.
-- `data/control_runtime.ControlRuntime` wraps operational writes in staged mutation methods (`control_centre_mutation`).
-- `screens/projector_broadcast.py` publishes projector state separately from mission and review operations.
+`Participant.py` in staging stops in `screens/participant.py`, which uses the
+Standard adapter. The join flow is Join Code → first name → last name → Join,
+then an immediate pending state, canonical registration, identity restoration,
+and dashboard. The browser/query state is a resume cache; canonical identity is
+returned by Core v2.
 
-### Runtime safety (staging)
+### Projector / broadcast
 
-- `StandardCoreV2Adapter._guard()` allows only:
-  - `*_v2` tables
-  - `rpc/exos_v2_*` procedure calls
-- Call counters:
-  - `LEGACY_RUNTIME_CALLS`
-  - `GOOGLE_SHEETS_RUNTIME_CALLS`
-- `assert_core_v2_only()` is required in canonical staging paths.
+`MissionAI.py` and `Facilitator.py` expose `?view=projector&event_id=<EVENT_ID>`
+and render `screens/leaderboard_display.py`. `screens/projector_broadcast.py`
+provides a local Preview and a persisted Apply action. Projector is display-only:
+it cannot launch, recover, review, or score.
 
-## Event isolation and recovery model
+## Canonical Standard data and adapter boundary
 
-- Core event identity is keyed by `EventID` in every canonical table and RPC payload.
-- Participant/session recovery:
-  - same-device/session via session token
-  - cross-device via `exos_v2_restore_join` then `exos_v2_recover_participant_access`
-  - team membership is preserved unless explicit, audited recovery changes it.
-- Query-string persistence supports resume (`event_id`, `participant_name`, `session_token`, `join_code`) in participant flow.
+- `data/standard_core_v2_adapter.py::StandardCoreV2Adapter` is the Standard
+  compatibility boundary. It permits only the explicit `_v2` table allowlist
+  and `exos_v2_*` RPCs.
+- `data/runtime_database.py` supplies the HTTP transport and resolves Supabase
+  configuration. The adapter, not the generic transport, establishes the
+  Standard Core-v2-only contract.
+- Core records are event scoped. Token-addressed state resolves to its owning
+  `EventID`; it is not an exception to event isolation.
+- Canonical Standard data includes `events_v2`, `teams_v2`, `programmes_v2`,
+  `modules_v2`, `activities_v2`, `participants_v2`,
+  `participant_sessions_v2`, `activity_runtime_v2`, `submissions_v2`,
+  `reviews_v2`, and the score/credit ledgers.
+- Live activity and broadcast control currently live in
+  `events_v2.event_payload` (`live_state` and `control_state.ProjectorBroadcast`).
+  `projector_state_v2` exists in the schema and cleanup/verification inventory,
+  but the frozen Standard broadcast renderer does not use it as its backing
+  store.
 
-## Performance, ranking, and ledger model
+## Identity and team assignment
 
-- Programme contract enters runtime through programme/activities metadata.
-- Score derivation is performed by canonical engines:
-  - `engines.canonical_performance.py`
-  - `data/runtime_database` + `standard_core_v2_adapter` score/credit RPCs
-- Canonical score storage: `score_transactions_v2`
-- Canonical credits: `credit_transactions_v2`
-- Points/leaderboard, performance percent, and ranking are derived from contract and submission states.
-- `load_performance_snapshot` is shared across participant/facilitator/projector.
+- `exos_v2_join_event_v2` creates a participant only for a new, unique
+  normalized identity. Its first-creation assignment uses
+  `exos_v2_next_team_id` (least assigned team, then `TeamID`).
+- Same-device restore returns the existing session/identity. Cross-device
+  recovery uses `exos_v2_restore_join` followed, for one unambiguous candidate,
+  by `exos_v2_recover_participant_access`.
+- Recovery creates/reclaims a session for the existing participant. It does not
+  create another participant or run round-robin assignment. `ParticipantID`,
+  `EventID`, and `TeamID` remain the canonical identity.
+- Team rendering is generic: `TeamIdentity`, then `TeamName`, then raw
+  `TeamID` only as a diagnostic fallback. Country, flags, icons, emoji, and
+  images are optional theme metadata.
 
-## Broadcast and projector architecture
+## Programme, review, performance, and ledgers
 
-- Facilitator broadcast has local preview and persisted apply phases.
-- `projector_state_v2`/event state keeps per-event broadcast data.
-- Two simultaneous events must not share projector state due to explicit `event_id` scoping.
-- The projector path never writes participant/facilitator lifecycle state.
+- Programme duplication uses `clone_programme_stages` and the Standard adapter
+  to copy programme/modules/activities only. It must never copy live state,
+  participants, sessions, submissions, reviews, or ledgers.
+- Migration 025’s Standard review path writes competitive approved scores to
+  `score_transactions_v2`. It does not implicitly write credits.
+- `credit_transactions_v2` is a separate Core ledger. A wallet/balance is a
+  third derived concept; none is interchangeable with a score or a participant
+  field such as `intelligence_credits`.
+- `engines/canonical_performance.py::load_performance_snapshot` derives the
+  shared performance/ranking view from programme contracts, submissions, teams,
+  and the canonical leaderboard. `NON_SCORING` contracts are excluded from
+  competitive aggregation.
 
-## Recovery from this architecture
+## Refresh and runtime safety
 
-1. Participant submits join and obtains pending state.
-2. `exos_v2_join_event_v2` creates/resolves identity and session.
-3. Recovery path surfaces candidate and can invoke:
-   - resume same session
-   - `exos_v2_recover_participant_access` on confirmed cross-device recovery
-4. Identity state is restored and normal surfaces continue with same `ParticipantID`/`TeamID`.
+- Standard adapter counters are `LEGACY_RUNTIME_CALLS` and
+  `GOOGLE_SHEETS_RUNTIME_CALLS`; staging Facilitator assertion requires both to
+  be zero for the canonical Facilitator journey.
+- Streamlit refresh must be scoped. Fragment polling is used for timers,
+  projector, and participant live mission state; a global one-second app rerun
+  is prohibited.
+- Widget-owned session-state keys must not be assigned after their widget has
+  been instantiated in the same rerun. Use separate transient/pending keys for
+  join and recovery transitions.
+
+## Formula R.A.C.E.
+
+Formula R.A.C.E. has a separate Core-v2 staging adapter and product lifecycle.
+Read `docs/RACE_HANDOVER.md` before touching it. Standard Core v2 supplies
+shared platform constraints, not a replacement R.A.C.E. identity, checkpoint,
+wallet, judging, or championship model.

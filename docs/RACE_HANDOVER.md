@@ -1,54 +1,107 @@
-# Formula R.A.C.E. Handover to Standard EXOS (Read-Only)
+# Formula R.A.C.E. Handover
 
-## Purpose
+## Boundary
 
-Do **not** modify R.A.C.E. runtime from this file.  
-This page documents what Standard EXOS concepts Formula R.A.C.E. should inherit at the repository level and what must remain distinct.
+Formula R.A.C.E. is a separate product workflow. Standard Core v2 gives it
+shared platform constraints and Core-v2 primitives; it does **not** make R.A.C.E.
+feature-complete, staging-validated, human-UAT-passed, production-ready, or
+load-certified.
 
-## Canonical R.A.C.E. baseline event (staging)
+Read this file before changing `FormulaRace.py`, `screens/formula_race.py`,
+`screens/formula_race_captain.py`, `data/formula_race_core_v2_adapter.py`, RACE
+migrations, or its staging scripts.
 
-- EventID: `CORE-V2-RACE-UAT-EVT-4CF0CEAF5F`
-- Join code: `RACE4CF0CE`
+## Current implementation — code only
 
-From:
-- `scripts/exos_core_v2_staging_cleanup.py`
-- `scripts/exos_core_v2_patch_race_uat_roster.py`
+The Core-v2 staging implementation has dedicated surfaces and an adapter:
 
-## What RACE should inherit from Standard EXOS
+- Facilitator/race control: `FormulaRace.py` → `screens/formula_race.py`
+- Captain: `screens/formula_race_captain.py`, deployed as its own Captain entry
+  surface
+- Data boundary: `FormulaRaceCoreV2StagingAdapter`
+- Staging guard: counters reject forbidden legacy paths and Google-Sheets-like
+  paths; the staging shell checks both counters
 
-- `NO GOOGLE SHEETS RUNTIME` for canonical event state.
-- `NO LEGACY RUNTIME FALLBACK` on canonical flow.
-- Event-scoped isolation (no cross-event state bleed).
-- Generic identity resolution (`TeamIdentity` first, then `TeamName`, then `TeamID`).
-- Participant session persistence and recovery patterns where relevant.
-- Scoped refresh over full-app poll loops.
-- Canonical ranking snapshots and display patterns.
-- Broadcast/Projector separation (display-only projector path).
-- `assert_core_v2_only`-style hard checks in staging shell.
+The current `Participant.py` staging branch stops at the Standard participant
+surface before its lower R.A.C.E. router is reachable. Do not claim a Standard
+participant join-code handoff to Captain is deployed; use the dedicated Captain
+entry surface until that routing is explicitly changed and tested.
 
-## What MUST remain R.A.C.E.-specific
+Code implements these product-specific capabilities:
 
-- Captain identity/session model.
-- One active captain/device contract.
-- One active checkpoint submission model.
-- Captain lock/recovery semantics.
-- Wallet/build/judging/race-result contracts.
-- Marketplace, penalties/bonuses, race result lock/unlock.
-- Championships/legacy race totals and tie-break behavior.
-- Event-specific race lifecycle controls.
+- Team/Captain PIN access, one active device/session behavior, same-device
+  restoration, and PIN-based cross-device Captain recovery
+- Four parallel checkpoint activities, proof submission/evidence, review, and
+  resubmission-related state
+- Credits earned, wallet/balance, marketplace purchases, and purchase history
+- Build status, judging rows, race-result rows with penalties/bonuses, and
+  championship/ranking presentation
+- EventID/TeamID-scoped reads and writes in the R.A.C.E. adapter
 
-## Do not merge these concepts
+“Implemented” above means a code path and source-contract tests exist. It does
+not claim that each operation is atomic under load, successfully deployed, or
+observed by a human in staging.
 
-- A single global score/credit concept for both systems.
-- Mixing Formula R.A.C.E. and Standard EXOS rank metric paths.
-- Shared recovery assumptions across captain and participant recovery roles.
+## Current evidence status
 
-## Required metric separation in future integration
+- **Automated source contracts:** focused R.A.C.E. adapter, Captain,
+  recovery/session, operations, parallel-checkpoint, and staging-path/schema
+  tests passed in the 2026-08-12 repository audit (39 tests).
+- **Staging runner:** `scripts/exos_core_v2_staging_race_vertical_slice.py`
+  exists. Its existence is not proof it ran successfully against the named
+  staging event.
+- **Human UAT:** no completed 16-step persistent-event client UAT record is
+  committed in this repository. Treat Captain login, checkpoint submission,
+  review/resubmit, wallet/purchase, reconnect, build, judging, results, and
+  championship as requiring human staging UAT.
+- **Production/load:** not certified.
 
-R.A.C.E. can expose:
-- **Championship Score**
-- **Credits Earned**
-- **Wallet Balance**
-- **Championship Rank**
+## R.A.C.E. migrations and installed-state rule
 
-as independent displays, while preserving each column’s source of truth and update semantics.
+Core-v2 R.A.C.E. relies on the Core schema foundation plus R.A.C.E.-specific
+patches:
+
+- 020 Core v2 schema foundation
+- 022 Core-v2 team/Captain access
+- 023 Core-v2 race-results locking
+- 024 Core-v2 Captain team-access recovery
+
+020’s rollback is not a R.A.C.E. forward migration. The older 015–019 Formula
+R.A.C.E. migration series, its rollbacks, seeds, and verification scripts have
+their own targets and assumptions; do not add them to a Core-v2 staging chain
+without reading their headers and the current deployment checklist.
+
+The repository contains no target-database migration-history export. Every
+installation status is UNKNOWN from repository evidence until queried against
+the intended staging database.
+
+## What to inherit from Standard Core v2
+
+- Event isolation and generic team identity rendering
+- No silent legacy/Google Sheets fallback on the Core-v2 staging path
+- Durable session/recovery patterns, adapted to Captain (not participant)
+  authorization
+- Scoped refresh rather than global full-app polling
+- Event-scoped, display-only Projector/Broadcast separation where applicable
+- Honest evidence labels: source tests ≠ staging execution ≠ human UAT ≠ load
+  certification
+
+## What must remain R.A.C.E.-specific
+
+- Captain rather than Standard participant identity and one-active-device policy
+- Checkpoint sequence/parallelism, checkpoint proof, resubmission, and review
+- Credits Earned, Wallet, Marketplace, Purchases, and Build Status
+- Judging, penalties/bonuses, race result, result locking/unlocking, and
+  Championship ranking/tie-break rules
+
+Never collapse R.A.C.E. championship score, credits earned, and wallet balance
+into one Standard score/credit field. Never apply Standard participant recovery
+or Standard programme scoring assumptions to Captain access without an explicit
+R.A.C.E. design and test.
+
+## Legacy shell warning
+
+The non-staging Facilitator branch still contains an older Google Sheets R.A.C.E.
+shell. It is separate from the Core-v2 staging adapter and does not inherit the
+Core-v2-only assertion. Do not use it as a fallback or cite it as R.A.C.E.
+Core-v2 staging evidence.
