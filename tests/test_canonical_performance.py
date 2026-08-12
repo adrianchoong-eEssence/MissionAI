@@ -116,6 +116,18 @@ def test_missing_contract_defaults_by_scoring_mode_without_activity_name_rules()
     assert activity_scoring_contract({"StageName": "Anything", "ScoringMode": "TEAM_COMPETITIVE"})["Type"] == "DIRECT_SCORE"
 
 
+def test_non_scoring_approved_review_value_never_becomes_a_canonical_score():
+    activity = _activity("A3", "Helium Stick", {
+        "Type": "NON_SCORING", "ScoringMode": "NON_SCORING",
+    })
+    result = evaluate_activity(activity, {
+        "Status": "APPROVED", "Metric1": "YES", "Score": 80,
+    })
+    assert result["Status"] == "Non-Scoring"
+    assert result["Score"] is None
+    assert result["Included"] is False
+
+
 def test_all_live_surfaces_use_shared_service_and_scoped_refresh():
     participant = (ROOT / "screens/participant.py").read_text()
     facilitator = (ROOT / "screens/control_centre.py").read_text()
@@ -137,6 +149,25 @@ def test_preview_does_not_write_and_projector_route_is_event_scoped():
     assert 'f"?view=projector&event_id={quote(str(event_id))}"' in broadcast
     assert 'st.query_params.get("view", "")' in facilitator
     assert "requested_event_id" in facilitator
+
+
+def test_standard_scores_broadcast_uses_canonical_performance_not_credit_wallet():
+    broadcast = (ROOT / "screens/projector_broadcast.py").read_text()
+    projector = (ROOT / "screens/leaderboard_display.py").read_text()
+    scores_block = broadcast.split('if mode == "Scores":', 1)[1].split(
+        'if mode == "Custom Message":', 1
+    )[0]
+    assert 'performance_snapshot' in scores_block
+    assert 'TotalScore' in scores_block
+    assert 'EarnedCredits' not in scores_block
+    assert 'broadcast_state.get("Mode") in {"Scores", "Credits"}' not in projector
+
+
+def test_projector_refresh_rereads_event_scoped_broadcast_state():
+    projector = (ROOT / "screens/leaderboard_display.py").read_text()
+    assert '@st.fragment(run_every="3s")' in projector
+    assert "stored_broadcast = db.get_broadcast_state(event_id)" in projector
+    assert "broadcast_state.update(stored_broadcast)" in projector
 
 
 def test_admin_branding_uses_existing_event_payload():
@@ -184,3 +215,13 @@ def test_admin_projector_entry_uses_selected_event_id():
     assert 'event_id = str(st.query_params.get("event_id", "")).strip()' in source
     assert 'show_leaderboard_display(event_id=event_id, standalone=True)' in source
     assert 'f"?view=projector&event_id={selected_event_id}"' in source
+
+
+def test_admin_and_facilitator_share_the_standalone_projector_surface():
+    admin = (ROOT / "MissionAI.py").read_text()
+    facilitator = (ROOT / "Facilitator.py").read_text()
+    expected = "show_leaderboard_display"
+    assert expected in admin
+    assert expected in facilitator
+    assert "standalone=True" in admin.split('if requested_view == "projector":', 1)[1]
+    assert "standalone=True" in facilitator.split("if projector_request:", 1)[1]

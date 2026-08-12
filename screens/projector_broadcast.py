@@ -455,23 +455,20 @@ def render_projector_broadcast(
         return True
 
     if mode == "Scores":
-        wallets = sorted(
-            (wallet_status or {}).get("Wallets", []) or [],
-            key=lambda row: -float(row.get("EarnedCredits", 0) or 0),
-        )
+        performance_teams = (performance_snapshot or {}).get("Teams", [])
         rows = "".join(
             f"""
             <div class="broadcast-ranking">
-              <span>{position}. {html.escape(str(wallet.get('TeamName', '')))}</span>
-              <strong>{html.escape(str(wallet.get('EarnedCredits', 0)))} Credits</strong>
+              <span>{row.get('Rank', position)}. {html.escape(str(row.get('TeamIdentity', '')))}</span>
+              <strong>{html.escape(str(row.get('TotalScore', 0)))} pts</strong>
             </div>
             """
-            for position, wallet in enumerate(wallets[:8], start=1)
-        ) or '<div class="broadcast-message">No Intelligence Credits yet.</div>'
+            for position, row in enumerate(performance_teams[:8], start=1)
+        ) or '<div class="broadcast-message">No approved scores yet.</div>'
         st.markdown(
             f"""
             <div class="broadcast-screen broadcast-rankings{presentation_class}">
-              <div class="broadcast-title">Intelligence Credits</div>
+              <div class="broadcast-title">Scores</div>
               {rows}
             </div>
             """,

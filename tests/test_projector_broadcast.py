@@ -114,6 +114,27 @@ def test_current_activity_mode_uses_current_experience_without_mutating_it():
     assert mission == original
 
 
+def test_scores_mode_renders_canonical_scores_without_a_credit_wallet():
+    with patch("screens.projector_broadcast.st.markdown") as markdown:
+        rendered = render_projector_broadcast(
+            {"Mode": "Scores", "PresentationMode": True},
+            event={"EventName": "AIA Lower South"},
+            mission={},
+            leaderboard=[],
+            wallet_status={},
+            timer={},
+            performance_snapshot={"Teams": [{
+                "Rank": 1, "TeamIdentity": "India", "TotalScore": 118,
+            }]},
+        )
+
+    markup = markdown.call_args.args[0]
+    assert rendered is True
+    assert "Scores" in markup
+    assert "India" in markup
+    assert "118 pts" in markup
+
+
 def test_preview_uses_same_renderer_with_scaled_presentation_class():
     with patch("screens.projector_broadcast.st.markdown") as markdown:
         render_projector_broadcast(

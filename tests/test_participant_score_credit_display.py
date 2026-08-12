@@ -15,6 +15,8 @@ def test_participant_displays_approved_submission_score_not_static_credit_seed()
 
     assert 'st.metric("Approved score", f"{_credit_number(approved_score)} pts")' in existing
     assert 'existing_submission.get("Score", "")' in existing
+    assert 'contract.get("Type") == "NON_SCORING"' in existing
+    assert 'Completed / Approved · Non-scoring' in existing
     assert 'st.metric("Credits", details["Credits"])' not in programme
     assert 'details.get("ScoringMode", "")' in programme
     assert "Competitive score is finalised after facilitator review." in programme

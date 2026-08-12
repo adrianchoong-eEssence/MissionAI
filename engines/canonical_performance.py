@@ -83,12 +83,21 @@ def evaluate_activity(activity, submission=None):
     contract = activity_scoring_contract(activity)
     submission = dict(submission or {})
     approved = str(submission.get("Status", "")).upper() == "APPROVED"
+    canonical_score = (
+        _number(submission.get("Score"))
+        if approved and contract["Type"] != "NON_SCORING"
+        else None
+    )
     result = {
         "ActivityID": str(activity.get("ActivityID", "")),
         "ActivityName": str(activity.get("ParticipantDisplayName") or activity.get("StageName") or "Activity"),
         "Contract": contract,
         "Status": _status(submission, contract),
-        "Score": _number(submission.get("Score")) if approved else None,
+        # A review may retain an old numeric value even when the authored
+        # activity contract is non-scoring.  It is evidence metadata, not a
+        # canonical score, and must not leak onto participant, facilitator or
+        # projector performance surfaces.
+        "Score": canonical_score,
         "Target": None,
         "Achievement": None,
         "Loss": None,

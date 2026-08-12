@@ -33,7 +33,10 @@ from engines.programme_hierarchy import (
 )
 from engines.programme_adapter import CanonicalProgrammeAdapter, ProgrammeIntegrityError
 from engines.experience_library import ExperienceLibraryService, ExperienceResolutionError
-from engines.canonical_performance import load_performance_snapshot
+from engines.canonical_performance import (
+    activity_scoring_contract,
+    load_performance_snapshot,
+)
 from components.experience_preview import render_experience_participant
 from screens.mission_setup import cropped_reference_image, mission_module_name
 
@@ -677,13 +680,17 @@ def render_team_leader_submission_gate(db):
     return False
 
 
-def render_existing_submission(existing_submission):
+def render_existing_submission(existing_submission, scoring_contract=None):
     status = str(existing_submission.get("Status", "PENDING")).strip().upper()
     if status == "APPROVED":
         st.success("✅ Evidence approved.")
-        approved_score = existing_submission.get("Score", "")
-        if approved_score not in {"", None}:
-            st.metric("Approved score", f"{_credit_number(approved_score)} pts")
+        contract = dict(scoring_contract or {})
+        if contract.get("Type") == "NON_SCORING":
+            st.caption("Completed / Approved · Non-scoring")
+        else:
+            approved_score = existing_submission.get("Score", "")
+            if approved_score not in {"", None}:
+                st.metric("Approved score", f"{_credit_number(approved_score)} pts")
     elif status == "REJECTED":
         st.error("Evidence rejected.")
     else:
@@ -2869,7 +2876,10 @@ def show_participant():
                 db, programme_mission, submission_type,
             )
             if existing_submission:
-                render_existing_submission(existing_submission)
+                render_existing_submission(
+                    existing_submission,
+                    activity_scoring_contract(hierarchy_activity),
+                )
             elif submission_type == "NASI":
                 render_submission_form(db, programme_mission, submission_type)
             elif render_team_leader_submission_gate(db):
