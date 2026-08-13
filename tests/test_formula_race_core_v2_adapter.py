@@ -168,6 +168,34 @@ def test_race_marketplace_control_uses_existing_item_activation_flag():
     assert '"is_active": active' in adapter
 
 
+def test_race_marketplace_open_verifies_persisted_active_rows():
+    class Runtime:
+        is_configured = True
+        can_publish = True
+        url = "https://staging.exos-core-v2.example.com"
+
+        def __init__(self):
+            self.items = [{"item_id": "ITEM-1", "event_id": "EVENT-1", "is_active": False}]
+
+        def _request(self, method, path, payload=None, query=None, admin=True):
+            if path != "marketplace_items_v2":
+                return []
+            if method == "GET":
+                return list(self.items)
+            if method == "PATCH":
+                for item in self.items:
+                    item.update(payload or {})
+                return []
+            raise RuntimeError("Unexpected request")
+
+    with _staging_env():
+        adapter = FormulaRaceCoreV2StagingAdapter(Runtime())
+        result = adapter.set_formula_race_marketplace_runtime("EVENT-1", "OPEN", "Facilitator")
+
+    assert result["active_item_count"] == 1
+    assert result["active"] is True
+
+
 def test_race_adapter_captain_workspace_returns_default_build_status_when_empty():
     with _staging_env():
         runtime = _fake_runtime_factory()

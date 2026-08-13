@@ -980,7 +980,14 @@ class FormulaRaceCoreV2StagingAdapter:
             {"event_id": f"eq.{str(event_id).strip()}"},
             {"is_active": active},
         )
-        return {"state": action, "active": active, "item_count": len(items), "actor": str(actor).strip()}
+        persisted = self._get(
+            "marketplace_items_v2",
+            {"event_id": f"eq.{str(event_id).strip()}", "select": "item_id,is_active"},
+        )
+        active_count = sum(bool(item.get("is_active", False)) for item in persisted)
+        if len(persisted) != len(items) or (active and active_count != len(items)) or (not active and active_count):
+            raise RuntimeError("Marketplace activation state did not persist. Refresh Race Control and retry.")
+        return {"state": action, "active": active, "item_count": len(persisted), "active_item_count": active_count, "actor": str(actor).strip()}
 
     def set_formula_race_build_status(self, event_id: str, team_id: str, status: str, checklist: dict[str, Any], reason: str, actor: str):
         _trace_uuid_context("set_formula_race_build_status.request", "build_status_v2", "event_id", event_id)
