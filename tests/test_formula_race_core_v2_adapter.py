@@ -248,6 +248,26 @@ def test_race_adapter_captain_workspace_returns_default_build_status_when_empty(
     assert int(build_status.get("Progress", 0)) == 0
 
 
+def test_race_build_status_preserves_the_race_phase_inside_core_v2_state():
+    with _staging_env():
+        runtime = _fake_runtime_factory()
+        runtime.rows["build_status_v2"] = [{
+            "event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F",
+            "team_id": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F",
+            "activity_id": "CHECKPOINT-1",
+            "build_status": "IN_PROGRESS",
+            "progress_pct": 60,
+            "build_payload": {"race_build_status": "Painting"},
+            "last_updated": "2026-08-13T00:00:00Z",
+        }]
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+
+    payload = adapter._build_status_payload("CORE-V2-RACE-UAT-EVT-4CF0CEAF5F", "CORE-V2-RACE-UAT-T01-4CF0CEAF5F")
+    assert payload["status"] == "Painting"
+    assert payload["Progress"] == 60
+    assert adapter.get_formula_race_state("CORE-V2-RACE-UAT-EVT-4CF0CEAF5F")["BuildStatus"][0]["status"] == "Painting"
+
+
 def test_formula_race_captain_login_returns_normalized_valid_token():
     class FakeRuntime:
         is_configured = True

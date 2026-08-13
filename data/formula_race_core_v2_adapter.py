@@ -46,6 +46,26 @@ _FORBIDDEN_CORE_V2_RPC_PREFIXES = (
     "exos_formula_race_",
 )
 
+_RACE_BUILD_STATUSES = (
+    "Not Started", "Collecting Parts", "Building", "Painting", "Ready to Race", "Completed",
+)
+_RACE_BUILD_CORE_STATUS = {
+    "Not Started": "NOT_STARTED",
+    "Collecting Parts": "IN_PROGRESS",
+    "Building": "IN_PROGRESS",
+    "Painting": "IN_PROGRESS",
+    "Ready to Race": "IN_PROGRESS",
+    "Completed": "COMPLETED",
+}
+_RACE_BUILD_PROGRESS = {
+    "Not Started": 0,
+    "Collecting Parts": 20,
+    "Building": 40,
+    "Painting": 60,
+    "Ready to Race": 80,
+    "Completed": 100,
+}
+
 
 def _require_staging_runtime(runtime) -> None:
     env = str(os.getenv("EXOS_ENV", "")).strip().lower()
@@ -74,6 +94,19 @@ def _as_dict(row: dict[str, Any] | None, fallback: dict[str, Any] | None = None)
     if row is None:
         return {} if fallback is None else dict(fallback)
     return dict(row)
+
+
+def _race_build_display(row: dict[str, Any]) -> str:
+    payload = _as_dict(row.get("build_payload"))
+    race_status = str(payload.get("race_build_status", "")).strip()
+    if race_status in _RACE_BUILD_STATUSES:
+        return race_status
+    return {
+        "NOT_STARTED": "Not Started",
+        "IN_PROGRESS": "Building",
+        "COMPLETED": "Completed",
+        "BLOCKED": "Blocked",
+    }.get(str(row.get("build_status", "NOT_STARTED")).strip().upper(), "Not Started")
 
 
 def _resolve_event_candidates(event_id: str) -> list[str]:
@@ -548,7 +581,7 @@ class FormulaRaceCoreV2StagingAdapter:
             "build_status_v2",
             {
                 "event_id": f"eq.{str(event_id).strip()}",
-                "select": "team_id,activity_id,build_status,progress_pct",
+                "select": "team_id,activity_id,build_status,progress_pct,build_payload,started_at,completed_at,last_updated",
             },
         )
         judging_rows = self._get(
@@ -569,7 +602,7 @@ class FormulaRaceCoreV2StagingAdapter:
         )
         return {
             "Checkpoints": checkpoints,
-            "BuildStatus": build_rows,
+            "BuildStatus": [{**row, "status": _race_build_display(row)} for row in build_rows],
             "Judging": judging_rows,
             "RaceResults": [
                 {
@@ -995,29 +1028,32 @@ class FormulaRaceCoreV2StagingAdapter:
         activities = self._get_checkpoint_activities(event_id)
         activity_id = str(activities[0].get("activity_id")) if activities else f"{event_id}-CHECKPOINT"
         _trace_uuid_context("set_formula_race_build_status.request", "build_status_v2", "activity_id", activity_id)
-        build_status = str(status or "NOT_STARTED").strip().upper().replace(" ", "_")
-        payload = {
-            "event_id": str(event_id),
-            "team_id": str(team_id),
-            "activity_id": activity_id,
-            "build_status": build_status,
-            "progress_pct": 100 if build_status in {"COMPLETED", "READY_TO_RACE"} else 0,
-            "build_payload": {"checklist": checklist or {}, "actor": str(actor), "reason": str(reason)},
-            "started_at": _now_iso(),
-            "last_updated": _now_iso(),
-        }
-        if build_status == "COMPLETED":
-            payload["completed_at"] = _now_iso()
+        race_status = str(status or "Not Started").strip()
+        if race_status not in _RACE_BUILD_STATUSES:
+            raise RuntimeError("Invalid R.A.C.E. Build Status.")
+        build_status = _RACE_BUILD_CORE_STATUS[race_status]
         existing = self._get(
             "build_status_v2",
             {
                 "event_id": f"eq.{str(event_id)}",
                 "team_id": f"eq.{str(team_id)}",
                 "activity_id": f"eq.{activity_id}",
-                "select": "event_id",
+                "select": "event_id,started_at",
                 "limit": "1",
             },
         )
+        payload = {
+            "event_id": str(event_id),
+            "team_id": str(team_id),
+            "activity_id": activity_id,
+            "build_status": build_status,
+            "progress_pct": _RACE_BUILD_PROGRESS[race_status],
+            "build_payload": {"race_build_status": race_status, "checklist": checklist or {}, "actor": str(actor), "reason": str(reason)},
+            "started_at": existing[0].get("started_at") if existing else (_now_iso() if race_status != "Not Started" else None),
+            "last_updated": _now_iso(),
+        }
+        if race_status == "Completed":
+            payload["completed_at"] = _now_iso()
         if existing:
             return self._patch("build_status_v2", {"event_id": f"eq.{str(event_id)}", "team_id": f"eq.{str(team_id)}", "activity_id": f"eq.{activity_id}"}, payload) or {}
         return self._post("build_status_v2", payload) or {}
@@ -1251,9 +1287,7 @@ class FormulaRaceCoreV2StagingAdapter:
             }
 
         latest = rows[0]
-        latest_status = str(latest.get("build_status", "NOT_STARTED")).strip().upper().replace(" ", "_")
-        if not latest_status:
-            latest_status = "NOT_STARTED"
+        latest_status = _race_build_display(latest)
 
         try:
             latest_progress = int(latest.get("progress_pct", 0) or 0)
@@ -1268,7 +1302,7 @@ class FormulaRaceCoreV2StagingAdapter:
             "Activities": [
                 {
                     "ActivityID": str(row.get("activity_id", "")),
-                    "Status": str(row.get("build_status", "NOT_STARTED")).strip().upper().replace(" ", "_"),
+                    "Status": _race_build_display(row),
                     "Progress": _safe_int(row.get("progress_pct", 0)),
                     "StartedAt": row.get("started_at"),
                     "CompletedAt": row.get("completed_at"),
@@ -1280,7 +1314,7 @@ class FormulaRaceCoreV2StagingAdapter:
             "ActivityStatus": [
                 {
                     "ActivityID": str(row.get("activity_id", "")),
-                    "Status": str(row.get("build_status", "NOT_STARTED")).strip().upper().replace(" ", "_"),
+                    "Status": _race_build_display(row),
                     "Progress": _safe_int(row.get("progress_pct", 0)),
                 }
                 for row in rows

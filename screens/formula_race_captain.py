@@ -266,7 +266,7 @@ def show_formula_race_captain(runtime_override=None):
     a,b,c,d,e,f=st.columns(6);a.metric("Championship rank",workspace.get("ChampionshipRank","—"));b.metric("Championship score",workspace.get("ChampionshipScore",0));c.metric("Credits earned",workspace.get("CreditsEarned",wallet.get("CreditsEarned",0)));d.metric("Credits spent",workspace.get("CreditsSpent",wallet.get("CreditsSpent",0)));e.metric("Wallet",wallet.get("Balance",0));f.metric("Build status",build.get("status","Not Started"))
     captain_section = st.radio(
         "Captain section",
-        ["RACE Checkpoints", "Wallet & Marketplace", "Submissions"],
+        ["RACE Checkpoints", "Wallet & Marketplace", "Build", "Submissions"],
         horizontal=True,
         label_visibility="collapsed",
         key="race_captain_section",
@@ -319,6 +319,18 @@ def show_formula_race_captain(runtime_override=None):
                 except RuntimeError as error:st.error(str(error))
         purchases=list(workspace.get("Purchases",[]))
         if purchases:st.dataframe(purchases,width="stretch",hide_index=True)
+    if captain_section == "Build":
+        st.subheader("Build Status")
+        st.metric("Current status", build.get("status", "Not Started"))
+        st.progress(min(max(float(build.get("Progress", 0) or 0) / 100, 0), 1), text=f"{build.get('Progress', 0)}%")
+        st.caption(f"Last updated: {build.get('LastUpdated', '') or 'Not started'}")
+        st.info("Build status is updated by Race Control. Your team can use this view to track readiness and purchased materials.")
+        purchases=list(workspace.get("Purchases",[]))
+        if purchases:
+            st.subheader("Purchased materials")
+            st.dataframe(purchases,width="stretch",hide_index=True)
+        else:
+            st.caption("No marketplace purchases recorded for this team.")
     if captain_section == "Submissions":
         if submissions:
             st.dataframe(

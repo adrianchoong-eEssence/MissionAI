@@ -28,6 +28,8 @@ def test_captain_navigation_uses_explicit_selectable_sections():
     assert 'key="race_captain_section"' in source
     assert 'if captain_section == "RACE Checkpoints":' in source
     assert 'if captain_section == "Wallet & Marketplace":' in source
+    assert 'if captain_section == "Build":' in source
     assert 'if captain_section == "Submissions":' in source
     assert 'st.tabs(["RACE Checkpoints","Wallet & Marketplace","Submissions"])' not in source
     assert "formula_race_purchase" in source
+    assert "Build status is updated by Race Control" in source

@@ -41,6 +41,14 @@ def test_manual_credit_adjustment_is_idempotent_and_uses_the_canonical_ledger():
     assert "on conflict(event_id,idempotency_key) do nothing" in ADJUSTMENT_SQL
 
 
+def test_build_status_uses_core_v2_persistence_with_race_display_phases():
+    assert "build_status_v2" in ADAPTER
+    assert '"race_build_status": race_status' in ADAPTER
+    assert '"Collecting Parts": "IN_PROGRESS"' in ADAPTER
+    assert '"Ready to Race": "IN_PROGRESS"' in ADAPTER
+    assert '"Completed": "COMPLETED"' in ADAPTER
+
+
 def test_captain_submission_uses_explicit_technical_actor_not_standard_join():
     assert "RACE_CAPTAIN_TECHNICAL_ACTOR" in SQL
     assert "RACE_SUBMISSION" in SQL
