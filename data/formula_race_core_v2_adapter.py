@@ -962,6 +962,26 @@ class FormulaRaceCoreV2StagingAdapter:
 
         return {"state": action}
 
+    def set_formula_race_marketplace_runtime(self, event_id: str, action: str, actor: str):
+        action = str(action).strip().upper()
+        if action not in {"OPEN", "PAUSE", "CLOSE"}:
+            raise RuntimeError("Marketplace action must be OPEN, PAUSE, or CLOSE.")
+        if not str(actor).strip():
+            raise RuntimeError("Facilitator identity is required to change the marketplace state.")
+        items = self._get(
+            "marketplace_items_v2",
+            {"event_id": f"eq.{str(event_id).strip()}", "select": "item_id"},
+        )
+        if not items:
+            raise RuntimeError("Marketplace catalogue is not configured for this event.")
+        active = action == "OPEN"
+        self._patch(
+            "marketplace_items_v2",
+            {"event_id": f"eq.{str(event_id).strip()}"},
+            {"is_active": active},
+        )
+        return {"state": action, "active": active, "item_count": len(items), "actor": str(actor).strip()}
+
     def set_formula_race_build_status(self, event_id: str, team_id: str, status: str, checklist: dict[str, Any], reason: str, actor: str):
         _trace_uuid_context("set_formula_race_build_status.request", "build_status_v2", "event_id", event_id)
         _trace_uuid_context("set_formula_race_build_status.request", "build_status_v2", "team_id", team_id)
@@ -1253,19 +1273,50 @@ class FormulaRaceCoreV2StagingAdapter:
         spent = sum(-_safe_int(row.get("amount", 0)) for row in rows if _safe_int(row.get("amount", 0)) < 0)
         return {"CreditsEarned": earned, "CreditsSpent": spent, "Balance": earned - spent}
 
-    def _marketplace_payload(self, event_id: str, team_id: str) -> dict[str, Any]:
-        item_rows = self._get("marketplace_items_v2", {"event_id": f"eq.{str(event_id)}", "select": "item_id,item_name,unit_cost_credits,stock_limit,is_active"})
+    def _marketplace_payload(self, event_id: str, team_id: str, active_only: bool = True) -> dict[str, Any]:
+        item_query = {"event_id": f"eq.{str(event_id)}", "select": "item_id,item_name,unit_cost_credits,stock_limit,is_active"}
+        if active_only:
+            item_query["is_active"] = "eq.true"
+        item_rows = self._get("marketplace_items_v2", item_query)
+        purchase_query = {
+            "marketplace_transactions_v2",
+        }
         purchase_rows = self._get(
             "marketplace_transactions_v2",
-            {"event_id": f"eq.{str(event_id)}", "team_id": f"eq.{str(team_id)}", "select": "marketplace_transaction_id,item_id,quantity,amount_paid,status,purchased_at,idempotency_key"},
+            {
+                "event_id": f"eq.{str(event_id)}",
+                "team_id": f"eq.{str(team_id)}",
+                "select": "marketplace_transaction_id,item_id,quantity,amount_paid,status,purchased_at,idempotency_key",
+            },
+        ) if str(team_id).strip() else self._get(
+            "marketplace_transactions_v2",
+            {
+                "event_id": f"eq.{str(event_id)}",
+                "select": "marketplace_transaction_id,team_id,item_id,quantity,amount_paid,status,purchased_at,idempotency_key",
+            },
         )
+        stock_rows = self._get(
+            "marketplace_transactions_v2",
+            {
+                "event_id": f"eq.{str(event_id)}",
+                "status": "eq.COMPLETED",
+                "select": "item_id,quantity",
+            },
+        )
+        reserved = {}
+        for row in stock_rows:
+            item_id = str(row.get("item_id", ""))
+            reserved[item_id] = reserved.get(item_id, 0) + _safe_int(row.get("quantity", 0))
         stock_lookup = {str(row.get("item_id")): row for row in item_rows}
         items = [
             {
                 "ItemID": item_id,
                 "ItemName": str(row.get("item_name", "")),
                 "CreditCost": row.get("unit_cost_credits", 0),
-                "StockQuantity": row.get("stock_limit"),
+                "StockQuantity": (
+                    None if row.get("stock_limit") is None
+                    else max(_safe_int(row.get("stock_limit")) - reserved.get(item_id, 0), 0)
+                ),
                 "Active": bool(row.get("is_active", True)),
             }
             for item_id, row in stock_lookup.items()
@@ -1285,7 +1336,7 @@ class FormulaRaceCoreV2StagingAdapter:
                     "IdempotencyKey": row.get("idempotency_key", ""),
                 }
             )
-        return {"items": items, "purchases": purchases}
+        return {"items": items, "purchases": purchases, "state": "OPEN" if items else "CLOSED"}
 
     @staticmethod
     def staging_runtime_guard() -> bool:

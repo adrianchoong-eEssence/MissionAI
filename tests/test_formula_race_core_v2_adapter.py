@@ -139,6 +139,35 @@ def test_race_review_and_gallery_share_the_private_evidence_resolver():
     assert "gallery(snapshot,runtime)" in source
 
 
+def test_race_marketplace_uses_active_items_and_completed_purchase_stock():
+    with _staging_env():
+        runtime = _fake_runtime_factory()
+        runtime.rows["marketplace_items_v2"] = [{
+            "item_id": "ITEM-1", "event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F",
+            "item_name": "Carbon Fibre Kit", "unit_cost_credits": 20,
+            "stock_limit": 40, "is_active": True,
+        }]
+        runtime.rows["marketplace_transactions_v2"] = [{
+            "marketplace_transaction_id": "PURCHASE-1", "event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F",
+            "team_id": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F", "item_id": "ITEM-1",
+            "quantity": 2, "amount_paid": 40, "status": "COMPLETED",
+        }]
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+
+    marketplace = adapter._marketplace_payload("CORE-V2-RACE-UAT-EVT-4CF0CEAF5F", "CORE-V2-RACE-UAT-T01-4CF0CEAF5F")
+    assert marketplace["items"] == [{"ItemID": "ITEM-1", "ItemName": "Carbon Fibre Kit", "CreditCost": 20, "StockQuantity": 38, "Active": True}]
+    assert marketplace["purchases"][0]["Amount"] == 40
+
+
+def test_race_marketplace_control_uses_existing_item_activation_flag():
+    source = Path("screens/formula_race.py").read_text()
+    adapter = Path("data/formula_race_core_v2_adapter.py").read_text()
+    assert "OPEN MARKETPLACE" in source
+    assert "set_race_marketplace_runtime" in source
+    assert "set_formula_race_marketplace_runtime" in adapter
+    assert '"is_active": active' in adapter
+
+
 def test_race_adapter_captain_workspace_returns_default_build_status_when_empty():
     with _staging_env():
         runtime = _fake_runtime_factory()

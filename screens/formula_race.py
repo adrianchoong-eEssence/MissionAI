@@ -592,6 +592,22 @@ def control_centre(s, control=None):
     with a: runtime_action("LAUNCH CHECKPOINTS","LAUNCH","launch","primary")
     with b: runtime_action("PAUSE CHECKPOINTS","PAUSE","pause")
     with c: runtime_action("CLOSE CHECKPOINTS","CLOSE","close")
+    st.subheader("Marketplace")
+    marketplace = control.runtime._marketplace_payload(s.event_id, "", active_only=False) if control else {"items": []}
+    active_items = [item for item in marketplace.get("items", []) if item.get("Active")]
+    st.caption(f"{len(active_items)} active of {len(marketplace.get('items', []))} configured items")
+    def marketplace_action(label, action_name, key, kind="secondary"):
+        if st.button(label, key=key, type=kind, width="stretch", disabled=bool(control and not actor)):
+            if control:
+                control.set_race_marketplace_runtime(s.event_id, action_name, actor)
+                st.success(f"{label} complete."); st.rerun()
+            else: st.toast(f"DEMO ONLY · {label}")
+    a,b,c=st.columns(3)
+    with a: marketplace_action("OPEN MARKETPLACE", "OPEN", "marketplace_open", "primary")
+    with b: marketplace_action("PAUSE MARKETPLACE", "PAUSE", "marketplace_pause")
+    with c: marketplace_action("CLOSE MARKETPLACE", "CLOSE", "marketplace_close")
+    if marketplace.get("items"):
+        st.dataframe(marketplace["items"], width="stretch", hide_index=True)
     a,b,c=st.columns(3)
     with a: action("Resume race","resume")
     with b: action("Review submissions","review")
@@ -670,9 +686,11 @@ def show_formula_race(db=None, event_id=""):
     elif page=="Marketplace":
         if snapshot.is_demo: marketplace(snapshot)
         else:
-            _title("Canonical marketplace", "Build Materials Depot", "Live purchases, stock deduction and overspend prevention are operated in Control Centre.")
-            st.info("Open Race Control to manage the live marketplace and audited team wallets.")
-            st.dataframe([x.__dict__ for x in snapshot.transactions if x.kind in {"SPEND", "REFUND"}], width="stretch", hide_index=True)
+            _title("Canonical marketplace", "Build Materials Depot", "Live purchases, stock deduction and overspend prevention are recorded through the R.A.C.E. marketplace ledger.")
+            marketplace_state = runtime._marketplace_payload(snapshot.event_id, "", active_only=False)
+            st.dataframe(marketplace_state.get("items", []), width="stretch", hide_index=True)
+            st.dataframe(marketplace_state.get("purchases", []), width="stretch", hide_index=True)
+            st.caption("Open, pause, or close the marketplace in Race Control Centre.")
     elif page=="Race Map": race_map(snapshot)
     else:
         control_centre(snapshot,control)
