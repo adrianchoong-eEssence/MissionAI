@@ -196,6 +196,32 @@ def test_race_marketplace_open_verifies_persisted_active_rows():
     assert result["active"] is True
 
 
+def test_race_manual_credit_adjustment_calls_the_race_ledger_rpc_once():
+    class Runtime:
+        is_configured = True
+        can_publish = True
+        url = "https://staging.exos-core-v2.example.com"
+
+        def __init__(self):
+            self.calls = []
+
+        def _request(self, method, path, payload=None, query=None, admin=True):
+            self.calls.append((method, path, payload, admin))
+            return {"CreditTransactionID": "TX-1", "Duplicate": False, "Amount": 50}
+
+    runtime = Runtime()
+    with _staging_env():
+        result = FormulaRaceCoreV2StagingAdapter(runtime).formula_race_manual_credit_adjustment(
+            "EVENT-1", "TEAM-1", 50, "Facilitator correction", "Ari", "adjustment-1"
+        )
+
+    assert result["Amount"] == 50
+    assert runtime.calls == [("POST", "rpc/exos_v2_formula_race_manual_credit_adjustment", {
+        "p_event_id": "EVENT-1", "p_team_id": "TEAM-1", "p_amount": 50,
+        "p_reason": "Facilitator correction", "p_actor": "Ari", "p_idempotency_key": "adjustment-1",
+    }, True)]
+
+
 def test_race_adapter_captain_workspace_returns_default_build_status_when_empty():
     with _staging_env():
         runtime = _fake_runtime_factory()

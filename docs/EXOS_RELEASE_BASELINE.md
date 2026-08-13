@@ -58,6 +58,9 @@ currently present or healthy in any database:
   patch for explicit Captain technical actors, idempotent checkpoint approval,
   atomic purchases, and deterministic final-result locking; depends on 020,
   022, 023, and 024. It does not alter the frozen Standard runtime.
+- `028_formula_race_manual_credit_adjustments.sql` — R.A.C.E.-only,
+  service-controlled, idempotent manual credit-ledger adjustment function; it
+  depends on the Core v2 ledger and does not alter the frozen Standard runtime.
 
 ### Rollback, verification, and diagnostics
 

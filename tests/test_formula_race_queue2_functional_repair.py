@@ -4,6 +4,7 @@ from engines.formula_race import final_standings, wallet_projection
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL = (ROOT / "supabase" / "027_formula_race_core_v2_atomic_operations.sql").read_text()
+ADJUSTMENT_SQL = (ROOT / "supabase" / "028_formula_race_manual_credit_adjustments.sql").read_text()
 ADAPTER = (ROOT / "data" / "formula_race_core_v2_adapter.py").read_text()
 CAPTAIN = (ROOT / "screens" / "formula_race_captain.py").read_text()
 RACE_CONTROL = (ROOT / "screens" / "formula_race.py").read_text()
@@ -31,6 +32,13 @@ def test_purchase_is_atomic_idempotent_and_locks_wallet_and_stock():
     assert "marketplace_transactions_v2" in SQL
     assert "race-purchase-credit|" in SQL
     assert "Stable purchase idempotency key is required" in SQL
+
+
+def test_manual_credit_adjustment_is_idempotent_and_uses_the_canonical_ledger():
+    assert "exos_v2_formula_race_manual_credit_adjustment" in ADJUSTMENT_SQL
+    assert "credit_transactions_v2" in ADJUSTMENT_SQL
+    assert "MANUAL_ADJUSTMENT" in ADJUSTMENT_SQL
+    assert "on conflict(event_id,idempotency_key) do nothing" in ADJUSTMENT_SQL
 
 
 def test_captain_submission_uses_explicit_technical_actor_not_standard_join():

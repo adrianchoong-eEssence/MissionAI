@@ -1168,6 +1168,25 @@ class FormulaRaceCoreV2StagingAdapter:
             },
         ) or {}
 
+    def formula_race_manual_credit_adjustment(self, event_id: str, team_id: str, amount: int, reason: str, actor: str, idempotency_key: str) -> dict[str, Any]:
+        if not str(team_id).strip():
+            raise RuntimeError("R.A.C.E. team is required for a manual credit adjustment.")
+        if int(amount or 0) == 0:
+            raise RuntimeError("Manual credit adjustment must be non-zero.")
+        if not str(reason).strip() or not str(actor).strip() or not str(idempotency_key).strip():
+            raise RuntimeError("Facilitator identity, reason, and idempotency key are required.")
+        return self._rpc(
+            "exos_v2_formula_race_manual_credit_adjustment",
+            {
+                "p_event_id": str(event_id).strip(),
+                "p_team_id": str(team_id).strip(),
+                "p_amount": int(amount),
+                "p_reason": str(reason).strip(),
+                "p_actor": str(actor).strip(),
+                "p_idempotency_key": str(idempotency_key).strip(),
+            },
+        ) or {}
+
     def formula_race_review_checkpoint(self, submission_id: str, decision: str, reviewer_id: str, notes: str = "", reason: str = "", idempotency_key: str = "") -> dict[str, Any]:
         return self._rpc(
             "exos_v2_formula_race_review_checkpoint",

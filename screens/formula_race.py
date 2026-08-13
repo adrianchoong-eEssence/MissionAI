@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from urllib.parse import urlparse
 import streamlit as st
 
@@ -618,7 +619,26 @@ def control_centre(s, control=None):
     t1,t2,t3=st.tabs(["Participant Recovery","Leader Recovery","Manual Credit Adjustment"])
     with t1: st.text_input("Participant ID"); action("Recover participant","recover_participant")
     with t2: st.selectbox("Team",[t.name for t in s.teams],key="leader_team"); action("Recover leader","recover_leader")
-    with t3: st.selectbox("Adjust team",[t.name for t in s.teams],key="adjust_team"); st.number_input("Credit adjustment",-500,500,0); st.text_input("Required reason"); action("Prepare adjustment","adjust_credit")
+    with t3:
+        team_name=st.selectbox("Adjust team",[t.name for t in s.teams],key="adjust_team")
+        amount=st.number_input("Credit adjustment",-500,500,0,key="race_adjustment_amount")
+        reason=st.text_input("Required reason",key="race_adjustment_reason")
+        selected=next((team for team in s.teams if team.name==team_name),None)
+        key_name=f"race_manual_adjustment:{s.event_id}:{selected.id if selected else ''}:{int(amount)}:{reason.strip()}"
+        if key_name not in st.session_state:
+            st.session_state[key_name]=f"race-manual-adjustment:{s.event_id}:{selected.id if selected else ''}:{uuid.uuid4()}"
+        if st.button("APPLY CREDIT ADJUSTMENT",type="primary",width="stretch",disabled=not control or not actor or not reason.strip() or not amount or selected is None):
+            try:
+                result=control.adjust_race_credits(s.event_id,selected.id,int(amount),reason,actor,st.session_state[key_name])
+                st.success(f"Manual credit adjustment recorded: {result.get('Amount', amount)} credits.")
+                st.session_state.pop(key_name,None);st.rerun()
+            except (RuntimeError, ValueError) as error:
+                st.error(str(error))
+        adjustments=[x.__dict__ for x in s.transactions if x.kind=="MANUAL_ADJUSTMENT"]
+        if adjustments:
+            st.dataframe(adjustments,width="stretch",hide_index=True)
+        else:
+            st.caption("No manual credit adjustments recorded for this event.")
     if not control: st.warning("DEMO DATA · No live mutation is performed.")
 
 

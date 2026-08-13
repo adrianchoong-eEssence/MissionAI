@@ -66,6 +66,7 @@ patches:
 - 023 Core-v2 race-results locking
 - 024 Core-v2 Captain team-access recovery
 - 027 Core-v2 R.A.C.E. atomic operations (depends on 020, 022, 023, and 024)
+- 028 Core-v2 R.A.C.E. idempotent manual credit adjustments (depends on 020 and 027)
 
 020’s rollback is not a R.A.C.E. forward migration. The older 015–019 Formula
 R.A.C.E. migration series, its rollbacks, seeds, and verification scripts have

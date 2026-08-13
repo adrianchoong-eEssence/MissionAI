@@ -140,5 +140,8 @@ class ControlRuntime:
     def set_race_marketplace_runtime(self,event_id,action,actor):
         return self._run(self.runtime.set_formula_race_marketplace_runtime,event_id,action,actor)
 
+    def adjust_race_credits(self,event_id,team_id,amount,reason,actor,idempotency_key):
+        return self._run(self.runtime.formula_race_manual_credit_adjustment,event_id,team_id,amount,reason,actor,idempotency_key)
+
     def review_race_checkpoint(self,submission_id,decision,reviewer_id,notes="",reason="",idempotency_key=""):
         return self._run(self.runtime.formula_race_review_checkpoint,submission_id,decision,reviewer_id,notes,reason,idempotency_key)
