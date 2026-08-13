@@ -1,6 +1,7 @@
 from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
 import os
 from contextlib import contextmanager
+from pathlib import Path
 
 
 @contextmanager
@@ -107,6 +108,35 @@ def test_race_adapter_debug_get_runtime_teams_tracks_expected_filter():
     assert result["resolved_event_id"] == "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
     assert result["query"]["event_id"] == "eq.CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
     assert len(result["rows"]) == 10
+
+
+def test_race_adapter_exposes_submission_evidence_storage_reference():
+    with _staging_env():
+        runtime = _fake_runtime_factory()
+        runtime.rows["submissions_v2"] = [{
+            "submission_id": "SUBMISSION-1", "event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F",
+            "team_id": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F", "activity_id": "CHECKPOINT-1",
+            "submission_status": "SUBMITTED", "submission_payload": {
+                "storage_reference": "supabase://exos-submissions/EVENT/TEAM/CHECKPOINT/photo.jpg"
+            },
+        }]
+        runtime.rows["submission_evidence_v2"] = [{
+            "submission_id": "SUBMISSION-1", "evidence_type": "PHOTO",
+            "evidence_uri": "supabase://exos-submissions/EVENT/TEAM/CHECKPOINT/photo.jpg",
+        }]
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+
+    submission = adapter.get_canonical_submissions("CORE-V2-RACE-UAT-EVT-4CF0CEAF5F")[0]
+    assert submission["StorageReference"] == "supabase://exos-submissions/EVENT/TEAM/CHECKPOINT/photo.jpg"
+    assert submission["EvidenceType"] == "PHOTO"
+    assert submission["EvidenceURI"] == submission["StorageReference"]
+
+
+def test_race_review_and_gallery_share_the_private_evidence_resolver():
+    source = Path("screens/formula_race.py").read_text()
+    assert "def _resolve_race_private_evidence(runtime, storage_reference: str)" in source
+    assert "reviews(snapshot,control,runtime)" in source
+    assert "gallery(snapshot,runtime)" in source
 
 
 def test_race_adapter_captain_workspace_returns_default_build_status_when_empty():

@@ -32,6 +32,19 @@ def _normalize_join_code(value: str) -> str:
     return str(value or "").strip().upper()
 
 
+_RACE_EVIDENCE_PREFIX = "supabase://exos-submissions/"
+
+
+def _resolve_race_private_evidence(runtime, storage_reference: str) -> str:
+    reference = str(storage_reference or "").strip()
+    if not reference.startswith(_RACE_EVIDENCE_PREFIX):
+        return ""
+    storage_path = reference[len(_RACE_EVIDENCE_PREFIX):].strip().lstrip("/")
+    if not storage_path:
+        return ""
+    return str(runtime.create_submission_image_url(storage_path) or "")
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def _cached_event_id_from_join_code(join_code: str, runtime_host: str) -> str:
     if not _staging_runtime_enabled():
@@ -441,12 +454,17 @@ def checkpoints(s):
     if st.button("Open Control Centre",type="primary",width="stretch"): st.session_state.race_nav="Control Centre"; st.rerun()
 
 
-def reviews(s, control=None):
+def reviews(s, control=None, runtime=None):
     _title("Submission and Award Pipeline", "RACE Review Queue", "Approve through the canonical review and CreditTransaction pipeline.")
     team_identity={team.id:team.name for team in s.teams}
     for x in s.submissions:
         with st.container(border=True):
             c1,c2=st.columns([4,1]); c1.markdown(f"### {x.checkpoint}\n{team_identity.get(x.team_id,x.team_id)} · {x.evidence} · submitted {x.submitted_at}"); c2.markdown(f"**{x.status}**")
+            evidence_url = _resolve_race_private_evidence(runtime, x.evidence) if runtime else ""
+            if evidence_url:
+                st.image(evidence_url, caption=f"{team_identity.get(x.team_id, x.team_id)} · {x.checkpoint}", use_container_width=True)
+            elif str(x.evidence).startswith(_RACE_EVIDENCE_PREFIX):
+                st.warning("Private photo evidence is unavailable.")
             actor=st.text_input("Facilitator identity",key=f"review_actor_{x.id}") if control else ""
             notes=st.text_input("Notes / rejection reason",key=f"review_notes_{x.id}") if control else ""
             pending=x.status.upper() in {"PENDING","PENDING_REVIEW","SUBMITTED"}
@@ -463,12 +481,21 @@ def reviews(s, control=None):
     if st.button("Open team photo gallery",width="stretch"): st.session_state.race_subscreen="gallery"; st.rerun()
 
 
-def gallery(s):
-    _title("Evidence", "Team Photo Gallery", "Review checkpoint evidence by team; demonstration frames stand in for canonical media URLs.")
+def gallery(s, runtime=None):
+    _title("Evidence", "Team Photo Gallery", "Review checkpoint evidence by team.")
     for row in range(2):
         cols=st.columns(3)
         for col,t in zip(cols,s.teams[row*3:row*3+3]):
-            col.markdown(f"<div class='race-card' style='height:180px;background:linear-gradient(145deg,{t.colour}33,#0c2435)'><span class='demo'>DEMO IMAGE</span><h3 style='margin-top:75px'>{t.name}</h3><p>Checkpoint build evidence</p></div>",unsafe_allow_html=True)
+            col.markdown(f"<div class='race-card'><h3>{t.name}</h3><p>Checkpoint build evidence</p></div>",unsafe_allow_html=True)
+            evidence = [x for x in s.submissions if x.team_id == t.id and str(x.evidence).startswith(_RACE_EVIDENCE_PREFIX)]
+            if not evidence:
+                col.caption("No photo evidence submitted.")
+            for x in evidence:
+                evidence_url = _resolve_race_private_evidence(runtime, x.evidence) if runtime else ""
+                if evidence_url:
+                    col.image(evidence_url, caption=x.checkpoint, use_container_width=True)
+                else:
+                    col.warning(f"{x.checkpoint}: private photo evidence is unavailable.")
     if st.button("Back to review queue"): st.session_state.race_subscreen=""; st.rerun()
 
 
@@ -627,7 +654,7 @@ def show_formula_race(db=None, event_id=""):
     control = ControlRuntime(db) if db is not None else None
     page=_top(snapshot); sub=st.session_state.get("race_subscreen","")
     if sub=="wallet": wallet(snapshot)
-    elif sub=="gallery": gallery(snapshot)
+    elif sub=="gallery": gallery(snapshot,runtime)
     elif page=="Overview": overview(snapshot)
     elif page=="Live Programme": live_programme(snapshot)
     elif page=="Championship":
@@ -639,7 +666,7 @@ def show_formula_race(db=None, event_id=""):
         checkpoints(snapshot) if view=="Checkpoint Control" else build_status(snapshot,control)
     elif page=="Reviews":
         view=st.radio("Review view",["Review Queue","Photo Gallery","Judging"],horizontal=True,label_visibility="collapsed")
-        reviews(snapshot,control) if view=="Review Queue" else (gallery(snapshot) if view=="Photo Gallery" else judging(snapshot,control))
+        reviews(snapshot,control,runtime) if view=="Review Queue" else (gallery(snapshot,runtime) if view=="Photo Gallery" else judging(snapshot,control))
     elif page=="Marketplace":
         if snapshot.is_demo: marketplace(snapshot)
         else:

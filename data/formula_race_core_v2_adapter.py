@@ -413,6 +413,20 @@ class FormulaRaceCoreV2StagingAdapter:
                 "order": "submitted_at.desc",
             },
         )
+        submission_ids = [str(row.get("submission_id", "")) for row in rows if row.get("submission_id")]
+        evidence_rows = self._get(
+            "submission_evidence_v2",
+            {
+                "submission_id": _in_filter(submission_ids),
+                "select": "submission_id,evidence_type,evidence_uri,evidence_payload,captured_by,captured_at",
+                "order": "captured_at.desc",
+            },
+        ) if submission_ids else []
+        evidence_by_submission = {
+            str(row.get("submission_id", "")): row
+            for row in evidence_rows
+            if str(row.get("submission_id", ""))
+        }
         return [
             {
                 "SubmissionID": str(row.get("submission_id", "")),
@@ -423,6 +437,16 @@ class FormulaRaceCoreV2StagingAdapter:
                 "Judge": str(row.get("reviewed_by", "")),
                 "Score": row.get("score", ""),
                 "SubmissionPayload": row.get("submission_payload", {}),
+                "StorageReference": str(
+                    (row.get("submission_payload") or {}).get("storage_reference", "")
+                    or evidence_by_submission.get(str(row.get("submission_id", "")), {}).get("evidence_uri", "")
+                ),
+                "EvidenceType": str(
+                    evidence_by_submission.get(str(row.get("submission_id", "")), {}).get("evidence_type", "NONE")
+                ),
+                "EvidenceURI": str(
+                    evidence_by_submission.get(str(row.get("submission_id", "")), {}).get("evidence_uri", "")
+                ),
                 "SubmittedAt": row.get("submitted_at") or row.get("created_at"),
             }
             for row in rows
