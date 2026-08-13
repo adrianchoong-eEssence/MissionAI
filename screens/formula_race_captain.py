@@ -264,8 +264,14 @@ def show_formula_race_captain(runtime_override=None):
     approved=sum(str(r.get("Status","")).upper()=="APPROVED" for r in checkpoints)
     wallet=dict(workspace.get("Wallet",{}));build=dict(workspace.get("BuildStatus",{}))
     a,b,c,d,e,f=st.columns(6);a.metric("Championship rank",workspace.get("ChampionshipRank","—"));b.metric("Championship score",workspace.get("ChampionshipScore",0));c.metric("Credits earned",workspace.get("CreditsEarned",wallet.get("CreditsEarned",0)));d.metric("Credits spent",workspace.get("CreditsSpent",wallet.get("CreditsSpent",0)));e.metric("Wallet",wallet.get("Balance",0));f.metric("Build status",build.get("status","Not Started"))
-    one,two,three=st.tabs(["RACE Checkpoints","Wallet & Marketplace","Submissions"])
-    with one:
+    captain_section = st.radio(
+        "Captain section",
+        ["RACE Checkpoints", "Wallet & Marketplace", "Submissions"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="race_captain_section",
+    )
+    if captain_section == "RACE Checkpoints":
         st.markdown("<style>.race-checkpoint{background:#0b1725;border:1px solid #253950;border-left:5px solid #ff5555;border-radius:16px;padding:18px;margin:10px 0;color:#f3f6fa}.race-checkpoint h3{margin:0;color:#fff}.race-checkpoint .credits{color:#ffca3a;font-weight:800}.race-checkpoint .status{letter-spacing:.08em;font-size:.78rem;font-weight:900}</style>",unsafe_allow_html=True)
         runtime_status=str(checkpoint_runtime.get("status",checkpoint_runtime.get("Status","READY"))).upper()
         if runtime_status!="LIVE":st.info(f"RACE Checkpoints are {runtime_status}. Your four cards will open when the facilitator launches them.")
@@ -290,10 +296,14 @@ def show_formula_race_captain(runtime_override=None):
                         st.success("Proof submitted for facilitator review.");st.rerun()
                     except RuntimeDatabaseError as error:st.error(str(error))
                     except RuntimeError as error:st.error(str(error))
-    with two:
+    if captain_section == "Wallet & Marketplace":
         st.caption("All wallet and marketplace activity is scoped to this EventID and TeamID.")
+        earned, spent, balance = st.columns(3)
+        earned.metric("Credits Earned", workspace.get("CreditsEarned", wallet.get("CreditsEarned", 0)))
+        spent.metric("Credits Spent", workspace.get("CreditsSpent", wallet.get("CreditsSpent", 0)))
+        balance.metric("Wallet Balance", wallet.get("Balance", 0))
         items=list(workspace.get("Marketplace",[]))
-        if not items:st.info("Marketplace is not open yet.")
+        if not items:st.info("Marketplace purchasing is unavailable until the facilitator opens it.")
         else:
             labels={f"{item.get('ItemName')} · {item.get('CreditCost')} Credits · {item.get('StockQuantity')} available":item for item in items}
             with st.form("race_marketplace_purchase"):
@@ -309,7 +319,7 @@ def show_formula_race_captain(runtime_override=None):
                 except RuntimeError as error:st.error(str(error))
         purchases=list(workspace.get("Purchases",[]))
         if purchases:st.dataframe(purchases,width="stretch",hide_index=True)
-    with three:
+    if captain_section == "Submissions":
         if submissions:
             st.dataframe(
                 [{key: value for key, value in submission.items() if key != "TeamID"} for submission in submissions],

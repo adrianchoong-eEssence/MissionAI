@@ -20,3 +20,14 @@ def test_team_asset_slots_cover_roster():
     import json
     manifest=json.loads(Path("Assets/race_teams/manifest.json").read_text())
     assert list(manifest)==EXPECTED
+
+
+def test_captain_navigation_uses_explicit_selectable_sections():
+    source = Path("screens/formula_race_captain.py").read_text()
+    assert 'captain_section = st.radio(' in source
+    assert 'key="race_captain_section"' in source
+    assert 'if captain_section == "RACE Checkpoints":' in source
+    assert 'if captain_section == "Wallet & Marketplace":' in source
+    assert 'if captain_section == "Submissions":' in source
+    assert 'st.tabs(["RACE Checkpoints","Wallet & Marketplace","Submissions"])' not in source
+    assert "formula_race_purchase" in source
