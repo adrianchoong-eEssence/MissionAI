@@ -19,7 +19,9 @@ def _deployment_environment() -> str:
         return ""
 
 
-if _deployment_environment() == "staging":
+_race_captain_requested = str(st.query_params.get("race", "")).strip() == "1"
+
+if _deployment_environment() == "staging" and not _race_captain_requested:
     show_participant()
     st.stop()
 
@@ -104,7 +106,7 @@ def _is_core_v2_race_request() -> bool:
     return "FORMULA RACE" in event_name or event_name == "RACE" or join_code.startswith("RACE")
 
 
-if str(st.query_params.get("race", "")) == "1" or st.session_state.get("race_captain"):
+if _race_captain_requested or st.session_state.get("race_captain"):
     show_formula_race_captain()
 elif _is_core_v2_race_request():
     show_formula_race_captain()

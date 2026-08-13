@@ -24,9 +24,10 @@ AIA = {
 }
 
 
-def test_staging_entrypoint_stops_before_race_or_legacy_imports():
+def test_staging_entrypoint_preserves_standard_guard_but_allows_explicit_race_captain_route():
     source = (ROOT / "Participant.py").read_text()
-    staging = source.index('if _deployment_environment() == "staging":')
+    assert '_race_captain_requested = str(st.query_params.get("race", "")).strip() == "1"' in source
+    staging = source.index('if _deployment_environment() == "staging" and not _race_captain_requested:')
     stop = source.index("st.stop()", staging)
     race_import = source.index("from data.formula_race_core_v2_adapter")
     strict_path = source[staging:stop]
@@ -35,6 +36,8 @@ def test_staging_entrypoint_stops_before_race_or_legacy_imports():
     assert "GoogleSheetsDB" not in strict_path
     assert "get_runtime_database" not in strict_path
     assert "formula_race" not in strict_path.casefold()
+    assert "if _race_captain_requested or st.session_state.get(\"race_captain\"):" in source
+    assert source.index("if _race_captain_requested or st.session_state.get(\"race_captain\"):") < source.index("show_formula_race_captain()")
 
 
 def test_standard_participant_screen_has_no_hybrid_data_source():
