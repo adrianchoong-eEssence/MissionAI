@@ -705,6 +705,8 @@ def show_formula_race(db=None, event_id=""):
             f"GOOGLE_SHEETS_RUNTIME_CALLS = {counts['GOOGLE_SHEETS_RUNTIME_CALLS']}"
         )
         _staging_diagnostics(runtime, requested_join_code, event_id)
+    if _staging_runtime_enabled() and hasattr(runtime, "get_performance_report") and str(st.query_params.get("performance", "")).lower() in {"1", "true", "yes"}:
+        st.dataframe(runtime.get_performance_report().get("Components", []), width="stretch", hide_index=True)
     control = ControlRuntime(db) if db is not None else None
     page=_top(snapshot); sub=st.session_state.get("race_subscreen","")
     if sub=="wallet": wallet(snapshot)

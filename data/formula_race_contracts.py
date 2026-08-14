@@ -174,20 +174,15 @@ class LiveFormulaRaceProvider:
         if strict_core_v2:
             if not hasattr(self.db.runtime, "get_formula_race_state"):
                 raise RuntimeError("Core v2 runtime state reader missing.")
-            state = self.db.runtime.get_formula_race_state(event_id) if hasattr(self.db.runtime, "get_formula_race_state") else {}
-            control = {
-                "CurrentStageStatus": "READY",
-                "Elapsed": "00:00",
-                "CurrentStageName": "Programme ready",
-            }
+            state = {}
+            control = {"CurrentStageStatus": "READY", "Elapsed": "00:00", "CurrentStageName": "Programme ready"}
         else:
             state = self.db.get_event_state(event_id) or {}
             control = self.db.get_runtime_control_state(event_id) or {}
         operations = {}
         if hasattr(self.db, "runtime") and getattr(self.db.runtime, "can_publish", False):
             try:
-                operations = self.db.runtime.get_formula_race_state(event_id) or {}
-                operations["Checkpoints"] = self.db.runtime.get_formula_race_checkpoints(event_id)
+                operations = self.db.runtime.get_formula_race_state(event_id, raw_teams) or {}
             except Exception: operations = {}
             if strict_core_v2 and not isinstance(operations, dict):
                 raise RuntimeError("Core v2 race state unavailable.")
@@ -195,7 +190,7 @@ class LiveFormulaRaceProvider:
         captain_status = {}
         if self.db.runtime.can_publish:
             try:
-                report = self.db.runtime.get_canonical_transaction_report(event_id) or {}
+                report = self.db.runtime.get_canonical_transaction_report(event_id, raw_teams) or {}
             except Exception:
                 report = {}
             try:
@@ -245,6 +240,7 @@ class LiveFormulaRaceProvider:
             str(row.get("Status", "PENDING")), str(row.get("SubmittedAt", row.get("Timestamp", ""))),
             str(row.get("StorageReference", row.get("PhotoURL", row.get("EvidenceType", "Evidence")))),
         ) for row in submissions_raw)
+        state = operations or state
         checkpoint_state = operations.get("Checkpoints", {})
         if isinstance(checkpoint_state, list):
             checkpoint_state = {"Status": ""}

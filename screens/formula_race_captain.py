@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import uuid
 import html
+import io
 import os
 import json
+from time import perf_counter
 from pathlib import Path
 from typing import Any
 import streamlit as st
@@ -99,6 +101,39 @@ def _purchase_idempotency_key(event_id: str, team_id: str, item_id: str, quantit
         key=f"race-captain-purchase:{event_id}:{team_id}:{item_id}:{int(quantity)}:{uuid.uuid4()}"
         st.session_state[key_name]=key
     return key
+
+
+def _optimise_race_photo(uploaded) -> tuple[bytes, str, dict[str, Any]]:
+    raw = uploaded.getvalue()
+    details: dict[str, Any] = {"OriginalBytes": len(raw), "UploadBytes": len(raw), "Optimised": False}
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(raw)) as image:
+            image = ImageOps.exif_transpose(image)
+            image.thumbnail((1600, 1600))
+            if image.mode != "RGB":
+                background = Image.new("RGB", image.size, "white")
+                background.paste(image, mask=image.getchannel("A") if "A" in image.getbands() else None)
+                image = background
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=82, optimize=True)
+            compressed = output.getvalue()
+        if len(compressed) < len(raw):
+            details.update({"UploadBytes": len(compressed), "Optimised": True})
+            return compressed, "image/jpeg", details
+    except Exception:
+        pass
+    return raw, uploaded.type or "image/jpeg", details
+
+
+def _captain_error(error: Exception, *, cost: int = 0, wallet: int = 0) -> None:
+    message = str(error).lower()
+    if "insufficient credits" in message:
+        st.error(f"Not enough Credits\n\nCost: {cost}\n\nWallet: {wallet}\n\nNeed: {max(cost-wallet, 0)} more")
+    elif "captain session" in message or "session is inactive" in message:
+        st.error("Your captain session is no longer active. Sign in again to continue.")
+    else:
+        st.error("We could not complete that R.A.C.E. action. Please try again.")
 
 def _set_session(payload):
     normalised_session = _normalise_session_payload(payload)
@@ -250,11 +285,9 @@ def show_formula_race_captain(runtime_override=None):
             f"LEGACY_RUNTIME_CALLS = {counts['LEGACY_RUNTIME_CALLS']} | "
             f"GOOGLE_SHEETS_RUNTIME_CALLS = {counts['GOOGLE_SHEETS_RUNTIME_CALLS']}"
         )
-    submissions=[
-        row for row in (
-            runtime.get_canonical_submissions(event_id) if runtime.can_publish else []
-        ) if str(row.get("TeamID",""))==team_id
-    ]
+        if str(st.query_params.get("performance", "")).lower() in {"1", "true", "yes"}:
+            st.dataframe(runtime.get_performance_report().get("Components", []), width="stretch", hide_index=True)
+    submissions=list(workspace.get("Submissions", []))
     asset=ASSET_ROOT/TEAM_ASSETS.get(name,"")
     if asset.is_file():st.image(str(asset),width=96)
     team_identity=str(workspace.get("TeamIdentity",name or "Your Team"))
@@ -286,16 +319,18 @@ def show_formula_race_captain(runtime_override=None):
                 if st.button("Submit Proof",type="primary",disabled=disabled,key=f"race_submit_{checkpoint.get('ActivityID')}"):
                     storage_reference=""
                     try:
-                        if uploaded:
-                            storage_path=f"{event_id}/{team_id}/{checkpoint.get('ActivityID')}/{uuid.uuid4()}-{uploaded.name}"
-                            runtime.upload_submission_image(storage_path,uploaded.getvalue(),uploaded.type or "image/jpeg")
-                            storage_reference="supabase://exos-submissions/"+storage_path
-                        activity_id=str(checkpoint.get("ActivityID", ""))
-                        runtime.formula_race_submit_checkpoint(session.get("SessionToken",""),device,
-                            activity_id,answer,storage_reference,_submission_idempotency_key(event_id,team_id,activity_id))
+                        with st.spinner("Submitting proof…"):
+                            if uploaded:
+                                started_at=perf_counter();payload,content_type,photo=_optimise_race_photo(uploaded);runtime.record_performance_component("captain.photo_processing",started_at)
+                                if photo["Optimised"]:st.caption(f"Photo optimised: {photo['OriginalBytes'] // 1024} KB to {photo['UploadBytes'] // 1024} KB")
+                                storage_path=f"{event_id}/{team_id}/{checkpoint.get('ActivityID')}/{uuid.uuid4()}-{uploaded.name.rsplit('.', 1)[0]}.jpg"
+                                runtime.upload_submission_image(storage_path,payload,content_type)
+                                storage_reference="supabase://exos-submissions/"+storage_path
+                            activity_id=str(checkpoint.get("ActivityID", ""))
+                            runtime.formula_race_submit_checkpoint(session.get("SessionToken",""),device,
+                                activity_id,answer,storage_reference,_submission_idempotency_key(event_id,team_id,activity_id))
                         st.success("Proof submitted for facilitator review.");st.rerun()
-                    except RuntimeDatabaseError as error:st.error(str(error))
-                    except RuntimeError as error:st.error(str(error))
+                    except (RuntimeDatabaseError,RuntimeError) as error:_captain_error(error)
     if captain_section == "Wallet & Marketplace":
         st.caption("All wallet and marketplace activity is scoped to this EventID and TeamID.")
         earned, spent, balance = st.columns(3)
@@ -312,11 +347,11 @@ def show_formula_race_captain(runtime_override=None):
             if buy:
                 try:
                     item_id=labels[selected].get("ItemID","")
-                    result=runtime.formula_race_purchase(session.get("SessionToken",""),device,
-                        item_id,quantity,_purchase_idempotency_key(event_id,team_id,item_id,int(quantity)))
+                    with st.spinner("Purchasing…"):
+                        result=runtime.formula_race_purchase(session.get("SessionToken",""),device,
+                            item_id,quantity,_purchase_idempotency_key(event_id,team_id,item_id,int(quantity)))
                     st.success(f"Purchase confirmed. Balance: {result.get('Balance',0)} Credits");st.rerun()
-                except RuntimeDatabaseError as error:st.error(str(error))
-                except RuntimeError as error:st.error(str(error))
+                except (RuntimeDatabaseError,RuntimeError) as error:_captain_error(error,cost=int(labels[selected].get("CreditCost",0) or 0)*int(quantity),wallet=int(wallet.get("Balance",0) or 0))
         purchases=list(workspace.get("Purchases",[]))
         if purchases:st.dataframe(purchases,width="stretch",hide_index=True)
     if captain_section == "Build":

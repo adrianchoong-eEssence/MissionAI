@@ -159,6 +159,25 @@ def test_race_result_save_uses_the_audited_pre_lock_correction_rpc():
     }, True)]
 
 
+def test_captain_workspace_batches_runtime_and_reuses_marketplace_projection():
+    source = Path("data/formula_race_core_v2_adapter.py").read_text()
+    workspace = source.split("def formula_race_captain_workspace", 1)[1].split("def formula_race_captain_logout", 1)[0]
+    assert workspace.count("self._marketplace_payload(event_id, team_id)") == 1
+    assert '"activity_id": _in_filter(activity_ids)' in workspace
+    assert '"Submissions": [' in workspace
+
+
+def test_adapter_performance_report_has_safe_endpoint_timings_only():
+    runtime = _fake_runtime_factory()
+    with _staging_env():
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+        adapter.get_runtime_event("RACE4CF0CE")
+    report = adapter.get_performance_report()
+    assert report["CallCount"] >= 1
+    assert any(row["Component"].startswith("GET events_v2") for row in report["Components"])
+    assert "payload" not in str(report).lower()
+
+
 def test_race_review_and_gallery_share_the_private_evidence_resolver():
     source = Path("screens/formula_race.py").read_text()
     assert "def _resolve_race_private_evidence(runtime, storage_reference: str)" in source

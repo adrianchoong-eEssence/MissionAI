@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 from datetime import datetime, timezone
+from time import perf_counter
 from uuid import UUID
 from typing import Any
 from urllib.parse import urlparse
@@ -260,6 +261,7 @@ class FormulaRaceCoreV2StagingAdapter:
         self.google_sheets_runtime_calls = 0
         self.last_login_rpc_response: dict[str, Any] | None = None
         self.last_login_normalized_token: str = ""
+        self._performance_events: list[dict[str, Any]] = []
 
     @staticmethod
     def _is_google_sheets_like(path: str) -> bool:
@@ -275,7 +277,30 @@ class FormulaRaceCoreV2StagingAdapter:
         return {
             "LEGACY_RUNTIME_CALLS": int(self.legacy_runtime_calls),
             "GOOGLE_SHEETS_RUNTIME_CALLS": int(self.google_sheets_runtime_calls),
+            "SUPABASE_HTTP_CALLS": len(self._performance_events),
         }
+
+    def _record_performance(self, kind: str, component: str, started_at: float) -> None:
+        self._performance_events.append({"Kind": kind, "Component": component, "DurationMs": round((perf_counter() - started_at) * 1000, 2)})
+
+    def record_performance_component(self, component: str, started_at: float) -> None:
+        self._record_performance("component", component, started_at)
+
+    def get_performance_report(self) -> dict[str, Any]:
+        grouped: dict[tuple[str, str], list[float]] = {}
+        for event in self._performance_events:
+            grouped.setdefault((str(event["Kind"]), str(event["Component"])), []).append(float(event["DurationMs"]))
+        return {"CallCount": len(self._performance_events), "TotalMs": round(sum(float(event["DurationMs"]) for event in self._performance_events), 2), "Components": [
+            {"Kind": kind, "Component": component, "Calls": len(durations), "TotalMs": round(sum(durations), 2), "AverageMs": round(sum(durations) / len(durations), 2)}
+            for (kind, component), durations in sorted(grouped.items())
+        ]}
+
+    def _timed_request(self, method: str, path: str, *, payload=None, query=None, admin: bool = True):
+        started_at = perf_counter()
+        try:
+            return self.runtime._request(method, path, payload=payload, query=query, admin=admin)
+        finally:
+            self._record_performance("supabase", f"{method} {path}", started_at)
 
     def __getattr__(self, name: str):
         return getattr(self.runtime, name)
@@ -286,7 +311,7 @@ class FormulaRaceCoreV2StagingAdapter:
             raise RuntimeError(f"Blocked forbidden legacy path in Core v2 staging: {path}")
         if self._is_google_sheets_like(path):
             self.google_sheets_runtime_calls += 1
-        result = self.runtime._request("GET", path, query=query, admin=admin)
+        result = self._timed_request("GET", path, query=query, admin=admin)
         return result if isinstance(result, list) else ([] if result is None else list(result) if isinstance(result, tuple) else [])
 
     def _post(self, path: str, payload: dict[str, Any] | None = None, admin: bool = True) -> dict[str, Any] | list[dict[str, Any]] | None:
@@ -296,7 +321,7 @@ class FormulaRaceCoreV2StagingAdapter:
         if self._is_google_sheets_like(path):
             self.google_sheets_runtime_calls += 1
         payload = payload or {}
-        return self.runtime._request("POST", path, payload=payload, admin=admin)
+        return self._timed_request("POST", path, payload=payload, admin=admin)
 
     def _patch(self, path: str, query: dict[str, Any], payload: dict[str, Any], admin: bool = True):
         if path in _FORBIDDEN_CORE_V2_PATHS:
@@ -304,7 +329,7 @@ class FormulaRaceCoreV2StagingAdapter:
             raise RuntimeError(f"Blocked forbidden legacy path in Core v2 staging: {path}")
         if self._is_google_sheets_like(path):
             self.google_sheets_runtime_calls += 1
-        return self.runtime._request("PATCH", path, payload=payload, query=query, admin=admin)
+        return self._timed_request("PATCH", path, payload=payload, query=query, admin=admin)
 
     def _delete(self, path: str, query: dict[str, Any], admin: bool = True):
         if path in _FORBIDDEN_CORE_V2_PATHS:
@@ -312,13 +337,13 @@ class FormulaRaceCoreV2StagingAdapter:
             raise RuntimeError(f"Blocked forbidden legacy path in Core v2 staging: {path}")
         if self._is_google_sheets_like(path):
             self.google_sheets_runtime_calls += 1
-        return self.runtime._request("DELETE", path, query=query, admin=admin)
+        return self._timed_request("DELETE", path, query=query, admin=admin)
 
     def _rpc(self, name: str, payload: dict[str, Any], admin: bool = True):
         if name.lower().startswith(_FORBIDDEN_CORE_V2_RPC_PREFIXES):
             self.legacy_runtime_calls += 1
             raise RuntimeError(f"Blocked forbidden legacy race rpc in Core v2 staging: {name}")
-        return self.runtime._request("POST", f"rpc/{name}", payload=payload, admin=admin)
+        return self._timed_request("POST", f"rpc/{name}", payload=payload, admin=admin)
 
     # ---------------------------
     # Compatibility reads (Legacy UI-facing methods)
@@ -575,7 +600,7 @@ class FormulaRaceCoreV2StagingAdapter:
             for row in sessions
         ]
 
-    def get_formula_race_state(self, event_id: str) -> dict[str, Any]:
+    def get_formula_race_state(self, event_id: str, teams: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         checkpoints = self.get_formula_race_checkpoints(event_id)
         build_rows = self._get(
             "build_status_v2",
@@ -614,10 +639,10 @@ class FormulaRaceCoreV2StagingAdapter:
                 }
                 for row in results_rows
             ],
-            "Teams": self.get_runtime_teams(event_id),
+            "Teams": list(teams) if teams is not None else self.get_runtime_teams(event_id),
         }
 
-    def get_canonical_transaction_report(self, event_id: str) -> dict[str, Any]:
+    def get_canonical_transaction_report(self, event_id: str, teams: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         tx_rows = self._get(
             "credit_transactions_v2",
             {
@@ -650,7 +675,7 @@ class FormulaRaceCoreV2StagingAdapter:
                 championship_scores[team_id] += float(row.get("score_delta", 0) or 0)
             except (TypeError, ValueError):
                 pass
-        team_ids = {str(row.get("TeamID", "")) for row in self.get_runtime_teams(event_id)}
+        team_ids = {str(row.get("TeamID", "")) for row in (teams if teams is not None else self.get_runtime_teams(event_id))}
         team_ids = sorted((team_ids | set(balances) | set(championship_scores)) - {""})
         ranked_team_ids = sorted(team_ids, key=lambda team_id: (-championship_scores[team_id], team_id))
         live_ranks = {team_id: index for index, team_id in enumerate(ranked_team_ids, start=1)}
@@ -847,6 +872,7 @@ class FormulaRaceCoreV2StagingAdapter:
         }
 
     def formula_race_captain_workspace(self, session_token: str, device_id: str) -> dict[str, Any]:
+        started_at = perf_counter()
         token = _require_uuid(session_token, "session_token")
         _trace_uuid_context("formula_race_captain_workspace.request", "team_access_sessions_v2", "session_token", token)
         _trace_uuid_context("formula_race_captain_workspace.request", "team_access_sessions_v2", "device_id", device_id)
@@ -876,29 +902,24 @@ class FormulaRaceCoreV2StagingAdapter:
         event_id = str(row.get("event_id", ""))
         team_id = str(row.get("team_id", ""))
 
-        checkpoint_state = []
-        for activity in self._get_checkpoint_activities(event_id):
-            runtime_rows = self._get(
-                "activity_runtime_v2",
-                {
-                    "event_id": f"eq.{event_id}",
-                    "team_id": f"eq.{team_id}",
-                    "activity_id": f"eq.{activity.get('activity_id')}",
-                    "order": "updated_at.desc",
-                    "limit": "1",
-                },
-            )
-            runtime_id = runtime_rows[0].get("runtime_id") if runtime_rows else None
-            _trace_uuid_context("formula_race_captain_workspace.runtime_rows", "activity_runtime_v2", "runtime_id", runtime_id)
-            checkpoint_state.append(self._checkpoint_payload(activity, runtime_rows[0] if runtime_rows else None))
+        activities = self._get_checkpoint_activities(event_id)
+        activity_ids = [str(activity.get("activity_id", "")) for activity in activities if activity.get("activity_id")]
+        runtime_rows = self._get("activity_runtime_v2", {"event_id": f"eq.{event_id}", "team_id": f"eq.{team_id}", "activity_id": _in_filter(activity_ids), "order": "updated_at.desc"}) if activity_ids else []
+        runtime_by_activity = {}
+        for runtime_row in runtime_rows:
+            runtime_by_activity.setdefault(str(runtime_row.get("activity_id", "")), runtime_row)
+        checkpoint_state = [self._checkpoint_payload(activity, runtime_by_activity.get(str(activity.get("activity_id", "")))) for activity in activities]
 
         session_status = "LIVE" if any(row.get("Status") in {"LIVE", "OPEN", "ACTIVE"} for row in checkpoint_state) else "READY"
 
-        report = self.get_canonical_transaction_report(event_id)
+        teams = self.get_runtime_teams(event_id)
+        report = self.get_canonical_transaction_report(event_id, teams)
         standing = next((entry for entry in report.get("Leaderboard", []) if str(entry.get("TeamID", "")) == team_id), {})
-        team = next((entry for entry in self.get_runtime_teams(event_id) if str(entry.get("TeamID", "")) == team_id), {})
-        wallet = self._wallet_payload(event_id, team_id)
-        return {
+        team = next((entry for entry in teams if str(entry.get("TeamID", "")) == team_id), {})
+        wallet = {"CreditsEarned": standing.get("CreditsEarned", 0), "CreditsSpent": standing.get("CreditsSpent", 0), "Balance": standing.get("WalletBalance", 0)}
+        marketplace = self._marketplace_payload(event_id, team_id)
+        submissions = self._get("submissions_v2", {"event_id": f"eq.{event_id}", "team_id": f"eq.{team_id}", "select": "submission_id,activity_id,submission_status,reviewed_at,reviewed_by,score,submitted_at,created_at", "order": "submitted_at.desc"})
+        workspace = {
             "EventID": event_id,
             "TeamID": team_id,
             "TeamIdentity": str(team.get("TeamIdentity", team.get("TeamName", team_id))),
@@ -911,10 +932,20 @@ class FormulaRaceCoreV2StagingAdapter:
             "CheckpointRuntime": {"status": session_status},
             "Wallet": wallet,
             "BuildStatus": self._build_status_payload(event_id, team_id),
-            "Marketplace": self._marketplace_payload(event_id, team_id).get("items", []),
-            "Purchases": self._marketplace_payload(event_id, team_id).get("purchases", []),
+            "Marketplace": marketplace.get("items", []),
+            "Purchases": marketplace.get("purchases", []),
+            "Submissions": [{"SubmissionID": str(item.get("submission_id", "")), "ActivityID": str(item.get("activity_id", "")), "Status": str(item.get("submission_status", "PENDING")), "Judge": str(item.get("reviewed_by", "")), "Score": item.get("score", ""), "SubmittedAt": item.get("submitted_at") or item.get("created_at")} for item in submissions],
             "Session": row,
         }
+        self.record_performance_component("captain.workspace", started_at)
+        return workspace
+
+    def upload_submission_image(self, storage_path: str, payload: bytes, content_type: str):
+        started_at = perf_counter()
+        try:
+            return self.runtime.upload_submission_image(storage_path, payload, content_type)
+        finally:
+            self.record_performance_component("captain.storage_upload", started_at)
 
     def formula_race_captain_logout(self, session_token: str, device_id: str) -> dict[str, Any]:
         token = _require_uuid(session_token, "session_token")

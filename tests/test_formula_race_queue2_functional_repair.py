@@ -90,3 +90,14 @@ def test_race_result_corrections_are_audited_before_lock_and_blocked_afterward()
     assert "insert into public.audit_log_v2" in RESULT_CORRECTION_SQL
     assert "Race result is locked and immutable until explicit unlock." in RESULT_CORRECTION_SQL
     assert "Save Result Correction" in RACE_CONTROL
+
+
+def test_race_performance_keeps_live_reads_fresh_and_optimises_evidence():
+    captain = (ROOT / "screens" / "formula_race_captain.py").read_text()
+    contracts = (ROOT / "data" / "formula_race_contracts.py").read_text()
+    assert "def _optimise_race_photo" in captain
+    assert "image.thumbnail((1600, 1600))" in captain
+    assert "quality=82" in captain
+    assert "Submitting proof…" in captain and "Purchasing…" in captain
+    assert "get_formula_race_state(event_id, raw_teams)" in contracts
+    assert "operations[\"Checkpoints\"] = self.db.runtime.get_formula_race_checkpoints" not in contracts
