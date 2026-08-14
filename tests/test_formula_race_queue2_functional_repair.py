@@ -68,3 +68,16 @@ def test_final_results_use_verified_adjusted_time_and_lock_positions():
 def test_operational_displays_use_team_identity_and_expose_lock_action():
     assert "team_identity={team.id:team.name" in RACE_CONTROL
     assert "LOCK FINAL RESULTS" in RACE_CONTROL
+
+
+def test_race_control_reloads_live_state_after_each_facilitator_write():
+    assert "def _refresh_after_race_control_write" in RACE_CONTROL
+    for mutation in (
+        "control.review_race_checkpoint",
+        "control.save_race_judging",
+        "control.save_race_result",
+        "control.set_race_build_status",
+        "control.set_race_marketplace_runtime",
+    ):
+        assert mutation in RACE_CONTROL
+    assert RACE_CONTROL.count("_refresh_after_race_control_write()") >= 8
