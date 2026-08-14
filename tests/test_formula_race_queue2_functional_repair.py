@@ -5,6 +5,7 @@ from engines.formula_race import final_standings, wallet_projection
 ROOT = Path(__file__).resolve().parents[1]
 SQL = (ROOT / "supabase" / "027_formula_race_core_v2_atomic_operations.sql").read_text()
 ADJUSTMENT_SQL = (ROOT / "supabase" / "028_formula_race_manual_credit_adjustments.sql").read_text()
+RESULT_CORRECTION_SQL = (ROOT / "supabase" / "029_formula_race_result_corrections.sql").read_text()
 ADAPTER = (ROOT / "data" / "formula_race_core_v2_adapter.py").read_text()
 CAPTAIN = (ROOT / "screens" / "formula_race_captain.py").read_text()
 RACE_CONTROL = (ROOT / "screens" / "formula_race.py").read_text()
@@ -81,3 +82,11 @@ def test_race_control_reloads_live_state_after_each_facilitator_write():
     ):
         assert mutation in RACE_CONTROL
     assert RACE_CONTROL.count("_refresh_after_race_control_write()") >= 8
+
+
+def test_race_result_corrections_are_audited_before_lock_and_blocked_afterward():
+    assert "exos_v2_formula_race_save_result" in RESULT_CORRECTION_SQL
+    assert "RACE_RESULT_CORRECTED" in RESULT_CORRECTION_SQL
+    assert "insert into public.audit_log_v2" in RESULT_CORRECTION_SQL
+    assert "Race result is locked and immutable until explicit unlock." in RESULT_CORRECTION_SQL
+    assert "Save Result Correction" in RACE_CONTROL

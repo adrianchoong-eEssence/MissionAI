@@ -132,6 +132,33 @@ def test_race_adapter_exposes_submission_evidence_storage_reference():
     assert submission["EvidenceURI"] == submission["StorageReference"]
 
 
+def test_race_result_save_uses_the_audited_pre_lock_correction_rpc():
+    class Runtime:
+        is_configured = True
+        can_publish = True
+        url = "https://staging.exos-core-v2.example.com"
+
+        def __init__(self):
+            self.calls = []
+
+        def _request(self, method, path, payload=None, query=None, admin=True):
+            self.calls.append((method, path, payload, admin))
+            return {"RaceResultID": "RESULT-1", "Corrected": True}
+
+    runtime = Runtime()
+    with _staging_env():
+        adapter = FormulaRaceCoreV2StagingAdapter(runtime)
+        adapter._get_checkpoint_activities = lambda _event_id: [{"activity_id": "CHECKPOINT-1"}]
+        result = adapter.save_formula_race_result("EVENT-1", "TEAM-1", 10000, 1000, 0, True, "UAT correction", "Adrian")
+
+    assert result["Corrected"] is True
+    assert runtime.calls == [("POST", "rpc/exos_v2_formula_race_save_result", {
+        "p_event_id": "EVENT-1", "p_team_id": "TEAM-1", "p_activity_id": "CHECKPOINT-1",
+        "p_time_ms": 10000, "p_penalty_ms": 1000, "p_bonus": 0.0,
+        "p_verified": True, "p_reason": "UAT correction", "p_actor": "Adrian",
+    }, True)]
+
+
 def test_race_review_and_gallery_share_the_private_evidence_resolver():
     source = Path("screens/formula_race.py").read_text()
     assert "def _resolve_race_private_evidence(runtime, storage_reference: str)" in source

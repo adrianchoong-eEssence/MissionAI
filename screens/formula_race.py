@@ -563,10 +563,19 @@ def drag_results(s, control=None):
     st.dataframe(rows,width="stretch",hide_index=True)
     if not control: st.markdown("<div class='race-card'><h3>Fastest Lap</h3><p>Velocity · 12.18 seconds</p><span class='accent'>+25 BONUS POINTS</span></div>",unsafe_allow_html=True)
     if control:
-        team=st.selectbox("Result team",[t.name for t in s.teams]);time_ms=st.number_input("Finish time (ms)",0,3600000,0);penalty=st.number_input("Penalty (ms)",0,3600000,0);bonus=st.number_input("Bonus credits",0,1000,0);verified=st.checkbox("Verified")
+        team=st.selectbox("Result team",[t.name for t in s.teams]);selected=next(t for t in s.teams if t.name==team);current=next((row for row in live_rows if str(row.get("team_id",""))==selected.id),{})
+        locked=bool(current.get("locked",False))
+        if current:
+            st.caption("Correcting the current pre-lock result. The correction reason and prior result are preserved in the canonical audit log.")
+        time_ms=st.number_input("Finish time (ms)",0,3600000,int(current.get("time_ms",0) or 0),key=f"race_result_time_{selected.id}",disabled=locked)
+        penalty=st.number_input("Penalty (ms)",0,3600000,int(current.get("penalty_ms",0) or 0),key=f"race_result_penalty_{selected.id}",disabled=locked)
+        bonus=st.number_input("Bonus credits",0,1000,int(current.get("bonus_credits",0) or 0),key=f"race_result_bonus_{selected.id}",disabled=locked)
+        verified=st.checkbox("Verified",value=bool(current.get("verified",False)),key=f"race_result_verified_{selected.id}",disabled=locked)
         actor=st.text_input("Facilitator identity",key="race_result_actor");reason=st.text_input("Result or correction reason",key="race_result_reason")
-        if st.button("Save Race Result",disabled=not actor or not reason,width="stretch"):
-            selected=next(t for t in s.teams if t.name==team);control.save_race_result(s.event_id,selected.id,time_ms,penalty,bonus,verified,reason,actor);st.success("Race result saved with audit history.");_refresh_after_race_control_write()
+        if locked: st.error("Final results are locked. This result cannot be corrected.")
+        action_label="Save Result Correction" if current else "Save Race Result"
+        if st.button(action_label,disabled=locked or not actor or not reason,width="stretch"):
+            control.save_race_result(s.event_id,selected.id,time_ms,penalty,bonus,verified,reason,actor);st.success("Race result saved with audit history.");_refresh_after_race_control_write()
         if st.button("LOCK FINAL RESULTS",type="primary",disabled=not actor or not reason,width="stretch"):
             control.lock_race_results(s.event_id,actor,reason);st.success("Final race positions are locked.");_refresh_after_race_control_write()
 

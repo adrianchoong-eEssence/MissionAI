@@ -1095,39 +1095,20 @@ class FormulaRaceCoreV2StagingAdapter:
     def save_formula_race_result(self, event_id: str, team_id: str, time_ms: int, penalty_ms: int, bonus: float, verified: bool, reason: str, actor: str):
         activities = self._get_checkpoint_activities(event_id)
         activity_id = str(activities[0].get("activity_id")) if activities else f"{event_id}-FINAL"
-        payload = {
-            "event_id": str(event_id),
-            "team_id": str(team_id),
-            "activity_id": activity_id,
-            "checkpoint": "Race Final",
-            "result_payload": {
-                "time_ms": int(time_ms),
-                "penalty_ms": int(penalty_ms),
-                "bonus": float(bonus),
-                "verified": bool(verified),
-                "reason": str(reason),
-                "judge": str(actor),
-            },
-            "locked": False,
-            "recorded_at": _now_iso(),
-            "updated_at": _now_iso(),
-        }
-        existing = self._get(
-            "race_results_v2",
+        return self._rpc(
+            "exos_v2_formula_race_save_result",
             {
-                "event_id": f"eq.{str(event_id)}",
-                "team_id": f"eq.{str(team_id)}",
-                "activity_id": f"eq.{activity_id}",
-                "checkpoint": "eq.Race Final",
-                "select": "race_result_id,locked",
-                "limit": "1",
+                "p_event_id": str(event_id),
+                "p_team_id": str(team_id),
+                "p_activity_id": activity_id,
+                "p_time_ms": int(time_ms),
+                "p_penalty_ms": int(penalty_ms),
+                "p_bonus": float(bonus),
+                "p_verified": bool(verified),
+                "p_reason": str(reason).strip(),
+                "p_actor": str(actor).strip(),
             },
         )
-        if existing and bool(existing[0].get("locked", False)):
-            raise RuntimeError("Race result is locked and immutable until explicit unlock.")
-        if existing:
-            return self._patch("race_results_v2", {"race_result_id": f"eq.{existing[0].get('race_result_id')}"}, payload) or {}
-        return self._post("race_results_v2", payload) or {}
 
     def get_race_build_status(self, event_id: str) -> list[dict[str, Any]]:
         return self._get("build_status_v2", {"event_id": f"eq.{str(event_id).strip()}", "select": "team_id,activity_id,event_id,build_status,progress_pct,build_payload,started_at,completed_at,last_updated"})
