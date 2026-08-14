@@ -99,5 +99,6 @@ def test_race_performance_keeps_live_reads_fresh_and_optimises_evidence():
     assert "image.thumbnail((1600, 1600))" in captain
     assert "quality=82" in captain
     assert "Submitting proof…" in captain and "Purchasing…" in captain
+    assert "Approving…" in RACE_CONTROL and "Saving race result…" in RACE_CONTROL
     assert "get_formula_race_state(event_id, raw_teams)" in contracts
     assert "operations[\"Checkpoints\"] = self.db.runtime.get_formula_race_checkpoints" not in contracts

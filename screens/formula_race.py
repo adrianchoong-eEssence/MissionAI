@@ -479,7 +479,8 @@ def reviews(s, control=None, runtime=None):
             notes=st.text_input("Notes / rejection reason",key=f"review_notes_{x.id}") if control else ""
             pending=x.status.upper() in {"PENDING","PENDING_REVIEW","SUBMITTED"}
             def decide(decision):
-                control.review_race_checkpoint(x.id,decision,actor,notes,notes,f"{x.id}:{decision}")
+                with st.spinner("Approving…" if decision == "APPROVE" else "Saving review…"):
+                    control.review_race_checkpoint(x.id,decision,actor,notes,notes,f"{x.id}:{decision}")
                 st.success("Review saved and projections updated.");_refresh_after_race_control_write()
             a,b,c=st.columns(3)
             if a.button("APPROVE",key=f"award_{x.id}",disabled=not pending or bool(control and not actor)):
@@ -548,7 +549,10 @@ def judging(s, control=None):
     reason=st.text_input("Submission or correction reason",key="race_judge_reason") if control else ""
     if st.button("Submit score",type="primary",width="stretch",disabled=bool(control and (not actor or not reason))):
         if control:
-            selected=next(t for t in s.teams if t.name==team);control.save_race_judging(s.event_id,selected.id,scores,reason,actor);st.success("Judging score saved with audit history.");_refresh_after_race_control_write()
+            selected=next(t for t in s.teams if t.name==team)
+            with st.spinner("Saving score…"):
+                control.save_race_judging(s.event_id,selected.id,scores,reason,actor)
+            st.success("Judging score saved with audit history.");_refresh_after_race_control_write()
         else: st.session_state.judge_confirm=f"Demo score {total:.1f} prepared for {team}"
     if st.session_state.get("judge_confirm"): st.success(st.session_state.judge_confirm+". No canonical Judge Score was written.")
 
@@ -575,9 +579,13 @@ def drag_results(s, control=None):
         if locked: st.error("Final results are locked. This result cannot be corrected.")
         action_label="Save Result Correction" if current else "Save Race Result"
         if st.button(action_label,disabled=locked or not actor or not reason,width="stretch"):
-            control.save_race_result(s.event_id,selected.id,time_ms,penalty,bonus,verified,reason,actor);st.success("Race result saved with audit history.");_refresh_after_race_control_write()
+            with st.spinner("Saving race result…"):
+                control.save_race_result(s.event_id,selected.id,time_ms,penalty,bonus,verified,reason,actor)
+            st.success("Race result saved with audit history.");_refresh_after_race_control_write()
         if st.button("LOCK FINAL RESULTS",type="primary",disabled=not actor or not reason,width="stretch"):
-            control.lock_race_results(s.event_id,actor,reason);st.success("Final race positions are locked.");_refresh_after_race_control_write()
+            with st.spinner("Locking final results…"):
+                control.lock_race_results(s.event_id,actor,reason)
+            st.success("Final race positions are locked.");_refresh_after_race_control_write()
 
 
 def build_status(s, control=None):
@@ -589,7 +597,10 @@ def build_status(s, control=None):
     if control:
         team=st.selectbox("Update team",[t.name for t in s.teams],key="build_team");status=st.selectbox("Build status",BUILD_STATUSES);actor=st.text_input("Facilitator identity",key="build_actor");reason=st.text_input("Required reason",key="build_reason")
         if st.button("Update Build Status",disabled=not actor or not reason,width="stretch"):
-            selected=next(t for t in s.teams if t.name==team);control.set_race_build_status(s.event_id,selected.id,status,{},reason,actor);st.success("Build status saved and audited.");_refresh_after_race_control_write()
+            selected=next(t for t in s.teams if t.name==team)
+            with st.spinner("Saving build status…"):
+                control.set_race_build_status(s.event_id,selected.id,status,{},reason,actor)
+            st.success("Build status saved and audited.");_refresh_after_race_control_write()
 
 
 def control_centre(s, control=None):
@@ -604,7 +615,8 @@ def control_centre(s, control=None):
     def runtime_action(label,action_name,key,kind="secondary"):
         if st.button(label,key=key,type=kind,width="stretch",disabled=bool(control and not actor)):
             if control:
-                control.set_race_checkpoint_runtime(s.event_id,module_id,action_name,actor)
+                with st.spinner(f"{label}…"):
+                    control.set_race_checkpoint_runtime(s.event_id,module_id,action_name,actor)
                 st.success(f"{label} complete.");_refresh_after_race_control_write()
             else: st.toast(f"DEMO ONLY · {label}")
     a,b,c=st.columns(3)
@@ -618,7 +630,8 @@ def control_centre(s, control=None):
     def marketplace_action(label, action_name, key, kind="secondary"):
         if st.button(label, key=key, type=kind, width="stretch", disabled=bool(control and not actor)):
             if control:
-                control.set_race_marketplace_runtime(s.event_id, action_name, actor)
+                with st.spinner(f"{label}…"):
+                    control.set_race_marketplace_runtime(s.event_id, action_name, actor)
                 st.success(f"{label} complete.");_refresh_after_race_control_write()
             else: st.toast(f"DEMO ONLY · {label}")
     a,b,c=st.columns(3)
