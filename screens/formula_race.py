@@ -270,7 +270,7 @@ def _snapshot(db, event_id: str):
             build = round(100 * completed / max(checkpoint_total or len(missions), 1))
             mapped_teams.append(Team(
                 team_id,
-                str(row.get("TeamName", team_id)),
+                str(row.get("TeamIdentity") or row.get("TeamName") or team_id),
                 str(row.get("Country", "")),
                 "#e31b23",
                 LiveFormulaRaceProvider(db)._number(standing.get("Score", row.get("Score", 0))),
@@ -324,7 +324,7 @@ def _snapshot(db, event_id: str):
     )
 
 
-NAV = ["Overview", "Live Programme", "Championship", "Teams", "Checkpoints", "Reviews", "Marketplace", "Race Map", "Control Centre"]
+NAV = ["Overview", "Programme", "Teams", "Reviews", "Parts Depot", "Build", "Championship", "Race", "Control"]
 MATERIALS = [("Cardboard sheet", 40), ("Wheel set", 120), ("Axle kit", 60), ("Glue sticks", 15)]
 CRITERIA = [("Design & innovation", 25), ("Build quality", 25), ("Team identity", 20), ("Performance", 30)]
 
@@ -333,42 +333,72 @@ def _css():
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;1,800&family=Inter:wght@400;600;700&display=swap');
-    :root{--navy:#071724;--panel:#0d2537;--line:#24465d;--red:#e31b23;--yellow:#f5c400;--blue:#19a8e7;--muted:#91a8b7}
-    .stApp{background:linear-gradient(135deg,#06121d 0%,#0a1d2b 60%,#07131d 100%);color:#f7fafc;font-family:Inter,sans-serif}
-    header[data-testid="stHeader"]{background:transparent}.block-container{max-width:1500px;padding:1rem 2rem 3rem}
-    h1,h2,h3,.race-font{font-family:'Barlow Condensed',sans-serif!important;text-transform:uppercase;letter-spacing:.025em}
-    h1{font-style:italic;font-weight:800!important;font-size:3.2rem!important;line-height:.9!important}
-    h2{font-weight:800!important;border-left:5px solid var(--red);padding-left:.7rem}
-    div[data-testid="stMetric"]{background:linear-gradient(145deg,#0e293c,#091d2b);border:1px solid var(--line);border-top:3px solid var(--red);padding:15px 18px;border-radius:4px}
-    div[data-testid="stMetricLabel"]{text-transform:uppercase;color:var(--muted)} div[data-testid="stMetricValue"]{font-family:'Barlow Condensed';font-weight:800}
-    .demo{display:inline-block;background:var(--yellow);color:#101820;padding:.22rem .6rem;border-radius:2px;font:800 .75rem Inter;letter-spacing:.12em}
-    .status{display:inline-block;border:1px solid #31d17c;color:#31d17c;padding:.2rem .55rem;border-radius:20px;font-size:.74rem;font-weight:700}
-    .race-card{background:linear-gradient(145deg,rgba(16,44,63,.94),rgba(8,27,40,.94));border:1px solid var(--line);border-radius:5px;padding:1rem 1.1rem;margin:.35rem 0;min-height:92px}
-    .race-card h3{margin:0;color:white}.race-card p{color:var(--muted);margin:.25rem 0}.accent{color:var(--yellow);font-weight:800}.red{color:#ff4950}.muted{color:var(--muted)}
-    .rank{font:800 2.1rem 'Barlow Condensed';color:var(--yellow);margin-right:1rem}.bar{height:7px;background:#17394d}.bar>i{display:block;height:7px;background:linear-gradient(90deg,var(--red),var(--yellow))}
-    .ticker{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:.55rem;color:#c5d4de;white-space:nowrap;overflow:hidden}
-    div.stButton>button{border-radius:2px;text-transform:uppercase;font-family:'Barlow Condensed';font-weight:800;letter-spacing:.04em;min-height:42px}
-    div[data-testid="stHorizontalBlock"]{gap:.75rem}
-    [data-testid="stSidebar"]{min-width:17rem;max-width:19rem}
-    @media(max-width:900px){.block-container{padding:.7rem 1rem 2rem}h1{font-size:2.3rem!important}.race-card{min-height:auto}}
+    :root{--navy:#071017;--panel:#0d1922;--panel-2:#102431;--line:#294351;--red:#ed3139;--amber:#f7b733;--green:#4dd38a;--blue:#43b6e8;--muted:#9eabb6}
+    .stApp{background:radial-gradient(circle at 88% -10%,#17384b 0,transparent 29%),linear-gradient(145deg,#071017 0%,#0a151d 55%,#071017 100%);color:#f5f7f8;font-family:Inter,system-ui,sans-serif}
+    header[data-testid="stHeader"]{background:transparent}.block-container{max-width:1440px;padding:.65rem 1.05rem 2.4rem}
+    h1,h2,h3,.race-font{font-family:'Barlow Condensed',Impact,sans-serif!important;text-transform:uppercase;letter-spacing:.025em}h1{font-weight:800!important;font-size:2.3rem!important;line-height:.88!important;margin:.18rem 0 .45rem!important}h2{font-size:1.65rem!important;font-weight:800!important;border-left:4px solid var(--red);padding-left:.55rem;margin:.65rem 0 .45rem!important}h3{margin:.05rem 0!important}
+    div[data-testid="stMetric"]{background:linear-gradient(145deg,rgba(17,37,49,.98),rgba(9,21,29,.98));border:1px solid var(--line);border-top:2px solid var(--red);padding:.55rem .7rem;border-radius:7px;min-height:76px}div[data-testid="stMetricLabel"]{text-transform:uppercase;color:var(--muted);font-size:.68rem;font-weight:700;letter-spacing:.08em}div[data-testid="stMetricValue"]{font-family:'Barlow Condensed';font-weight:800;font-size:1.7rem}
+    .demo{display:inline-block;background:var(--amber);color:#101820;padding:.2rem .5rem;border-radius:3px;font:800 .65rem Inter;letter-spacing:.1em}.status{display:inline-block;border:1px solid rgba(77,211,138,.65);color:var(--green);padding:.2rem .48rem;border-radius:999px;font-size:.65rem;font-weight:800;letter-spacing:.07em}.status.attention{color:var(--amber);border-color:rgba(247,183,51,.65)}
+    .pit-header{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;padding:.22rem 0 .5rem;border-bottom:1px solid var(--line)}.pit-brand{font:800 1.25rem/1 'Barlow Condensed',Impact,sans-serif;letter-spacing:.055em}.pit-brand b{color:var(--red)}.pit-label{color:var(--amber);font:800 .62rem Inter,sans-serif;letter-spacing:.14em}.pit-event{color:var(--muted);font-size:.76rem;margin-top:.18rem}.pit-telemetry{display:grid;grid-template-columns:repeat(4,auto);gap:.32rem .7rem;align-items:center;margin:.45rem 0}.pit-telemetry span{color:var(--muted);font-size:.66rem;white-space:nowrap}.pit-telemetry b{color:#fff;font-size:.77rem}.race-kicker{color:var(--amber);font:800 .64rem Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase}.race-copy,.muted{color:var(--muted);font-size:.78rem}.race-card{background:linear-gradient(145deg,rgba(18,34,45,.96),rgba(9,18,25,.96));border:1px solid var(--line);border-radius:7px;padding:.65rem .75rem;margin:.3rem 0;min-height:0}.race-card h3{font-size:1.1rem}.race-card p{color:var(--muted);margin:.18rem 0;font-size:.78rem}.accent{color:var(--amber);font-weight:800}.red{color:#ff6970}.attention{color:var(--amber)!important}.good{color:var(--green)!important}
+    .rank{font:800 1.6rem 'Barlow Condensed';color:var(--amber);margin-right:.45rem}.bar{height:5px;background:#17394d}.bar>i{display:block;height:5px;background:linear-gradient(90deg,var(--red),var(--amber))}.ticker{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:.38rem 0;color:#c5d4de;font-size:.72rem;white-space:nowrap;overflow:hidden}.ops-label{font:800 .63rem Inter,sans-serif;letter-spacing:.11em;color:var(--muted);text-transform:uppercase}.ops-value{font:800 1.15rem 'Barlow Condensed',Impact,sans-serif;color:#fff}.ops-value.attention{color:var(--amber)}
+    div.stButton>button{border-radius:5px;text-transform:uppercase;font-family:'Barlow Condensed';font-weight:800;letter-spacing:.05em;min-height:36px;padding:.2rem .55rem}div[data-testid="stHorizontalBlock"]{gap:.55rem}div[data-testid="stRadio"]>div{gap:.28rem;flex-wrap:wrap}div[data-testid="stRadio"] label{min-width:max-content!important;margin:0!important;padding:.22rem .42rem;border:1px solid var(--line);border-radius:4px;font-size:.68rem;font-weight:800;letter-spacing:.04em}div[data-testid="stRadio"] label p{white-space:nowrap!important}.stDataFrame{border:1px solid var(--line);border-radius:6px;overflow:hidden}[data-testid="stExpander"]{border-color:var(--line)!important;background:rgba(11,26,36,.55)}
+    @media(max-width:900px){.block-container{padding:.55rem .7rem 2rem}.pit-header{display:block}.pit-telemetry{grid-template-columns:repeat(2,auto);justify-content:start}h1{font-size:2rem!important}.race-card{padding:.6rem}.stDataFrame{overflow-x:auto}}
     </style>""", unsafe_allow_html=True)
 
 
 def _top(snapshot: RaceSnapshot):
-    a,b,c = st.columns([5,2,2])
-    with a: st.markdown("<div class='race-font' style='font-size:1.6rem;font-weight:800'>FORMULA <span class='red'>R.A.C.E.</span> <span class='muted'>/ RACE OPERATIONS</span></div>", unsafe_allow_html=True)
-    badge = "DEMO DATA" if snapshot.is_demo else f"LIVE DATA · {snapshot.event_id}"
-    with b: st.markdown(f"<span class='demo'>{badge}</span>", unsafe_allow_html=True)
-    with c: st.markdown(f"<span class='status'>● {snapshot.race_status}</span>", unsafe_allow_html=True)
+    pending = _pending_reviews(snapshot)
+    connected = sum(team.connected for team in snapshot.teams)
+    state_class = "attention" if str(snapshot.race_status).upper() in {"PAUSED", "READY"} else ""
+    badge = "DEMO DATA" if snapshot.is_demo else "LIVE"
+    st.markdown(
+        f"<div class='pit-header'><div><div class='pit-label'>FORMULA R.A.C.E. / RACE CONTROL</div>"
+        f"<div class='pit-brand'>THE RACE <b>PIT WALL</b></div><div class='pit-event'>{snapshot.event_name}</div></div>"
+        f"<div><span class='demo'>{badge}</span> <span class='status {state_class}'>● {snapshot.race_status}</span></div></div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div class='pit-telemetry'><span>TEAMS <b>{len(snapshot.teams)}</b></span>"
+        f"<span>CONNECTED <b>{connected}</b></span><span>PENDING REVIEWS <b>{pending}</b></span>"
+        f"<span>CURRENT PHASE <b>{snapshot.active_checkpoint}</b></span></div>", unsafe_allow_html=True,
+    )
     selected = st.radio("Primary navigation", NAV, horizontal=True, label_visibility="collapsed", key="race_nav")
-    st.markdown(f"<div class='ticker'>LIVE TELEMETRY &nbsp; ◆ &nbsp; {snapshot.active_checkpoint} &nbsp; ◆ &nbsp; ELAPSED {snapshot.elapsed} &nbsp; ◆ &nbsp; {len(snapshot.submissions)} SUBMISSIONS IN FEED</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='ticker'>LIVE TELEMETRY &nbsp; ◆ &nbsp; {snapshot.active_checkpoint} &nbsp; ◆ &nbsp; {len(snapshot.submissions)} SUBMISSIONS &nbsp; ◆ &nbsp; ELAPSED {snapshot.elapsed}</div>", unsafe_allow_html=True)
     return selected
 
 
 def _title(kicker, title, copy=""):
-    st.caption(kicker.upper())
+    st.markdown(f"<div class='race-kicker'>{kicker}</div>", unsafe_allow_html=True)
     st.title(title)
-    if copy: st.markdown(f"<p class='muted'>{copy}</p>", unsafe_allow_html=True)
+    if copy: st.markdown(f"<p class='race-copy'>{copy}</p>", unsafe_allow_html=True)
+
+
+def _pending_reviews(snapshot: RaceSnapshot) -> int:
+    return sum(item.status.upper() in {"PENDING", "PENDING_REVIEW", "SUBMITTED"} for item in snapshot.submissions)
+
+
+def _facilitator_identity(control=None) -> str:
+    """Persist the existing audit identity for this browser session only."""
+    if not control:
+        return ""
+    st.session_state.setdefault("race_control_operator", "")
+    return st.text_input("OPERATING AS", key="race_control_operator", placeholder="Facilitator identity")
+
+
+def _operational_team_rows(snapshot: RaceSnapshot) -> list[dict[str, object]]:
+    definitions = snapshot.operations.get("Checkpoints", {}).get("Checkpoints", [])
+    total = len(definitions) or 4
+    pending_states = {"PENDING", "PENDING_REVIEW", "SUBMITTED"}
+    rows = []
+    for team in snapshot.teams:
+        team_submissions = [item for item in snapshot.submissions if item.team_id == team.id]
+        complete = sum(item.status.upper() in {"APPROVED", "AWARDED"} for item in team_submissions)
+        rows.append({
+            "Rank": team.rank, "Team": team.name, "Captain": "CONNECTED" if team.connected else "OFFLINE",
+            "Checkpoints": f"{min(complete, total)}/{total}", "Review": sum(item.status.upper() in pending_states for item in team_submissions),
+            "Championship": team.score, "Wallet": team.balance, "Build": f"{team.build}%",
+        })
+    return rows
 
 
 def _team_rows(snapshot, limit=None):
@@ -382,60 +412,69 @@ def _team_rows(snapshot, limit=None):
 
 
 def overview(s):
-    _title("Mission AI powered race experience", "Race Control Overview", "One operational picture across programme, championship, submissions and supply.")
-    pending=sum(1 for item in s.submissions if item.status.upper() in {"PENDING", "PENDING_REVIEW", "SUBMITTED"})
-    cols=st.columns(4)
-    for col,(label,value,delta) in zip(cols,[
-        ("Teams on track",len(s.teams),"Selected event"),
-        ("Active checkpoint",s.active_checkpoint,"Runtime state"),
-        ("Pending reviews",pending,"Canonical queue"),
-        ("Transactions",len(s.transactions),"Immutable ledger"),
-    ]): col.metric(label,value,delta)
-    left,right=st.columns([1.45,1])
+    _title("Operational command", "Pit Wall Overview", "One dense live view of teams, reviews, readiness and the next facilitator action.")
+    pending = _pending_reviews(s)
+    connected = sum(team.connected for team in s.teams)
+    ready = sum(team.build >= 80 for team in s.teams)
+    cols = st.columns(6)
+    for col, (label, value) in zip(cols, [
+        ("Teams", len(s.teams)), ("Connected", connected), ("Pending reviews", pending),
+        ("Programme", s.active_checkpoint), ("Parts depot", "CONFIGURED" if s.stock else "SEE DEPOT"), ("Ready to race", ready),
+    ]):
+        col.metric(label, value)
+    attention = []
+    if pending: attention.append(f"<span class='ops-value attention'>{pending}</span> <span class='ops-label'>PENDING REVIEW</span>")
+    if ready: attention.append(f"<span class='ops-value good'>{ready}</span> <span class='ops-label'>BUILD READY</span>")
+    if not attention: attention.append("<span class='ops-value good'>CLEAR</span> <span class='ops-label'>NO CANONICAL ATTENTION FLAGS</span>")
+    st.markdown(f"<div class='race-card'><div class='ops-label'>Needs attention now</div>{' &nbsp; ◆ &nbsp; '.join(attention)}</div>", unsafe_allow_html=True)
+    st.subheader("10-Team Operational Grid")
+    st.dataframe(_operational_team_rows(s), width="stretch", hide_index=True, column_config={
+        "Captain": "CAPTAIN", "Checkpoints": "CP", "Championship": "CHAMPIONSHIP SCORE",
+    })
+    left, right = st.columns([1.35, 1])
     with left:
-        st.subheader("Live Championship"); _team_rows(s)
-    with right:
-        st.subheader("Recent Activity")
-        for item in s.activity: st.markdown(f"<div class='race-card'>{item}</div>",unsafe_allow_html=True)
-    c1,c2=st.columns(2)
-    with c1:
         st.subheader("Review Queue")
         identities = {team.id: team.name for team in s.teams}
-        for x in s.submissions[:2]: st.markdown(f"<div class='race-card'><h3>{x.checkpoint}</h3><p>{identities.get(x.team_id, x.team_id)} · {x.evidence} · {x.submitted_at}</p><span class='accent'>{x.status}</span></div>",unsafe_allow_html=True)
-    with c2:
-        st.subheader("System & Stock")
-        for n,q in s.stock.items(): st.progress(min(q/70,1),text=f"{n} · {q} available")
+        review_items = [item for item in s.submissions if item.status.upper() in {"PENDING", "PENDING_REVIEW", "SUBMITTED"}]
+        for item in review_items[:3]:
+            st.markdown(f"<div class='race-card'><b>{identities.get(item.team_id, 'Team')}</b> · {item.checkpoint}<br><span class='attention'>{item.status}</span> <span class='muted'>· {item.submitted_at or 'time unavailable'}</span></div>", unsafe_allow_html=True)
+        if not review_items: st.caption("No canonical submissions require review.")
+    with right:
+        st.subheader("Live Feed")
+        for item in s.activity[:4]: st.markdown(f"<div class='race-card'>{item}</div>", unsafe_allow_html=True)
 
 
 def live_programme(s):
-    _title("Formula R.A.C.E. / Programme Journey", "Build It. Race It. Win It.", "RACE Checkpoints is one module containing four concurrent activities.")
+    _title("Programme control", "Live Programme", "Parallel checkpoint activities remain independently available, open, paused or closed.")
     checkpoint_state=s.operations.get("Checkpoints",{})
     checkpoint_pct=100*sum(x.status.upper()=="APPROVED" for x in s.submissions)/(max(len(s.teams)*4,1))
     stages=[("01","Launch EXOS",100),("02","RACE Checkpoints",checkpoint_pct),("03","Marketplace / Spend Credits",0),("04","Build",0),("05","Team Photo",0),("06","Drag Race",0),("07","Judging",0),("08","Championship",0)]
     for no,name,p in stages:
         live=name=="RACE Checkpoints" and str(checkpoint_state.get("Status","")).upper()=="LIVE"
         c1,c2,c3=st.columns([.7,4,1.2]); c1.markdown(f"<span class='rank'>{no}</span>",unsafe_allow_html=True); c2.markdown(f"### {name}"); c2.progress(min(float(p)/100,1.0)); c3.markdown("<span class='status'>ACTIVE</span>" if live else ("✓ COMPLETE" if p==100 else "READY"),unsafe_allow_html=True)
-    if st.button("Open active checkpoint",type="primary",width="stretch"): st.session_state.race_nav="Checkpoints"; st.rerun()
+    if st.button("Open programme controls",type="primary",width="stretch"): st.session_state.race_nav="Control"; st.rerun()
 
 
 def championship(s, final=False):
-    _title("Official standings" if final else "Live timing", "Final Championship" if final else "Live Championship", "Canonical award-ledger projection when connected; demonstration standings shown now.")
+    _title("Final race ranking" if final else "Mission and judging score", "Final Race Results" if final else "Championship", "Championship Rank is distinct from final race rank, which is based on adjusted race time.")
     if final and not s.is_demo:
         rows=final_standings([{"TeamID":t.id,"TeamName":t.name} for t in s.teams],
             [{"TeamID":x.team_id,"Amount":x.amount} for x in s.transactions],s.operations.get("Judging",[]),s.operations.get("RaceResults",[]),s.operations.get("Config",{}))
         st.dataframe(rows,width="stretch",hide_index=True)
     else: _team_rows(s)
-    st.subheader("Score Breakdown")
-    st.dataframe([{"Team":t.name,"Checkpoints":round(t.score*.52),"Judging":round(t.score*.31),"Drag Race":round(t.score*.17),"Total":t.score} for t in s.teams],width="stretch",hide_index=True)
-    if final: st.success("Championship lock is available from Control Centre after canonical scoring reconciliation.")
+    if not final:
+        st.subheader("Championship Table")
+        st.dataframe([{"Rank": t.rank, "Team": t.name, "Championship Score": t.score, "Wallet": t.balance, "Build": f"{t.build}%"} for t in s.teams], width="stretch", hide_index=True)
+    if final: st.success("Final result locking is available from Race Control after canonical verification.")
 
 
 def teams(s):
-    _title("Paddock", "Teams", "Identity, build readiness and wallet position in one view.")
-    for t in s.teams:
-        with st.expander(f"#{t.rank:02}  {t.name.upper()} · {t.country}"):
-            c1,c2,c3=st.columns(3); c1.metric("Championship",t.score); c2.metric("Wallet",f"{t.balance} CR"); c3.metric("Build",f"{t.build}%")
-            if st.button("Open team wallet",key=f"wallet_{t.id}"): st.session_state.selected_team=t.id; st.session_state.race_subscreen="wallet"; st.rerun()
+    _title("Team operations", "Teams", "Dense team health, championship position, checkpoint progress and wallet visibility.")
+    st.dataframe(_operational_team_rows(s), width="stretch", hide_index=True)
+    choices = {f"#{team.rank:02} · {team.name}": team.id for team in s.teams}
+    selected = st.selectbox("Open team wallet", list(choices), key="race_team_wallet")
+    if st.button("View wallet operations", key="open_selected_wallet"):
+        st.session_state.selected_team = choices[selected]; st.session_state.race_subscreen="wallet"; st.rerun()
 
 
 def wallet(s):
@@ -450,12 +489,12 @@ def wallet(s):
         st.dataframe([x.__dict__ for x in team_transactions],width="stretch",hide_index=True)
     else:
         st.caption("No credit transactions recorded for this team.")
-    st.subheader("Achievements"); st.markdown("🏆 **Safety First** &nbsp;&nbsp; ⚡ **Fast Submitter** &nbsp;&nbsp; 🔧 **Master Builder**")
+    st.caption("Wallet figures are canonical ledger projections. Manual adjustments remain audited in Control.")
     if st.button("Back to teams"): st.session_state.race_subscreen=""; st.rerun()
 
 
 def checkpoints(s):
-    _title("Parallel Activity Set", "RACE Checkpoints", "All four remain available concurrently until the module is closed.")
+    _title("Checkpoint telemetry", "RACE Checkpoints", "All four checkpoint activities may operate concurrently; this view does not imply a single current checkpoint.")
     definitions=s.operations.get("Checkpoints",{}).get("Checkpoints",[])
     approved={(x.team_id,x.checkpoint) for x in s.submissions if x.status.upper()=="APPROVED"}
     pending=sum(x.status.upper() in {"PENDING","PENDING_REVIEW","SUBMITTED"} for x in s.submissions)
@@ -464,23 +503,25 @@ def checkpoints(s):
         complete=sum(any(team.id==team_id and (str(cp.get("Name",""))==checkpoint or str(cp.get("ActivityID",""))==checkpoint) for team_id,checkpoint in approved) for cp in definitions)
         rows.append({"Team":team.name,"Completed":f"{complete}/4","Pending Reviews":sum(x.team_id==team.id and x.status.upper() in {"PENDING","PENDING_REVIEW","SUBMITTED"} for x in s.submissions),"Credits":team.balance})
     leader=max(rows,key=lambda row:row["Credits"])["Team"] if rows else "—"
-    a,b,c=st.columns(3);a.metric("Teams",len(s.teams));b.metric("Pending reviews",pending);c.metric("Current leader",leader)
+    a,b,c=st.columns(3);a.metric("Teams",len(s.teams));b.metric("Pending reviews",pending);c.metric("Wallet leader",leader)
     st.dataframe(rows,width="stretch",hide_index=True)
-    if st.button("Open Control Centre",type="primary",width="stretch"): st.session_state.race_nav="Control Centre"; st.rerun()
+    if st.button("Open programme controls",type="primary",width="stretch"): st.session_state.race_nav="Control"; st.rerun()
 
 
 def reviews(s, control=None, runtime=None):
-    _title("Submission and Award Pipeline", "RACE Review Queue", "Approve through the canonical review and CreditTransaction pipeline.")
+    _title("Facilitator action queue", "RACE Review Queue", "Private evidence is resolved lazily only for submissions shown here; decisions use the certified review contract.")
     team_identity={team.id:team.name for team in s.teams}
-    for x in s.submissions:
+    pending_items = [item for item in s.submissions if item.status.upper() in {"PENDING", "PENDING_REVIEW", "SUBMITTED"}]
+    st.metric("PENDING REVIEWS", len(pending_items))
+    actor = _facilitator_identity(control)
+    for x in pending_items:
         with st.container(border=True):
-            c1,c2=st.columns([4,1]); c1.markdown(f"### {x.checkpoint}\n{team_identity.get(x.team_id,x.team_id)} · {x.evidence} · submitted {x.submitted_at}"); c2.markdown(f"**{x.status}**")
+            c1,c2=st.columns([4,1]); c1.markdown(f"### {team_identity.get(x.team_id, 'Team')} · {x.checkpoint}\n<span class='muted'>Submitted {x.submitted_at or 'time unavailable'}</span>", unsafe_allow_html=True); c2.markdown(f"<span class='status attention'>{x.status}</span>", unsafe_allow_html=True)
             evidence_url = _resolve_race_private_evidence(runtime, x.evidence) if runtime else ""
             if evidence_url:
-                st.image(evidence_url, caption=f"{team_identity.get(x.team_id, x.team_id)} · {x.checkpoint}", use_container_width=True)
+                st.image(evidence_url, caption=f"{team_identity.get(x.team_id, 'Team')} · {x.checkpoint}", use_container_width=True)
             elif str(x.evidence).startswith(_RACE_EVIDENCE_PREFIX):
                 st.warning("Private photo evidence is unavailable.")
-            actor=st.text_input("Facilitator identity",key=f"review_actor_{x.id}") if control else ""
             notes=st.text_input("Notes / rejection reason",key=f"review_notes_{x.id}") if control else ""
             pending=x.status.upper() in {"PENDING","PENDING_REVIEW","SUBMITTED"}
             def decide(decision):
@@ -494,16 +535,18 @@ def reviews(s, control=None, runtime=None):
                 decide("REQUEST_RESUBMISSION") if control else st.toast(f"Demo revision for {x.id}")
             if c.button("REJECT",key=f"reject_{x.id}",disabled=not pending or bool(control and not actor)):
                 decide("REJECT") if control else st.toast(f"Demo rejection for {x.id}")
-    if st.button("Open team photo gallery",width="stretch"): st.session_state.race_subscreen="gallery"; st.rerun()
+    if not pending_items: st.success("Review queue clear.")
+    if st.button("Open photo gallery",width="stretch"): st.session_state.race_subscreen="gallery"; st.rerun()
 
 
 def gallery(s, runtime=None):
-    _title("Evidence", "Team Photo Gallery", "Review checkpoint evidence by team.")
-    for row in range(2):
+    _title("Secondary evidence browser", "Photo Gallery", "Private signed image URLs are requested only for evidence displayed in this gallery.")
+    for row in range(0, len(s.teams), 3):
         cols=st.columns(3)
-        for col,t in zip(cols,s.teams[row*3:row*3+3]):
-            col.markdown(f"<div class='race-card'><h3>{t.name}</h3><p>Checkpoint build evidence</p></div>",unsafe_allow_html=True)
+        for col,t in zip(cols,s.teams[row:row+3]):
             evidence = [x for x in s.submissions if x.team_id == t.id and str(x.evidence).startswith(_RACE_EVIDENCE_PREFIX)]
+            state = evidence[-1].status if evidence else "NO EVIDENCE"
+            col.markdown(f"<div class='race-card'><h3>{t.name}</h3><p>{state}</p></div>",unsafe_allow_html=True)
             if not evidence:
                 col.caption("No photo evidence submitted.")
             for x in evidence:
@@ -516,7 +559,7 @@ def gallery(s, runtime=None):
 
 
 def marketplace(s):
-    _title("Build Materials Depot", "Pit-Lane Marketplace", "Purchases remain local demo cart actions until canonical Award Transaction spend is connected.")
+    _title("Team garage economy", "Parts Depot", "Demo purchases remain local. In a live event, inventory and purchases are rendered from the canonical marketplace projection.")
     team=st.selectbox("Purchasing team",[t.name for t in s.teams]); selected=next(t for t in s.teams if t.name==team); st.metric("Available wallet",f"{selected.balance} CR")
     cart=st.session_state.setdefault("race_cart",{})
     cols=st.columns(4)
@@ -539,18 +582,22 @@ def race_map(s):
 
 
 def judging(s, control=None):
-    _title("Official Scoring", "Judging", "Weighted scoring contract prepared for canonical Judge Score and scoring configuration.")
-    names=[t.name for t in s.teams]; idx=names.index(st.session_state.get("judge_team",names[0])); team=st.selectbox("Select team",names,index=idx,key="judge_team")
+    _title("Efficient one-team scoring", "Judging", "Criteria remain dynamic from the certified configuration. Save and correction actions remain audited.")
+    names=[t.name for t in s.teams]
+    st.session_state.setdefault("race_judge_index", 0)
+    index=min(max(int(st.session_state["race_judge_index"]),0),len(names)-1)
+    team=st.selectbox("Select team",names,index=index,key="judge_team")
+    selected_index=names.index(team)
     p,n=st.columns(2)
-    if p.button("← Previous team",width="stretch"): st.session_state.judge_team=names[(names.index(team)-1)%len(names)]; st.rerun()
-    if n.button("Next team →",width="stretch"): st.session_state.judge_team=names[(names.index(team)+1)%len(names)]; st.rerun()
+    if p.button("← Previous team",width="stretch"): st.session_state.race_judge_index=(selected_index-1)%len(names); st.rerun()
+    if n.button("Next team →",width="stretch"): st.session_state.race_judge_index=(selected_index+1)%len(names); st.rerun()
     total=0.0
     categories=JUDGING_CATEGORIES if control else tuple(name for name,_ in CRITERIA)
     scores={}
     for criterion in categories:
         score=st.slider(criterion,0,10,7,key=f"score_{team}_{criterion}");scores[criterion]=score;total+=score
-    st.metric("Total score",f"{total:.1f}"); st.progress((names.index(team)+1)/len(names),text=f"Judging progress · {names.index(team)+1} of {len(names)} teams")
-    actor=st.text_input("Facilitator identity",key="race_judge_actor") if control else ""
+    st.metric("Total score",f"{total:.1f}"); st.progress((selected_index+1)/len(names),text=f"Judging progress · {selected_index+1} of {len(names)} teams")
+    actor=_facilitator_identity(control)
     reason=st.text_input("Submission or correction reason",key="race_judge_reason") if control else ""
     if st.button("Submit score",type="primary",width="stretch",disabled=bool(control and (not actor or not reason))):
         if control:
@@ -563,12 +610,14 @@ def judging(s, control=None):
 
 
 def drag_results(s, control=None):
-    _title("Official Timing", "Drag Race Results", "Adjusted time uses finish time plus penalty. The optional result annotation is informational only.")
+    _title("Live event pressure screen", "Drag Race Results", "Final Race Rank is based on adjusted time. Bonus Value is informational only and never awards spendable Credits.")
     live_rows=s.operations.get("RaceResults",[]) if control else []
     rows=[]
     for i,t in enumerate(s.teams):
         live=next((r for r in live_rows if str(r.get("team_id",""))==t.id),{})
-        rows.append({"Pos":live.get("position",i+1),"Team":t.name,"Time ms":live.get("time_ms",live.get("finish_time_ms","—")),"Penalty ms":live.get("penalty_ms",0),"Info value":live.get("bonus_credits",live.get("bonus",0)),"Verified":live.get("verified",False),"Locked":live.get("locked",False)})
+        time_ms = live.get("time_ms", live.get("finish_time_ms", "—"))
+        readable = f"{float(time_ms) / 1000:.3f}s" if isinstance(time_ms, (int, float)) else "—"
+        rows.append({"Final Rank":live.get("position",i+1),"Team":t.name,"Finish":readable,"Penalty ms":live.get("penalty_ms",0),"Adjusted ms":live.get("adjusted_time_ms",time_ms),"Bonus Value":live.get("bonus_credits",live.get("bonus",0)),"Verified":live.get("verified",False),"Locked":live.get("locked",False)})
     st.dataframe(rows,width="stretch",hide_index=True)
     if not control: st.markdown("<div class='race-card'><h3>Fastest Lap</h3><p>Velocity · 12.18 seconds</p><span class='accent'>INFORMATIONAL RESULT ANNOTATION</span></div>",unsafe_allow_html=True)
     if control:
@@ -580,27 +629,30 @@ def drag_results(s, control=None):
         penalty=st.number_input("Penalty (ms)",0,3600000,int(current.get("penalty_ms",0) or 0),key=f"race_result_penalty_{selected.id}",disabled=locked)
         bonus=st.number_input("Result annotation (informational)",0,1000,int(current.get("bonus_credits",current.get("bonus",0)) or 0),key=f"race_result_bonus_{selected.id}",disabled=locked,help="This does not award Credits, change Wallet balance, Championship Score, or adjusted race time.")
         verified=st.checkbox("Verified",value=bool(current.get("verified",False)),key=f"race_result_verified_{selected.id}",disabled=locked)
-        actor=st.text_input("Facilitator identity",key="race_result_actor");reason=st.text_input("Result or correction reason",key="race_result_reason")
+        actor=_facilitator_identity(control);reason=st.text_input("Result or correction reason",key="race_result_reason")
         if locked: st.error("Final results are locked. This result cannot be corrected.")
         action_label="Save Result Correction" if current else "Save Race Result"
         if st.button(action_label,disabled=locked or not actor or not reason,width="stretch"):
             with st.spinner("Saving race result…"):
                 control.save_race_result(s.event_id,selected.id,time_ms,penalty,bonus,verified,reason,actor)
             st.success("Race result saved with audit history.");_refresh_after_race_control_write()
-        if st.button("LOCK FINAL RESULTS",type="primary",disabled=not actor or not reason,width="stretch"):
+        verified=sum(bool(row.get("verified", False)) for row in live_rows); missing=max(len(s.teams)-len(live_rows), 0); unverified=max(len(live_rows)-verified, 0)
+        st.markdown(f"<div class='race-card'><span class='ops-label'>Final results readiness</span><br><span class='ops-value'>{verified}/{len(s.teams)}</span> VERIFIED &nbsp; · &nbsp; {missing} MISSING &nbsp; · &nbsp; {unverified} UNVERIFIED</div>", unsafe_allow_html=True)
+        confirm_lock=st.checkbox("I understand final ranking will be frozen and locked results cannot be edited.",key="race_lock_confirm",disabled=locked)
+        if st.button("LOCK FINAL RESULTS",type="primary",disabled=locked or not actor or not reason or not confirm_lock,width="stretch"):
             with st.spinner("Locking final results…"):
                 control.lock_race_results(s.event_id,actor,reason)
             st.success("Final race positions are locked.");_refresh_after_race_control_write()
 
 
 def build_status(s, control=None):
-    _title("Engineering Readiness", "Build Status", "Materials, structural checkpoints and race-readiness by team.")
+    _title("Pit / garage status", "Build Control", "All ten teams are shown together so facilitators can identify who is behind, building, painting or ready.")
     live={str(r.get("team_id","")):r for r in s.operations.get("BuildStatus",[])}
     for t in s.teams:
         status=str(live.get(t.id,{}).get("status","Not Started"));pct=BUILD_STATUSES.index(status)*20 if status in BUILD_STATUSES else 0
-        c1,c2,c3=st.columns([2,5,1]); c1.markdown(f"**{t.name.upper()}**\n\n{t.country}"); c2.progress(pct/100,text=f"{status} · {pct}%"); c3.markdown("READY" if status in {"Ready to Race","Completed"} else "ACTIVE")
+        c1,c2,c3=st.columns([2,5,1]); c1.markdown(f"**{t.name.upper()}**\n\n{t.country}"); c2.progress(pct/100,text=f"{status} · {pct}%"); c3.markdown("<span class='good'>READY</span>" if status in {"Ready to Race","Completed"} else "<span class='muted'>ACTIVE</span>", unsafe_allow_html=True)
     if control:
-        team=st.selectbox("Update team",[t.name for t in s.teams],key="build_team");status=st.selectbox("Build status",BUILD_STATUSES);actor=st.text_input("Facilitator identity",key="build_actor");reason=st.text_input("Required reason",key="build_reason")
+        team=st.selectbox("Update team",[t.name for t in s.teams],key="build_team");status=st.selectbox("Build status",BUILD_STATUSES);actor=_facilitator_identity(control);reason=st.text_input("Required reason",key="build_reason")
         if st.button("Update Build Status",disabled=not actor or not reason,width="stretch"):
             selected=next(t for t in s.teams if t.name==team)
             with st.spinner("Saving build status…"):
@@ -609,14 +661,13 @@ def build_status(s, control=None):
 
 
 def control_centre(s, control=None):
-    _title("Canonical Runtime Facade", "Race Control Centre", "Operational controls are arranged for tablet use. Demo mode never mutates EXOS runtime.")
+    _title("Facilitator command centre", "Control", "Programme, depot, broadcast, recovery and audited manual operations are separated by operational risk.")
     checkpoint_state=s.operations.get("Checkpoints",{})
     module_id=str(checkpoint_state.get("ModuleID",f"{s.event_id}-RACE-CHECKPOINTS"))
     checkpoint=st.selectbox("RACE checkpoint module",["RACE Checkpoints"])
-    st.caption(f"Selected: {checkpoint} · {checkpoint_state.get('Status','READY')} · four parallel activities")
-    def action(label,key,kind="secondary"):
-        if st.button(label,key=key,type=kind,width="stretch"): st.toast(f"DEMO ONLY · {label} acknowledged locally")
-    actor=st.text_input("Facilitator identity",key="race_control_actor") if control else ""
+    st.caption(f"{checkpoint} · {checkpoint_state.get('Status','READY')} · four parallel activities")
+    actor=_facilitator_identity(control)
+    st.subheader("Programme Control")
     def runtime_action(label,action_name,key,kind="secondary"):
         if st.button(label,key=key,type=kind,width="stretch",disabled=bool(control and not actor)):
             if control:
@@ -628,10 +679,11 @@ def control_centre(s, control=None):
     with a: runtime_action("LAUNCH CHECKPOINTS","LAUNCH","launch","primary")
     with b: runtime_action("PAUSE CHECKPOINTS","PAUSE","pause")
     with c: runtime_action("CLOSE CHECKPOINTS","CLOSE","close")
-    st.subheader("Marketplace")
+    st.subheader("Parts Depot Control")
     marketplace = control.runtime._marketplace_payload(s.event_id, "", active_only=False) if control else {"items": []}
     active_items = [item for item in marketplace.get("items", []) if item.get("Active")]
-    st.caption(f"{len(active_items)} active of {len(marketplace.get('items', []))} configured items")
+    depot_state = "OPEN" if active_items else "CLOSED"
+    st.markdown(f"<div class='race-card'><span class='ops-label'>Parts depot state</span><br><span class='ops-value'>{depot_state}</span> · {len(active_items)} active of {len(marketplace.get('items', []))} configured items</div>", unsafe_allow_html=True)
     def marketplace_action(label, action_name, key, kind="secondary"):
         if st.button(label, key=key, type=kind, width="stretch", disabled=bool(control and not actor)):
             if control:
@@ -644,18 +696,22 @@ def control_centre(s, control=None):
     with b: marketplace_action("PAUSE MARKETPLACE", "PAUSE", "marketplace_pause")
     with c: marketplace_action("CLOSE MARKETPLACE", "CLOSE", "marketplace_close")
     if marketplace.get("items"):
-        st.dataframe(marketplace["items"], width="stretch", hide_index=True)
-    a,b,c=st.columns(3)
-    with a: action("Resume race","resume")
-    with b: action("Review submissions","review")
-    with c: action("Emergency stop","emergency")
-    st.subheader("Broadcast Message"); msg=st.text_input("Message",placeholder="Message all participant and projector views")
-    if st.button("Broadcast",disabled=not msg,width="stretch"): st.toast("DEMO ONLY · broadcast previewed")
-    st.subheader("Recovery & Manual Operations")
-    t1,t2,t3=st.tabs(["Participant Recovery","Leader Recovery","Manual Credit Adjustment"])
-    with t1: st.text_input("Participant ID"); action("Recover participant","recover_participant")
-    with t2: st.selectbox("Team",[t.name for t in s.teams],key="leader_team"); action("Recover leader","recover_leader")
-    with t3:
+        st.dataframe([{
+            "Item": item.get("ItemName", ""), "Credit Cost": item.get("CreditCost", 0),
+            "Remaining": item.get("StockQuantity", "—"), "State": "OPEN" if item.get("Active") else "CLOSED",
+        } for item in marketplace["items"]], width="stretch", hide_index=True)
+    st.subheader("Broadcast")
+    msg=st.text_input("Broadcast message",placeholder="Message all participant and projector views")
+    a,b=st.columns(2)
+    with a:
+        if st.button("PREVIEW BROADCAST",disabled=not msg,width="stretch"): st.toast("DEMO ONLY · broadcast previewed")
+    with b:
+        st.link_button("OPEN PROJECTOR", f"?view=projector&event_id={s.event_id}", width="stretch")
+    st.subheader("Recovery")
+    recovery_team=st.selectbox("Captain recovery team",[t.name for t in s.teams],key="leader_team")
+    st.info(f"{recovery_team} uses the existing Captain PIN recovery journey. Race Control does not create or alter Captain credentials.")
+    st.subheader("Manual Wallet Operation")
+    with st.container(border=True):
         team_name=st.selectbox("Adjust team",[t.name for t in s.teams],key="adjust_team")
         amount=st.number_input("Credit adjustment",-500,500,0,key="race_adjustment_amount")
         reason=st.text_input("Required reason",key="race_adjustment_reason")
@@ -675,6 +731,10 @@ def control_centre(s, control=None):
             st.dataframe(adjustments,width="stretch",hide_index=True)
         else:
             st.caption("No manual credit adjustments recorded for this event.")
+    st.subheader("Emergency")
+    emergency_confirm=st.checkbox("I understand an emergency action interrupts live operations.", key="race_emergency_confirm")
+    if st.button("EMERGENCY STOP", key="emergency", type="secondary", width="stretch", disabled=not emergency_confirm):
+        st.toast("DEMO ONLY · Emergency stop acknowledged locally")
     if not control: st.warning("DEMO DATA · No live mutation is performed.")
 
 
@@ -692,6 +752,8 @@ def show_formula_race(db=None, event_id=""):
     st.session_state.setdefault("active_event_id", "")
     st.session_state.setdefault("race_nav", NAV[0])
     st.session_state.setdefault("race_subscreen", "")
+    if st.session_state.get("race_nav") not in NAV:
+        st.session_state["race_nav"] = NAV[0]
 
     requested_join_code = str(st.query_params.get("join_code", "")).strip()
     if requested_join_code:
@@ -708,7 +770,8 @@ def show_formula_race(db=None, event_id=""):
         event_id = st.session_state.get("active_event_id", "")
     try:
         snapshot = _snapshot(db, event_id)
-        _assert_staging_runtime_health(runtime)
+        if _staging_runtime_enabled():
+            _assert_staging_runtime_health(runtime)
     except RuntimeError as error:
         st.error(f"Staging contract violation: {error}")
         if _staging_runtime_enabled():
@@ -730,25 +793,27 @@ def show_formula_race(db=None, event_id=""):
     if sub=="wallet": wallet(snapshot)
     elif sub=="gallery": gallery(snapshot,runtime)
     elif page=="Overview": overview(snapshot)
-    elif page=="Live Programme": live_programme(snapshot)
+    elif page=="Programme": live_programme(snapshot)
     elif page=="Championship":
-        view=st.radio("Championship view",["Live Championship","Drag Race Results","Final Championship"],horizontal=True,label_visibility="collapsed")
-        drag_results(snapshot,control) if view=="Drag Race Results" else championship(snapshot,view=="Final Championship")
+        view=st.radio("Championship view",["Championship","Final Race Results"],horizontal=True,label_visibility="collapsed")
+        drag_results(snapshot,control) if view=="Final Race Results" else championship(snapshot)
     elif page=="Teams": teams(snapshot)
-    elif page=="Checkpoints":
-        view=st.radio("Checkpoint view",["Checkpoint Control","Build Status"],horizontal=True,label_visibility="collapsed")
-        checkpoints(snapshot) if view=="Checkpoint Control" else build_status(snapshot,control)
+    elif page=="Build": build_status(snapshot,control)
     elif page=="Reviews":
         view=st.radio("Review view",["Review Queue","Photo Gallery","Judging"],horizontal=True,label_visibility="collapsed")
         reviews(snapshot,control,runtime) if view=="Review Queue" else (gallery(snapshot,runtime) if view=="Photo Gallery" else judging(snapshot,control))
-    elif page=="Marketplace":
+    elif page=="Parts Depot":
         if snapshot.is_demo: marketplace(snapshot)
         else:
-            _title("Canonical marketplace", "Build Materials Depot", "Live purchases, stock deduction and overspend prevention are recorded through the R.A.C.E. marketplace ledger.")
+            _title("Canonical inventory and purchases", "Parts Depot", "Stock, purchases and credit spend are canonical marketplace projections. Lifecycle controls are in Control.")
             marketplace_state = runtime._marketplace_payload(snapshot.event_id, "", active_only=False)
-            st.dataframe(marketplace_state.get("items", []), width="stretch", hide_index=True)
-            st.dataframe(marketplace_state.get("purchases", []), width="stretch", hide_index=True)
-            st.caption("Open, pause, or close the marketplace in Race Control Centre.")
-    elif page=="Race Map": race_map(snapshot)
+            active = [row for row in marketplace_state.get("items", []) if row.get("Active")]
+            st.metric("PARTS DEPOT", "OPEN" if active else "CLOSED")
+            st.dataframe([{"Item": row.get("ItemName", ""), "Credit Cost": row.get("CreditCost", 0), "Remaining": row.get("StockQuantity", "—"), "State": "OPEN" if row.get("Active") else "CLOSED"} for row in marketplace_state.get("items", [])], width="stretch", hide_index=True)
+            st.subheader("Recent Purchases")
+            st.dataframe([{"Team": next((team.name for team in snapshot.teams if team.id == row.get("TeamID")), "Team"), "Item": row.get("ItemName", ""), "Quantity": row.get("Quantity", 0), "Credits Spent": row.get("Amount", 0), "Status": row.get("Status", "")} for row in marketplace_state.get("purchases", [])], width="stretch", hide_index=True)
+    elif page=="Race":
+        view=st.radio("Race view",["Race Status","Race Results"],horizontal=True,label_visibility="collapsed")
+        drag_results(snapshot,control) if view=="Race Results" else race_map(snapshot)
     else:
         control_centre(snapshot,control)
