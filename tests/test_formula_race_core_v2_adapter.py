@@ -283,6 +283,11 @@ def test_race_adapter_captain_workspace_returns_default_build_status_when_empty(
                 "updated_at": "2026-08-10T00:00:00Z",
             }
         ]
+        runtime.rows["credit_transactions_v2"] = [
+            {"event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F", "team_id": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F", "amount": 52},
+            {"event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F", "team_id": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F", "amount": 18},
+            {"event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F", "team_id": "CORE-V2-RACE-UAT-T01-4CF0CEAF5F", "amount": -20},
+        ]
         adapter = FormulaRaceCoreV2StagingAdapter(runtime)
 
     workspace = adapter.formula_race_captain_workspace(
@@ -292,6 +297,7 @@ def test_race_adapter_captain_workspace_returns_default_build_status_when_empty(
     assert build_status.get("status") == "NOT_STARTED"
     assert build_status.get("Status") == "NOT_STARTED"
     assert int(build_status.get("Progress", 0)) == 0
+    assert workspace["Wallet"] == {"CreditsEarned": 70, "CreditsSpent": 20, "Balance": 50}
 
 
 def test_race_build_status_preserves_the_race_phase_inside_core_v2_state():
