@@ -239,17 +239,32 @@ def test_non_lock_error_is_not_treated_as_expected() -> None:
     assert runner._is_expected_lock_rejection(err, "race result is locked and immutable until explicit unlock") is False
 
 
+def test_runner_legacy_guard_still_blocks_pre_core_v2_result_rpc() -> None:
+    runner = CoreV2RaceStagingRunner()
+    assert runner._is_legacy_runtime_rpc("exos_save_formula_race_result") is True
+
+
 def test_final_lock_certification_uses_only_the_disposable_event_and_lock_rpcs() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     certification = source.split("def _certify_final_lock_results", 1)[1].split("def ui_verification", 1)[0]
     assert "self._save_final_result(" in certification
     assert "self._lock_final_results(" in certification
-    assert '"exos_v2_formula_race_save_result"' in source
-    assert '"exos_v2_formula_race_lock_final_results"' in source
+    save_result = source.split("def _save_final_result", 1)[1].split("def _lock_final_results", 1)[0]
+    lock_result = source.split("def _lock_final_results", 1)[1].split("def _expect_incomplete_lock_rejection", 1)[0]
+    assert "_canonical_race_control_adapter().save_formula_race_result(" in save_result
+    assert "_canonical_race_control_adapter().lock_formula_race_results(" in lock_result
     assert "missing_result_rejected" in certification
     assert "unverified_result_rejected" in certification
     assert "idempotent_relock" in certification
     assert "self.event_id" in certification
+
+
+def test_premium_ui_is_deferred_and_not_an_engine_gate() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert 'self.ui_checks = {"runtime_snapshot": False}' in source
+    assert "RACE premium UI: DEFERRED (UI/UX overhaul; not an engine gate)" in source
+    gates = source.split("self.gates = {", 1)[1].split("}\n        self.ui_checks", 1)[0]
+    assert '"race_premium_ui"' not in gates
 
 
 def test_final_lock_certification_exercises_missing_unverified_tie_and_relock_gates() -> None:
@@ -300,8 +315,19 @@ def test_final_lock_certification_exercises_missing_unverified_tie_and_relock_ga
             return sorted(result, key=lambda row: (row["ranking_position"] or 999, row["team_id"]))
         return sorted(result, key=lambda row: row["team_id"])
 
+    class FakeRaceControlAdapter:
+        def save_formula_race_result(self, event_id, team_id, time_ms, penalty_ms, bonus, verified, reason, actor):
+            return fake_rpc("exos_v2_formula_race_save_result", {
+                "p_event_id": event_id, "p_team_id": team_id, "p_time_ms": time_ms,
+                "p_penalty_ms": penalty_ms, "p_bonus": bonus, "p_verified": verified,
+            })
+
+        def lock_formula_race_results(self, event_id, actor, reason):
+            return fake_rpc("exos_v2_formula_race_lock_final_results", {"p_event_id": event_id})
+
     runner._rpc = fake_rpc  # type: ignore[method-assign]
     runner._get = fake_get  # type: ignore[method-assign]
+    runner._race_control_adapter = FakeRaceControlAdapter()
     runner._certify_final_lock_results()
 
     for gate in (

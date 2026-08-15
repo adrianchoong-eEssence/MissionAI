@@ -13,6 +13,8 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 import ast
 
+from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
+
 
 KNOWN_PROD_HOSTS = {
     # Known production runtime project (must never target).
@@ -114,6 +116,19 @@ def find_stale_activity_event_refs(source_text: str) -> list[str]:
     return stale
 
 
+class _RunnerCoreV2Runtime:
+    """Minimal transport bridge so certification uses the live Core-v2 adapter."""
+
+    def __init__(self, runner: "CoreV2RaceStagingRunner") -> None:
+        self.runner = runner
+        self.url = runner.supabase_url
+        self.is_configured = bool(runner.supabase_url and runner.anon_key)
+        self.can_publish = bool(runner.service_key)
+
+    def _request(self, method: str, path: str, *, payload=None, query=None, admin: bool = True):
+        return self.runner._request(method, path, payload=payload, query=query, admin=admin)
+
+
 class CoreV2RaceStagingRunner:
     @staticmethod
     def _git_commit_short() -> str:
@@ -128,7 +143,7 @@ class CoreV2RaceStagingRunner:
 
     @staticmethod
     def _runner_version() -> str:
-        return "exos-core-v2-race-vertical-slice-v7"
+        return "exos-core-v2-race-vertical-slice-v8"
 
     @staticmethod
     def _coerce_bool(value: object) -> bool:
@@ -407,10 +422,10 @@ class CoreV2RaceStagingRunner:
             "tie_rule_deterministic": False,
             "result_locking": False,
             "final_ranking": False,
-            "race_premium_ui": False,
             "google_sheets_runtime_calls": False,
             "cleanup": False,
         }
+        self.ui_checks = {"runtime_snapshot": False}
 
         self._legacy_runtime_calls = []
         self._legacy_rpc_calls = []
@@ -431,6 +446,7 @@ class CoreV2RaceStagingRunner:
             "stored_credential_row": None,
             "stored_session_row": None,
         }
+        self._race_control_adapter = None
 
         # Canonical operation audit for this runner.
         self.operation_audit = []
@@ -632,6 +648,14 @@ class CoreV2RaceStagingRunner:
             raise RuntimeError(f"HTTP {error.code} {method} {path}: {body or error.reason}")
         except (URLError, TimeoutError) as exc:
             raise RuntimeError(f"Request failed for {method} {path}: {exc}")
+
+    def _canonical_race_control_adapter(self) -> FormulaRaceCoreV2StagingAdapter:
+        """Use the live Race Control Core-v2 result path, not a runner-local RPC."""
+        if self._race_control_adapter is None:
+            self._race_control_adapter = FormulaRaceCoreV2StagingAdapter(
+                _RunnerCoreV2Runtime(self)
+            )
+        return self._race_control_adapter
 
     def _rpc(self, name: str, payload: dict, admin: bool = True):
         if self._is_legacy_runtime_rpc(name):
@@ -1250,32 +1274,25 @@ class CoreV2RaceStagingRunner:
         self._certify_final_lock_results()
 
     def _save_final_result(self, team_id: str, time_ms: int, penalty_ms: int, verified: bool) -> dict:
-        result = self._rpc(
-            "exos_v2_formula_race_save_result",
-            {
-                "p_event_id": self.event_id,
-                "p_team_id": team_id,
-                "p_activity_id": self.activity_ids[0],
-                "p_time_ms": time_ms,
-                "p_penalty_ms": penalty_ms,
-                "p_bonus": 7,
-                "p_verified": verified,
-                "p_reason": "Automated disposable-event final-lock certification",
-                "p_actor": "RACE_AUTOMATION",
-            },
+        result = self._canonical_race_control_adapter().save_formula_race_result(
+            self.event_id,
+            team_id,
+            time_ms,
+            penalty_ms,
+            7,
+            verified,
+            "Automated disposable-event final-lock certification",
+            "RACE_AUTOMATION",
         )
         if not isinstance(result, dict) or not result.get("RaceResultID"):
             raise RuntimeError("Race result RPC did not return a result identifier")
         return result
 
     def _lock_final_results(self) -> dict:
-        result = self._rpc(
-            "exos_v2_formula_race_lock_final_results",
-            {
-                "p_event_id": self.event_id,
-                "p_actor": "RACE_AUTOMATION",
-                "p_reason": "Automated disposable-event final-lock certification",
-            },
+        result = self._canonical_race_control_adapter().lock_formula_race_results(
+            self.event_id,
+            "RACE_AUTOMATION",
+            "Automated disposable-event final-lock certification",
         )
         if not isinstance(result, dict):
             raise RuntimeError("Final lock RPC returned an invalid payload")
@@ -1380,6 +1397,9 @@ class CoreV2RaceStagingRunner:
             and self.gates["ranking_deterministic"]
             and self.gates["tie_rule_deterministic"]
         )
+        adapter = self._canonical_race_control_adapter()
+        if hasattr(adapter, "_assert_no_legacy_or_sheet_calls"):
+            adapter._assert_no_legacy_or_sheet_calls()
 
     def ui_verification(self) -> None:
         dashboard = self._get(
@@ -1417,7 +1437,7 @@ class CoreV2RaceStagingRunner:
             and len(state) > 0
             and isinstance(workspace, list)
         )
-        self.gates["race_premium_ui"] = bool(dashboard_ok and workspace_ok and state_ok)
+        self.ui_checks["runtime_snapshot"] = bool(dashboard_ok and workspace_ok and state_ok)
 
     def cleanup(self) -> None:
         submission_rows = self._get(
@@ -1549,7 +1569,8 @@ class CoreV2RaceStagingRunner:
         print(f"10-team ranking produced: {'PASS' if self.gates['ranking_10_teams'] else 'FAIL'}")
         print(f"Ranking deterministic: {'PASS' if self.gates['ranking_deterministic'] else 'FAIL'}")
         print(f"Tie handling deterministic: {'PASS' if self.gates['tie_rule_deterministic'] else 'FAIL'}")
-        print(f"RACE premium UI: {'PASS' if self.gates['race_premium_ui'] else 'FAIL'}")
+        print("RACE premium UI: DEFERRED (UI/UX overhaul; not an engine gate)")
+        print(f"RACE UI runtime snapshot: {'PASS' if self.ui_checks['runtime_snapshot'] else 'FAIL'}")
         print(f"Google Sheets runtime calls: {'YES' if self.gates['google_sheets_runtime_calls'] else 'NO'}")
         print(f"Cleanup: {'PASS' if self.gates['cleanup'] else 'FAIL'}")
         print(f"EventID: {self.event_id}")
