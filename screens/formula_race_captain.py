@@ -28,7 +28,7 @@ def _race_css() -> None:
     @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;1,800&family=Inter:wght@400;500;600;700&display=swap');
     :root { --race-ink:#071017; --race-panel:#0d1922; --race-panel-2:#101f2a; --race-line:#263846; --race-red:#ed3139; --race-amber:#f7b733; --race-green:#4dd38a; --race-blue:#43b6e8; --race-muted:#9eabb6; }
     .stApp { background:radial-gradient(circle at 82% -8%,#18384a 0,transparent 28%),linear-gradient(145deg,#071017 0%,#0a151d 55%,#071017 100%); color:#f5f7f8; font-family:Inter,system-ui,sans-serif; }
-    .block-container { max-width:1120px; padding:1rem 1rem 3.5rem; }
+    .block-container { max-width:1120px; padding:.5rem .8rem 3rem; }
     [data-testid="stHeader"] { background:transparent; }
     .race-shell { max-width:920px; margin:0 auto; }
     .race-kicker,.race-overline { color:var(--race-amber); font:800 .70rem/1 Inter,sans-serif; letter-spacing:.15em; text-transform:uppercase; }
@@ -41,11 +41,11 @@ def _race_css() -> None:
     .race-header { display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; margin:.5rem 0 1rem; }.race-live{color:var(--race-green);font-weight:800;font-size:.72rem;letter-spacing:.08em;white-space:nowrap}
     .race-metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.55rem; margin:.7rem 0 1rem; }
     .race-metric { padding:.7rem .75rem; min-width:0; border-top:3px solid var(--race-line); }.race-metric.accent{border-top-color:var(--race-red)} .race-metric strong{display:block;overflow-wrap:anywhere;color:#fff;font:800 1.8rem/.86 'Barlow Condensed',Impact,sans-serif;letter-spacing:.02em}.race-metric small{display:block;margin-bottom:.22rem;color:var(--race-muted);font:700 .62rem Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase}
-    .race-panel { padding:1rem; margin:.75rem 0; }.race-panel-title{font-size:1.4rem;font-weight:800;margin:0 0 .25rem}.race-checkpoint{padding:.85rem;margin:.55rem 0;border-left:4px solid var(--race-line)}.race-checkpoint.current{border-left-color:var(--race-red);box-shadow:0 0 0 1px rgba(237,49,57,.14)}.race-checkpoint.complete{opacity:.65}.race-checkpoint h3,.race-store-item h3{font:800 1.2rem/1 'Barlow Condensed',Impact,sans-serif;text-transform:uppercase;margin:.2rem 0}.race-checkpoint p{margin:.35rem 0;color:var(--race-muted);font-size:.86rem}.race-status{display:inline-block;padding:.22rem .45rem;border:1px solid var(--race-line);border-radius:999px;color:#c9d3da;font:800 .62rem Inter,sans-serif;letter-spacing:.09em}.race-status.active,.race-status.available{color:var(--race-amber);border-color:rgba(247,183,51,.55)}.race-status.approved{color:var(--race-green);border-color:rgba(77,211,138,.55)}.race-status.review,.race-status.submitted{color:var(--race-blue);border-color:rgba(67,182,232,.55)}.race-status.rejected{color:#ff8a8e;border-color:rgba(237,49,57,.55)}
+    .race-panel { padding:.85rem; margin:.55rem 0; }.race-panel-title{font-size:1.4rem;font-weight:800;margin:0 0 .2rem}.race-current{border-left:4px solid var(--race-red);box-shadow:0 0 0 1px rgba(237,49,57,.14)}.race-stage-track{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.3rem;margin:.5rem 0}.race-stage{padding:.3rem .1rem;border:1px solid var(--race-line);border-radius:6px;text-align:center;color:var(--race-muted);font:800 .62rem Inter,sans-serif;letter-spacing:.04em;white-space:nowrap}.race-stage.active,.race-stage.available{color:var(--race-amber);border-color:rgba(247,183,51,.55)}.race-stage.approved{color:var(--race-green);border-color:rgba(77,211,138,.55)}.race-stage.review,.race-stage.submitted{color:var(--race-blue);border-color:rgba(67,182,232,.55)}.race-stage.rejected{color:#ff8a8e;border-color:rgba(237,49,57,.55)}.race-stage-row{display:grid;grid-template-columns:2.1rem minmax(0,1fr) auto auto;align-items:center;gap:.45rem;padding:.55rem .65rem;margin:.35rem 0;border:1px solid var(--race-line);border-radius:8px;background:rgba(11,25,34,.72)}.race-stage-row.complete{opacity:.58}.race-stage-row strong{font:800 1rem/1 'Barlow Condensed',Impact,sans-serif;text-transform:uppercase;overflow-wrap:anywhere}.race-stage-row small{color:var(--race-muted);font-size:.7rem}.race-proof{margin:.35rem 0 .55rem;padding:.65rem .7rem;border:1px solid var(--race-line);border-radius:8px;background:rgba(7,16,23,.48)}.race-proof-title{color:var(--race-amber);font:800 .68rem Inter,sans-serif;letter-spacing:.13em}.race-status{display:inline-block;padding:.22rem .45rem;border:1px solid var(--race-line);border-radius:999px;color:#c9d3da;font:800 .62rem Inter,sans-serif;letter-spacing:.09em}.race-status.active,.race-status.available{color:var(--race-amber);border-color:rgba(247,183,51,.55)}.race-status.approved{color:var(--race-green);border-color:rgba(77,211,138,.55)}.race-status.review,.race-status.submitted{color:var(--race-blue);border-color:rgba(67,182,232,.55)}.race-status.rejected{color:#ff8a8e;border-color:rgba(237,49,57,.55)}
     .race-store-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem; }.race-store-item{padding:.85rem}.race-cost{color:var(--race-amber);font:800 1.45rem 'Barlow Condensed',Impact,sans-serif}.race-note{padding:.7rem .8rem;border-left:3px solid var(--race-blue);background:rgba(67,182,232,.09);color:#d8e8f0;font-size:.86rem}
-    div[data-testid="stRadio"] > div { gap:.35rem; } div[data-testid="stRadio"] label { flex:1;justify-content:center;margin:0!important;border:1px solid var(--race-line);border-radius:8px;padding:.42rem .25rem;background:rgba(10,23,32,.7);font-size:.76rem;font-weight:800;letter-spacing:.04em; } div[data-testid="stRadio"] label:has(input:checked){border-color:var(--race-red);background:rgba(237,49,57,.13)}
-    div.stButton>button,div[data-testid="stFormSubmitButton"]>button { min-height:44px;border-radius:7px;text-transform:uppercase;font-weight:800;letter-spacing:.04em; } div[data-testid="stMetric"]{background:transparent;border:0;padding:0} [data-testid="stMetricLabel"]{color:var(--race-muted)}
-    @media (max-width:600px) { .block-container{padding:.65rem .7rem 3rem}.race-header{align-items:flex-start;flex-direction:column;gap:.35rem}.race-team-name{font-size:2rem}.race-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.race-store-grid{grid-template-columns:1fr}.race-login{margin:3vh auto 0;padding:1rem}.race-login h1{font-size:2.7rem} }
+    div[data-testid="stRadio"] > div { gap:.24rem; } div[data-testid="stRadio"] label { flex:1;justify-content:center;min-width:0;margin:0!important;border:1px solid var(--race-line);border-radius:8px;padding:.42rem .12rem;background:rgba(10,23,32,.7);font-size:.68rem;font-weight:800;letter-spacing:.02em;white-space:nowrap; } div[data-testid="stRadio"] label p{white-space:nowrap!important;overflow:visible!important} div[data-testid="stRadio"] label:has(input:checked){border-color:var(--race-red);background:rgba(237,49,57,.13)}
+    div.stButton>button,div[data-testid="stFormSubmitButton"]>button { min-height:42px;border-radius:7px;text-transform:uppercase;font-weight:800;letter-spacing:.04em; } div[data-testid="stMetric"]{background:transparent;border:0;padding:0} [data-testid="stMetricLabel"]{color:var(--race-muted)}div[data-testid="stFileUploader"]{padding:.35rem .45rem;border:1px dashed var(--race-line);border-radius:8px;background:rgba(7,16,23,.35)}div[data-testid="stFileUploader"] small{display:none!important}textarea{min-height:68px!important;background:#0b161f!important;color:#f5f7f8!important}
+    @media (max-width:600px) { .block-container{padding:.35rem .65rem 2.5rem}.race-header{align-items:flex-start;flex-direction:column;gap:.35rem}.race-team-name{font-size:2rem}.race-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.race-store-grid{grid-template-columns:1fr}.race-login{margin:3vh auto 0;padding:1rem}.race-login h1{font-size:2.7rem}.race-stage-row{grid-template-columns:1.8rem minmax(0,1fr) auto}.race-stage-row small{display:none} }
     </style>
     """, unsafe_allow_html=True)
 
@@ -246,7 +246,8 @@ def show_formula_race_captain(runtime_override=None):
         except RuntimeError as error:
             st.error(str(error))
             return
-    if _staging_mode():
+    show_diagnostics = _staging_mode() and str(st.query_params.get("performance", st.query_params.get("debug", ""))).lower() in {"1", "true", "yes", "on"}
+    if show_diagnostics:
         st.caption("EXOS CORE V2 — STAGING")
     device=_device_id();raw_session=st.session_state.get("race_captain")
     token=str(st.query_params.get("captain_session",""))
@@ -349,7 +350,7 @@ def show_formula_race_captain(runtime_override=None):
         _clear_captain_state()
         st.info("Your captain session has expired. Sign in again.")
         return
-    if _is_staging_mode() and hasattr(runtime, "get_staging_call_counts"):
+    if show_diagnostics and hasattr(runtime, "get_staging_call_counts"):
         runtime._assert_no_legacy_or_sheet_calls()
         counts = runtime.get_staging_call_counts()
         st.caption(
@@ -388,32 +389,37 @@ def show_formula_race_captain(runtime_override=None):
         key="race_captain_section",
     )
     if captain_section == "RACE Checkpoints":
-        st.markdown(f"<div class='race-panel'><div class='race-overline'>Current checkpoint</div><div class='race-panel-title'>{html.escape(str(current.get('Name','Race Control is preparing the next checkpoint')))}</div><span class='race-status {_status_class(current_status)}'>{html.escape(current_status)}</span><p class='race-subtle'>{html.escape(str(current.get('Instructions','Stand by for the next mission.')))}</p><div class='race-cost'>+{html.escape(_display_number(current.get('Credits',0),'0'))} CREDITS</div></div>",unsafe_allow_html=True)
+        stage_track = "".join(
+            f"<div class='race-stage {_status_class(_status_copy(checkpoint.get('Status')))}'>CP{index}</div>"
+            for index, checkpoint in enumerate(checkpoints, start=1)
+        )
+        if stage_track: st.markdown(f"<div class='race-stage-track'>{stage_track}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='race-panel race-current'><div class='race-overline'>Current checkpoint</div><div class='race-panel-title'>{html.escape(str(current.get('Name','Race Control is preparing the next checkpoint')))}</div><span class='race-status {_status_class(current_status)}'>{html.escape(current_status)}</span><p class='race-subtle'>{html.escape(str(current.get('Instructions','Stand by for the next mission.')))}</p><div class='race-cost'>+{html.escape(_display_number(current.get('Credits',0),'0'))} CREDITS</div></div>",unsafe_allow_html=True)
         if runtime_status!="LIVE": st.info(f"Race Control has checkpoints {runtime_status.lower()}. Your mission will unlock here when it goes live.")
-        for checkpoint in checkpoints:
-            status=_status_copy(checkpoint.get("Status")); is_current=checkpoint.get("ActivityID")==current.get("ActivityID")
-            css_class="current" if is_current else ("complete" if status=="APPROVED" else "")
-            st.markdown(f"<div class='race-checkpoint {css_class}'><span class='race-status {_status_class(status)}'>{html.escape(status)}</span><h3>{html.escape(str(checkpoint.get('Name','Checkpoint')))}</h3><p>{html.escape(str(checkpoint.get('Instructions','')))}</p><div class='race-cost'>+{html.escape(_display_number(checkpoint.get('Credits',0),'0'))} CREDITS</div></div>",unsafe_allow_html=True)
-            disabled=runtime_status!="LIVE" or status in {"AWAITING REVIEW","APPROVED","SUBMITTED","LOCKED"}
-            if is_current or status=="REJECTED / RESUBMIT":
-                with st.expander("SUBMIT PROOF",expanded=is_current and not disabled):
-                    proof_type=str(checkpoint.get("ProofType","Photo")).upper()
-                    uploaded=st.file_uploader("Photo proof",type=["jpg","jpeg","png","webp"],disabled=disabled or proof_type=="TEXT",key=f"race_proof_{checkpoint.get('ActivityID')}")
-                    answer=st.text_area("Optional notes",disabled=disabled,key=f"race_answer_{checkpoint.get('ActivityID')}")
-                    if st.button("SUBMIT PROOF",type="primary",disabled=disabled,key=f"race_submit_{checkpoint.get('ActivityID')}"):
-                        storage_reference=""
-                        try:
-                            with st.spinner("Submitting proof…"):
-                                if uploaded:
-                                    started_at=perf_counter(); payload,content_type,photo=_optimise_race_photo(uploaded); runtime.record_performance_component("captain.photo_processing",started_at)
-                                    if photo["Optimised"]: st.caption(f"Photo optimised: {photo['OriginalBytes'] // 1024} KB to {photo['UploadBytes'] // 1024} KB")
-                                    storage_path=f"{event_id}/{team_id}/{checkpoint.get('ActivityID')}/{uuid.uuid4()}-{uploaded.name.rsplit('.', 1)[0]}.jpg"
-                                    runtime.upload_submission_image(storage_path,payload,content_type)
-                                    storage_reference="supabase://exos-submissions/"+storage_path
-                                activity_id=str(checkpoint.get("ActivityID", ""))
-                                runtime.formula_race_submit_checkpoint(session.get("SessionToken",""),device,activity_id,answer,storage_reference,_submission_idempotency_key(event_id,team_id,activity_id))
-                            st.success("PROOF SUBMITTED · Awaiting Race Control review.");st.rerun()
-                        except (RuntimeDatabaseError, RuntimeError) as error: st.error(_captain_error(error))
+        current_disabled=runtime_status!="LIVE" or current_status in {"AWAITING REVIEW","APPROVED","SUBMITTED","LOCKED"}
+        if current:
+            st.markdown("<div class='race-proof'><div class='race-proof-title'>PROOF</div></div>", unsafe_allow_html=True)
+            proof_type=str(current.get("ProofType","Photo")).upper()
+            uploaded=st.file_uploader("Upload photo",type=["jpg","jpeg","png","webp"],disabled=current_disabled or proof_type=="TEXT",key=f"race_proof_{current.get('ActivityID')}")
+            answer=st.text_area("Optional notes",disabled=current_disabled,key=f"race_answer_{current.get('ActivityID')}",height=68)
+            if st.button("SUBMIT PROOF",type="primary",disabled=current_disabled,key=f"race_submit_{current.get('ActivityID')}"):
+                storage_reference=""
+                try:
+                    with st.spinner("Submitting proof…"):
+                        if uploaded:
+                            started_at=perf_counter(); payload,content_type,photo=_optimise_race_photo(uploaded); runtime.record_performance_component("captain.photo_processing",started_at)
+                            if photo["Optimised"]: st.caption(f"Photo optimised: {photo['OriginalBytes'] // 1024} KB to {photo['UploadBytes'] // 1024} KB")
+                            storage_path=f"{event_id}/{team_id}/{current.get('ActivityID')}/{uuid.uuid4()}-{uploaded.name.rsplit('.', 1)[0]}.jpg"
+                            runtime.upload_submission_image(storage_path,payload,content_type)
+                            storage_reference="supabase://exos-submissions/"+storage_path
+                        activity_id=str(current.get("ActivityID", ""))
+                        runtime.formula_race_submit_checkpoint(session.get("SessionToken",""),device,activity_id,answer,storage_reference,_submission_idempotency_key(event_id,team_id,activity_id))
+                    st.success("PROOF SUBMITTED · Awaiting Race Control review.");st.rerun()
+                except (RuntimeDatabaseError, RuntimeError) as error: st.error(_captain_error(error))
+        for index, checkpoint in enumerate(checkpoints, start=1):
+            if checkpoint.get("ActivityID") == current.get("ActivityID"): continue
+            status=_status_copy(checkpoint.get("Status")); css_class="complete" if status=="APPROVED" else ""
+            st.markdown(f"<div class='race-stage-row {css_class}'><span class='race-overline'>CP{index}</span><strong>{html.escape(str(checkpoint.get('Name','Checkpoint')))}</strong><span class='race-status {_status_class(status)}'>{html.escape(status)}</span><span class='race-cost'>+{html.escape(_display_number(checkpoint.get('Credits',0),'0'))}</span></div>",unsafe_allow_html=True)
     if captain_section == "Wallet & Marketplace":
         purchases=list(workspace.get("Purchases",[])); items=list(workspace.get("Marketplace",[])); spent=sum(float(row.get("Amount",0) or 0) for row in purchases)
         st.markdown("<div class='race-panel'><div class='race-overline'>TEAM GARAGE / PARTS DEPOT</div><div class='race-panel-title'>Wallet & Marketplace</div><div class='race-metric-grid'>" +
