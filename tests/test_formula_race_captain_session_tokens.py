@@ -16,6 +16,23 @@ def test_query_token_normalization_blocks_none_null_and_empty():
     assert captain_screen._normalise_session_token(valid) == valid
 
 
+def test_team_options_fall_back_to_team_name_when_identity_is_blank():
+    rows = [
+        {
+            "TeamID": f"CORE-V2-RACE-UAT-T{number:02d}-4CF0CEAF5F",
+            "TeamIdentity": "" if number == 1 else None,
+            "TeamName": "SANDSTORM" if number == 1 else f"TEAM {number:02d}",
+            "IsActive": True,
+        }
+        for number in range(1, 11)
+    ]
+
+    options = captain_screen._team_options(rows)
+
+    assert len(options) == 10
+    assert options["SANDSTORM"] == "CORE-V2-RACE-UAT-T01-4CF0CEAF5F"
+
+
 class _Query(dict):
     def pop(self, key, default=None):
         return super().pop(key, default)

@@ -61,6 +61,17 @@ def _display_number(value: Any, empty: str = "—") -> str:
         return str(value)
 
 
+def _team_options(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Bind canonical roster rows to Captain selector labels without changing them."""
+    options: dict[str, str] = {}
+    for row in rows:
+        label = str(row.get("TeamIdentity") or row.get("TeamName") or "").strip()
+        team_id = str(row.get("TeamID") or "").strip()
+        if label and team_id:
+            options[label] = team_id
+    return options
+
+
 def _status_copy(value: Any) -> str:
     raw = str(value or "AVAILABLE").strip().upper().replace("_", " ")
     aliases = {"UNDER REVIEW": "AWAITING REVIEW", "REVIEW": "AWAITING REVIEW", "PENDING": "AWAITING REVIEW", "NOT STARTED": "NOT STARTED", "READY": "AVAILABLE"}
@@ -323,7 +334,7 @@ def show_formula_race_captain(runtime_override=None):
         join_code=st.text_input("Event Join Code",placeholder="ENTER JOIN CODE",key="race_captain_join_code").upper().strip()
         event=runtime.get_event_by_join_code(join_code) if join_code else None
         teams=runtime.get_runtime_teams(str(event.get("EventID",""))) if event else []
-        team_map={str(r.get("TeamIdentity",r.get("TeamName",""))):str(r.get("TeamID","")) for r in teams}
+        team_map=_team_options(teams)
         team_names=sorted(team_map.keys())
         with st.form("race_captain_login"):
             team=st.selectbox("Team",team_names,disabled=not team_names);pin=st.text_input("Team PIN",type="password")
