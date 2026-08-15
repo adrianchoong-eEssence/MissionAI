@@ -227,8 +227,7 @@ def _snapshot(db, event_id: str):
         operations = {}
         if getattr(db.runtime, "can_publish", False):
             try:
-                operations = db.runtime.get_formula_race_state(event_id) or {}
-                operations["Checkpoints"] = db.runtime.get_formula_race_checkpoints(event_id)
+                operations = db.runtime.get_formula_race_state(event_id, teams_data) or {}
             except Exception:
                 operations = {}
 
@@ -236,7 +235,7 @@ def _snapshot(db, event_id: str):
         captain_status = {}
         if getattr(db.runtime, "can_publish", False):
             try:
-                report = db.runtime.get_canonical_transaction_report(event_id) or {}
+                report = db.runtime.get_canonical_transaction_report(event_id, teams_data) or {}
             except Exception:
                 report = {}
             try:
@@ -384,7 +383,7 @@ def _team_rows(snapshot, limit=None):
 
 def overview(s):
     _title("Mission AI powered race experience", "Race Control Overview", "One operational picture across programme, championship, submissions and supply.")
-    pending=sum(1 for item in s.submissions if item.status.upper() in {"PENDING", "PENDING_REVIEW"})
+    pending=sum(1 for item in s.submissions if item.status.upper() in {"PENDING", "PENDING_REVIEW", "SUBMITTED"})
     cols=st.columns(4)
     for col,(label,value,delta) in zip(cols,[
         ("Teams on track",len(s.teams),"Selected event"),
@@ -442,9 +441,15 @@ def teams(s):
 def wallet(s):
     team=next((t for t in s.teams if t.id==st.session_state.get("selected_team")),s.teams[0])
     _title(f"{team.country} / Rank #{team.rank}", f"{team.name} Team Wallet", "Ledger projection: credits are not calculated or persisted by this screen.")
-    a,b,c,d=st.columns(4); a.metric("Current balance",f"{team.balance} CR"); b.metric("Earned","650 CR"); c.metric("Bonuses","75 CR"); d.metric("Spend","−145 CR")
+    team_transactions=[x for x in s.transactions if x.team_id==team.id]
+    credits_earned=sum(float(x.amount or 0) for x in team_transactions if float(x.amount or 0)>0)
+    credits_spent=-sum(float(x.amount or 0) for x in team_transactions if float(x.amount or 0)<0)
+    a,b,c,d=st.columns(4); a.metric("Current balance",f"{team.balance} CR"); b.metric("Credits earned",f"{credits_earned:g} CR"); c.metric("Credits spent",f"{credits_spent:g} CR"); d.metric("Championship score",team.score)
     st.subheader("Transaction Timeline")
-    st.dataframe([x.__dict__ for x in s.transactions if x.team_id==team.id] or [s.transactions[0].__dict__],width="stretch",hide_index=True)
+    if team_transactions:
+        st.dataframe([x.__dict__ for x in team_transactions],width="stretch",hide_index=True)
+    else:
+        st.caption("No credit transactions recorded for this team.")
     st.subheader("Achievements"); st.markdown("🏆 **Safety First** &nbsp;&nbsp; ⚡ **Fast Submitter** &nbsp;&nbsp; 🔧 **Master Builder**")
     if st.button("Back to teams"): st.session_state.race_subscreen=""; st.rerun()
 
@@ -453,11 +458,11 @@ def checkpoints(s):
     _title("Parallel Activity Set", "RACE Checkpoints", "All four remain available concurrently until the module is closed.")
     definitions=s.operations.get("Checkpoints",{}).get("Checkpoints",[])
     approved={(x.team_id,x.checkpoint) for x in s.submissions if x.status.upper()=="APPROVED"}
-    pending=sum(x.status.upper() in {"PENDING","PENDING_REVIEW"} for x in s.submissions)
+    pending=sum(x.status.upper() in {"PENDING","PENDING_REVIEW","SUBMITTED"} for x in s.submissions)
     rows=[]
     for team in s.teams:
         complete=sum(any(team.id==team_id and (str(cp.get("Name",""))==checkpoint or str(cp.get("ActivityID",""))==checkpoint) for team_id,checkpoint in approved) for cp in definitions)
-        rows.append({"Team":team.name,"Completed":f"{complete}/4","Pending Reviews":sum(x.team_id==team.id and x.status.upper() in {"PENDING","PENDING_REVIEW"} for x in s.submissions),"Credits":team.balance})
+        rows.append({"Team":team.name,"Completed":f"{complete}/4","Pending Reviews":sum(x.team_id==team.id and x.status.upper() in {"PENDING","PENDING_REVIEW","SUBMITTED"} for x in s.submissions),"Credits":team.balance})
     leader=max(rows,key=lambda row:row["Credits"])["Team"] if rows else "—"
     a,b,c=st.columns(3);a.metric("Teams",len(s.teams));b.metric("Pending reviews",pending);c.metric("Current leader",leader)
     st.dataframe(rows,width="stretch",hide_index=True)
@@ -558,14 +563,14 @@ def judging(s, control=None):
 
 
 def drag_results(s, control=None):
-    _title("Official Timing", "Drag Race Results", "Heat results and fastest-lap bonus projection.")
+    _title("Official Timing", "Drag Race Results", "Adjusted time uses finish time plus penalty. The optional result annotation is informational only.")
     live_rows=s.operations.get("RaceResults",[]) if control else []
     rows=[]
     for i,t in enumerate(s.teams):
         live=next((r for r in live_rows if str(r.get("team_id",""))==t.id),{})
-        rows.append({"Pos":live.get("position",i+1),"Team":t.name,"Time ms":live.get("time_ms",live.get("finish_time_ms","—")),"Penalty ms":live.get("penalty_ms",0),"Bonus":live.get("bonus_credits",0),"Verified":live.get("verified",False),"Locked":live.get("locked",False)})
+        rows.append({"Pos":live.get("position",i+1),"Team":t.name,"Time ms":live.get("time_ms",live.get("finish_time_ms","—")),"Penalty ms":live.get("penalty_ms",0),"Info value":live.get("bonus_credits",live.get("bonus",0)),"Verified":live.get("verified",False),"Locked":live.get("locked",False)})
     st.dataframe(rows,width="stretch",hide_index=True)
-    if not control: st.markdown("<div class='race-card'><h3>Fastest Lap</h3><p>Velocity · 12.18 seconds</p><span class='accent'>+25 BONUS POINTS</span></div>",unsafe_allow_html=True)
+    if not control: st.markdown("<div class='race-card'><h3>Fastest Lap</h3><p>Velocity · 12.18 seconds</p><span class='accent'>INFORMATIONAL RESULT ANNOTATION</span></div>",unsafe_allow_html=True)
     if control:
         team=st.selectbox("Result team",[t.name for t in s.teams]);selected=next(t for t in s.teams if t.name==team);current=next((row for row in live_rows if str(row.get("team_id",""))==selected.id),{})
         locked=bool(current.get("locked",False))
@@ -573,7 +578,7 @@ def drag_results(s, control=None):
             st.caption("Correcting the current pre-lock result. The correction reason and prior result are preserved in the canonical audit log.")
         time_ms=st.number_input("Finish time (ms)",0,3600000,int(current.get("time_ms",0) or 0),key=f"race_result_time_{selected.id}",disabled=locked)
         penalty=st.number_input("Penalty (ms)",0,3600000,int(current.get("penalty_ms",0) or 0),key=f"race_result_penalty_{selected.id}",disabled=locked)
-        bonus=st.number_input("Bonus credits",0,1000,int(current.get("bonus_credits",0) or 0),key=f"race_result_bonus_{selected.id}",disabled=locked)
+        bonus=st.number_input("Result annotation (informational)",0,1000,int(current.get("bonus_credits",current.get("bonus",0)) or 0),key=f"race_result_bonus_{selected.id}",disabled=locked,help="This does not award Credits, change Wallet balance, Championship Score, or adjusted race time.")
         verified=st.checkbox("Verified",value=bool(current.get("verified",False)),key=f"race_result_verified_{selected.id}",disabled=locked)
         actor=st.text_input("Facilitator identity",key="race_result_actor");reason=st.text_input("Result or correction reason",key="race_result_reason")
         if locked: st.error("Final results are locked. This result cannot be corrected.")
@@ -719,7 +724,7 @@ def show_formula_race(db=None, event_id=""):
         )
         _staging_diagnostics(runtime, requested_join_code, event_id)
     if _staging_runtime_enabled() and hasattr(runtime, "get_performance_report") and str(st.query_params.get("performance", "")).lower() in {"1", "true", "yes"}:
-        st.dataframe(runtime.get_performance_report().get("Components", []), width="stretch", hide_index=True)
+        st.dataframe(runtime.get_performance_report().get("Operations", []), width="stretch", hide_index=True)
     control = ControlRuntime(db) if db is not None else None
     page=_top(snapshot); sub=st.session_state.get("race_subscreen","")
     if sub=="wallet": wallet(snapshot)

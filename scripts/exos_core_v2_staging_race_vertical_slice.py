@@ -128,7 +128,7 @@ class CoreV2RaceStagingRunner:
 
     @staticmethod
     def _runner_version() -> str:
-        return "exos-core-v2-race-vertical-slice-v6"
+        return "exos-core-v2-race-vertical-slice-v7"
 
     @staticmethod
     def _coerce_bool(value: object) -> bool:
@@ -173,14 +173,9 @@ class CoreV2RaceStagingRunner:
         )
         expected_order: list[str] = []
         expected_rank = {}
-        current_position = 1
-        previous_metric = None
         for idx, (team_id, adjusted) in enumerate(ordered_by_metric):
-            if previous_metric is None or adjusted != previous_metric:
-                current_position = idx + 1
-            expected_rank[team_id] = current_position
+            expected_rank[team_id] = idx + 1
             expected_order.append(team_id)
-            previous_metric = adjusted
 
         tie_pairs = []
         for idx in range(1, len(ordered_by_metric)):
@@ -404,6 +399,9 @@ class CoreV2RaceStagingRunner:
             "bonus_applied_once": False,
             "lock_persisted": False,
             "locked_mutation_rejected": False,
+            "missing_result_rejected": False,
+            "unverified_result_rejected": False,
+            "idempotent_relock": False,
             "ranking_10_teams": False,
             "ranking_deterministic": False,
             "tie_rule_deterministic": False,
@@ -1249,246 +1247,138 @@ class CoreV2RaceStagingRunner:
             and isinstance(correction, list)
         )
 
-        created = []
-        for idx, scored_team_id in enumerate(self.team_ids[:10], start=1):
-            if idx in {1, 2}:
-                base_time = 120000
-            else:
-                base_time = 120000 + (idx - 1) * 2000
-            if idx == 1:
-                penalty_ms = 5000
-            elif idx == 2:
-                penalty_ms = 5000
-            else:
-                penalty_ms = 2000
+        self._certify_final_lock_results()
 
-            row = self._post(
-                "race_results_v2",
-                {
-                    "event_id": self.event_id,
-                    "team_id": scored_team_id,
-                    "activity_id": self.activity_ids[0],
-                    "checkpoint": "Race Final",
-                    "ranking_position": idx,
-                    "result_payload": {
-                        "time_ms": base_time,
-                        "penalty_ms": penalty_ms,
-                        "bonus_credits": 0,
-                        "verified": False,
-                    },
-                    "locked": False,
-                },
-            )
-            if isinstance(row, list) and row:
-                created.append(row[0])
-
-        result_rows = self._get(
-            "race_results_v2",
+    def _save_final_result(self, team_id: str, time_ms: int, penalty_ms: int, verified: bool) -> dict:
+        result = self._rpc(
+            "exos_v2_formula_race_save_result",
             {
-                "event_id": f"eq.{self.event_id}",
-                "checkpoint": "eq.Race Final",
-                "select": "team_id,ranking_position,result_payload,locked",
-                "order": "team_id.asc",
+                "p_event_id": self.event_id,
+                "p_team_id": team_id,
+                "p_activity_id": self.activity_ids[0],
+                "p_time_ms": time_ms,
+                "p_penalty_ms": penalty_ms,
+                "p_bonus": 7,
+                "p_verified": verified,
+                "p_reason": "Automated disposable-event final-lock certification",
+                "p_actor": "RACE_AUTOMATION",
             },
         )
+        if not isinstance(result, dict) or not result.get("RaceResultID"):
+            raise RuntimeError("Race result RPC did not return a result identifier")
+        return result
 
-        self.gates["result_row_created"] = bool(
-            isinstance(created, list)
-            and len(created) == 10
-            and isinstance(result_rows, list)
-            and len(result_rows) >= 10
+    def _lock_final_results(self) -> dict:
+        result = self._rpc(
+            "exos_v2_formula_race_lock_final_results",
+            {
+                "p_event_id": self.event_id,
+                "p_actor": "RACE_AUTOMATION",
+                "p_reason": "Automated disposable-event final-lock certification",
+            },
         )
-        self.gates["race_result"] = bool(self.gates["result_row_created"])
+        if not isinstance(result, dict):
+            raise RuntimeError("Final lock RPC returned an invalid payload")
+        return result
 
-        result_rows = self._get(
+    def _expect_incomplete_lock_rejection(self, gate: str) -> None:
+        try:
+            self._lock_final_results()
+        except RuntimeError as error:
+            if "Every active team requires one verified Race Final result before locking" not in str(error):
+                raise
+            self.gates[gate] = True
+            return
+        raise RuntimeError(f"Expected {gate} lock rejection was not returned")
+
+    def _certify_final_lock_results(self) -> None:
+        """Exercise 029 and the final-lock RPC against this runner's disposable event."""
+        # Nine verified rows prove a missing active-team result blocks the lock.
+        for index, team_id in enumerate(self.team_ids[:9], start=1):
+            self._save_final_result(team_id, 120000 + index * 1000, 1000, True)
+        self._expect_incomplete_lock_rejection("missing_result_rejected")
+
+        # The tenth row exists but is unverified, which must remain a separate block.
+        tenth_team_id = self.team_ids[9]
+        self._save_final_result(tenth_team_id, 130000, 1000, False)
+        self._expect_incomplete_lock_rejection("unverified_result_rejected")
+
+        # Correct the tenth result before lock. The first pair tie on adjusted time;
+        # TeamID ASC must therefore put the first team ahead of the second.
+        self._save_final_result(tenth_team_id, 130000, 1000, True)
+        self._save_final_result(self.team_ids[0], 120000, 5000, True)
+        self._save_final_result(self.team_ids[1], 121000, 4000, True)
+
+        rows = self._get(
             "race_results_v2",
             {
                 "event_id": f"eq.{self.event_id}",
                 "checkpoint": "eq.Race Final",
-                "activity_id": f"eq.{self.activity_ids[0]}",
                 "select": "team_id,activity_id,checkpoint,locked,ranking_position,result_payload",
                 "order": "team_id.asc",
             },
         )
-        if not isinstance(result_rows, list):
-            result_rows = []
-
-        print("=== RANKING DIAGNOSTIC ===")
-        (
-            _expected_count,
-            _actual_rows_count,
-            _unique_team_count,
-            _missing_teams,
-            _duplicate_teams,
-        ) = self._print_ranking_diagnostic(
-            result_rows,
+        result_rows = rows if isinstance(rows, list) else []
+        self.gates["result_row_created"] = len(result_rows) == 10
+        self.gates["race_result"] = self.gates["result_row_created"]
+        self.gates["penalty_applied_once"] = all(
+            int((row.get("result_payload") or {}).get("penalty_ms", 0) or 0) > 0
+            for row in result_rows
+        )
+        self.gates["bonus_applied_once"] = all(
+            (row.get("result_payload") or {}).get("bonus") == 7 for row in result_rows
+        )
+        self.gates["penalties_bonuses"] = bool(
+            self.gates["penalty_applied_once"] and self.gates["bonus_applied_once"]
         )
 
-        ranking_payload_ok = isinstance(result_rows, list) and len(result_rows) == 10
-        self.gates["result_row_created"] = bool(
-            ranking_payload_ok and isinstance(created, list) and len(created) == 10
-        )
-        self.gates["race_result"] = bool(self.gates["result_row_created"])
+        locked = self._lock_final_results()
+        self.gates["lock_persisted"] = bool(locked.get("Locked") and not locked.get("AlreadyLocked"))
+        repeated_lock = self._lock_final_results()
+        self.gates["idempotent_relock"] = bool(repeated_lock.get("Locked") and repeated_lock.get("AlreadyLocked"))
 
-        penalty_ok = True
-        bonus_ok = True
-        for idx, scored_team_id in enumerate(self.team_ids[:10], start=1):
-            if idx in {1, 2}:
-                penalty_ms = 5000
-                bonus_credits = 20 if idx == 1 else 5
-            else:
-                penalty_ms = 2000
-                bonus_credits = 5
-
-            self._patch(
-                "race_results_v2",
-                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{scored_team_id}", "activity_id": f"eq.{self.activity_ids[0]}", "checkpoint": "eq.Race Final"},
-                {"result_payload": {"penalty_ms": penalty_ms, "bonus_credits": bonus_credits, "verified": True}},
-            )
-            penalty_ok = penalty_ok and bool(penalty_ms > 0)
-
-            bonus_ok = bonus_ok and bool(bonus_credits > 0)
-
-        self.gates["result_row_created"] = bool(self.gates["result_row_created"])
-        self.gates["race_result"] = bool(self.gates["result_row_created"])
-
-        final_result_rows = self._get(
-            "race_results_v2",
-            {
-                "event_id": f"eq.{self.event_id}",
-                "checkpoint": "eq.Race Final",
-                "activity_id": f"eq.{self.activity_ids[0]}",
-                "select": "team_id,ranking_position,result_payload",
-                "order": "team_id.asc",
-            },
-        )
-        if not isinstance(final_result_rows, list):
-            final_result_rows = []
-
-        ranking_updates = self._compute_rank_positions(final_result_rows)
-        for update in ranking_updates:
-            self._patch(
-                "race_results_v2",
-                {
-                    "event_id": f"eq.{self.event_id}",
-                    "team_id": f"eq.{update['team_id']}",
-                    "activity_id": f"eq.{self.activity_ids[0]}",
-                    "checkpoint": "eq.Race Final",
-                },
-                {"ranking_position": update["ranking_position"]},
-            )
-
-        self.gates["penalty_applied_once"] = bool(penalty_ok)
-        self.gates["bonus_applied_once"] = bool(bonus_ok)
-        self.gates["penalties_bonuses"] = bool(self.gates["penalty_applied_once"] and self.gates["bonus_applied_once"])
-
-        locked_states = []
-        for scored_team_id in self.team_ids[:10]:
-            self._patch(
-                "race_results_v2",
-                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{scored_team_id}", "activity_id": f"eq.{self.activity_ids[0]}", "checkpoint": "eq.Race Final"},
-                {"locked": True},
-            )
-
-        locked_rows = self._get(
-            "race_results_v2",
-            {
-                "event_id": f"eq.{self.event_id}",
-                "checkpoint": "eq.Race Final",
-                "select": "team_id,locked",
-            },
-        )
-        if isinstance(locked_rows, list):
-            locked_states = [row.get("team_id") for row in locked_rows if isinstance(row, dict) and row.get("locked") is True]
-        self.gates["lock_persisted"] = bool(len(locked_states) >= 10)
-        self.gates["result_locking"] = self.gates["lock_persisted"]
-
-        lock_mutation_rejected = False
-        expected_lock_message = "race result is locked and immutable until explicit unlock"
         try:
-            self._patch(
-                "race_results_v2",
-                {"event_id": f"eq.{self.event_id}", "team_id": f"eq.{self.team_ids[0]}", "activity_id": f"eq.{self.activity_ids[0]}", "checkpoint": "eq.Race Final"},
-                {"ranking_position": 99, "result_payload": {"verified": False}},
+            self._save_final_result(self.team_ids[0], 1, 0, False)
+        except RuntimeError as error:
+            self.gates["locked_mutation_rejected"] = self._is_expected_lock_rejection(
+                error,
+                "race result is locked and immutable until explicit unlock",
             )
-        except RuntimeError as err:
-            if self._is_expected_lock_rejection(err, expected_lock_message):
-                lock_mutation_rejected = True
-            else:
-                raise
-        self.gates["locked_mutation_rejected"] = lock_mutation_rejected
-        if not lock_mutation_rejected:
-            raise RuntimeError(
-                "Expected lock rejection was not returned from post-lock result mutation"
-            )
+        if not self.gates["locked_mutation_rejected"]:
+            raise RuntimeError("Expected post-lock result mutation rejection was not returned")
 
         rankings = self._get(
             "race_results_v2",
             {
                 "event_id": f"eq.{self.event_id}",
                 "checkpoint": "eq.Race Final",
-                "select": "team_id,ranking_position,result_payload",
+                "select": "team_id,ranking_position,result_payload,locked",
                 "order": "ranking_position.asc,team_id.asc",
             },
         )
-
         ranking_rows = rankings if isinstance(rankings, list) else []
+        expected_order, _, ranking_payloads_ok = self._compute_team_rank_order(ranking_rows)
+        observed_order = [str(row.get("team_id", "")) for row in ranking_rows]
         expected_team_ids = [str(team_id) for team_id in self.team_ids[:10]]
-        self.gates["ranking_10_teams"] = self._ranking_10_team_produced(
-            ranking_rows,
-            expected_team_ids,
+        self.gates["ranking_10_teams"] = self._ranking_10_team_produced(ranking_rows, expected_team_ids)
+        self.gates["ranking_deterministic"] = bool(
+            ranking_payloads_ok
+            and observed_order == expected_order
+            and observed_order.index(self.team_ids[0]) < observed_order.index(self.team_ids[1])
         )
-
-        rankings_rerun = self._get(
-            "race_results_v2",
-            {
-                "event_id": f"eq.{self.event_id}",
-                "checkpoint": "eq.Race Final",
-                "select": "team_id,ranking_position,result_payload",
-                "order": "ranking_position.asc,team_id.asc",
-            },
+        self.gates["tie_rule_deterministic"] = bool(self.gates["ranking_deterministic"])
+        self.gates["lock_persisted"] = bool(
+            self.gates["lock_persisted"]
+            and len(ranking_rows) == 10
+            and all(row.get("locked") is True for row in ranking_rows)
         )
-        rerank_rows = rankings_rerun if isinstance(rankings_rerun, list) else []
-        first_order = [row.get("team_id") for row in ranking_rows if isinstance(row, dict)]
-        second_order = [row.get("team_id") for row in rerank_rows if isinstance(row, dict)]
-        ranking_deterministic_order = first_order == second_order and len(first_order) == 10
-
-        if len(ranking_rows) == 10:
-            expected_order, sorted_rows_with_metric, ranking_payloads_ok = self._compute_team_rank_order(ranking_rows)
-            expected_positions = {}
-            current_position = 1
-            previous_metric = None
-            for idx, (team_id, adjusted) in enumerate(sorted_rows_with_metric):
-                if previous_metric is None or adjusted != previous_metric:
-                    current_position = idx + 1
-                expected_positions[team_id] = current_position
-                previous_metric = adjusted
-            observed_positions = {
-                row.get("team_id"): int(row.get("ranking_position", 0))
-                for row in ranking_rows
-                if isinstance(row, dict) and row.get("team_id") is not None and row.get("ranking_position") is not None
-            }
-            self.gates["ranking_deterministic"] = (
-                ranking_payloads_ok
-                and len(set(first_order)) == 10
-                and len(ranking_rows) == 10
-                and expected_positions == observed_positions
-            )
-            self.gates["tie_rule_deterministic"] = ranking_payloads_ok
-            ranking_deterministic_order = ranking_deterministic_order and (first_order == expected_order)
-        else:
-            self.gates["tie_rule_deterministic"] = False
-            ranking_deterministic_order = False
-
-        self.gates["ranking_10_teams"] = bool(self.gates["ranking_10_teams"] and ranking_deterministic_order)
-
+        self.gates["result_locking"] = bool(
+            self.gates["lock_persisted"] and self.gates["locked_mutation_rejected"] and self.gates["idempotent_relock"]
+        )
         self.gates["final_ranking"] = bool(
             self.gates["ranking_10_teams"]
             and self.gates["ranking_deterministic"]
             and self.gates["tie_rule_deterministic"]
-        )
-        self.gates["result_locking"] = bool(
-            self.gates["lock_persisted"] and self.gates["locked_mutation_rejected"]
         )
 
     def ui_verification(self) -> None:
@@ -1651,6 +1541,9 @@ class CoreV2RaceStagingRunner:
         print(f"Bonus applied once: {'PASS' if self.gates['bonus_applied_once'] else 'FAIL'}")
         print(f"Lock persisted: {'PASS' if self.gates['lock_persisted'] else 'FAIL'}")
         print(f"Locked mutation rejected: {'PASS' if self.gates['locked_mutation_rejected'] else 'FAIL'}")
+        print(f"Missing result rejected: {'PASS' if self.gates['missing_result_rejected'] else 'FAIL'}")
+        print(f"Unverified result rejected: {'PASS' if self.gates['unverified_result_rejected'] else 'FAIL'}")
+        print(f"Idempotent re-lock: {'PASS' if self.gates['idempotent_relock'] else 'FAIL'}")
         print(f"Result locking: {'PASS' if self.gates['result_locking'] else 'FAIL'}")
         print(f"Ranking metric used: {self.ranking_metric}")
         print(f"10-team ranking produced: {'PASS' if self.gates['ranking_10_teams'] else 'FAIL'}")

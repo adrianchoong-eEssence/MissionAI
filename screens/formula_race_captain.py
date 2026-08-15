@@ -286,7 +286,7 @@ def show_formula_race_captain(runtime_override=None):
             f"GOOGLE_SHEETS_RUNTIME_CALLS = {counts['GOOGLE_SHEETS_RUNTIME_CALLS']}"
         )
         if str(st.query_params.get("performance", "")).lower() in {"1", "true", "yes"}:
-            st.dataframe(runtime.get_performance_report().get("Components", []), width="stretch", hide_index=True)
+            st.dataframe(runtime.get_performance_report().get("Operations", []), width="stretch", hide_index=True)
     submissions=list(workspace.get("Submissions", []))
     asset=ASSET_ROOT/TEAM_ASSETS.get(name,"")
     if asset.is_file():st.image(str(asset),width=96)

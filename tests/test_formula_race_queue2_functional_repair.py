@@ -64,6 +64,8 @@ def test_final_results_use_verified_adjusted_time_and_lock_positions():
     assert "ranking_position=ranked.final_rank" in SQL
     assert "locked=true" in SQL
     assert "exos_v2_formula_race_lock_final_results" in ADAPTER
+    assert "count(distinct r.team_id)" in RESULT_CORRECTION_SQL
+    assert "partial lock state" in RESULT_CORRECTION_SQL
 
 
 def test_operational_displays_use_team_identity_and_expose_lock_action():
@@ -102,3 +104,13 @@ def test_race_performance_keeps_live_reads_fresh_and_optimises_evidence():
     assert "Approving…" in RACE_CONTROL and "Saving race result…" in RACE_CONTROL
     assert "get_formula_race_state(event_id, raw_teams)" in contracts
     assert "operations[\"Checkpoints\"] = self.db.runtime.get_formula_race_checkpoints" not in contracts
+    overview_snapshot = RACE_CONTROL.split('if active_view == "Overview":', 1)[1].split('return LiveFormulaRaceProvider', 1)[0]
+    assert "get_formula_race_state(event_id, teams_data)" in overview_snapshot
+    assert "get_canonical_transaction_report(event_id, teams_data)" in overview_snapshot
+    assert "operations[\"Checkpoints\"] = db.runtime.get_formula_race_checkpoints" not in overview_snapshot
+
+
+def test_race_review_counter_includes_canonical_submitted_state_and_bonus_is_informational():
+    assert '"PENDING", "PENDING_REVIEW", "SUBMITTED"' in RACE_CONTROL
+    assert 'Result annotation (informational)' in RACE_CONTROL
+    assert 'does not award Credits, change Wallet balance, Championship Score, or adjusted race time' in RACE_CONTROL

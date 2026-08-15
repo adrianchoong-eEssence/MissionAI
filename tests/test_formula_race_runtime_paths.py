@@ -10,7 +10,7 @@ SEED = Path("supabase/seeds/formula_race_core_v2_queue5_test_event.sql").read_te
 def test_formula_race_captain_no_google_sheets_runtime_reads():
     assert "from data.google_sheets import GoogleSheetsDB" not in CAPTAIN
     assert "runtime.get_runtime_teams(" in CAPTAIN
-    assert "get_canonical_submissions(" in CAPTAIN
+    assert 'submissions=list(workspace.get("Submissions", []))' in CAPTAIN
 
 
 def test_formula_race_core_v2_queue5_seed_is_isolated():

@@ -173,8 +173,8 @@ def test_adapter_performance_report_has_safe_endpoint_timings_only():
         adapter = FormulaRaceCoreV2StagingAdapter(runtime)
         adapter.get_runtime_event("RACE4CF0CE")
     report = adapter.get_performance_report()
-    assert report["CallCount"] >= 1
-    assert any(row["Component"].startswith("GET events_v2") for row in report["Components"])
+    assert any(row["Operation"].startswith("GET events_v2") for row in report["Operations"])
+    assert all(set(row) == {"Operation", "DurationMs", "BackendCallCount"} for row in report["Operations"])
     assert "payload" not in str(report).lower()
 
 

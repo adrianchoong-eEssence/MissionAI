@@ -112,7 +112,7 @@ def test_linked_content_reruns_do_not_clear_participant_identity():
 def test_prejoin_runtime_lookup_does_not_load_experience_content():
     source = Path("screens/participant.py").read_text()
     function = source.split("def participant_event_by_code", 1)[1].split("\n\n", 1)[0]
-    assert "get_runtime_database().get_event_by_join_code" in function
+    assert "get_standard_database().get_event_by_join_code" in function
     assert "GoogleSheetsDB" not in function
     assert "get_mission" not in function
     assert "get_assets" not in function

@@ -262,6 +262,7 @@ class FormulaRaceCoreV2StagingAdapter:
         self.last_login_rpc_response: dict[str, Any] | None = None
         self.last_login_normalized_token: str = ""
         self._performance_events: list[dict[str, Any]] = []
+        self._backend_http_call_count = 0
 
     @staticmethod
     def _is_google_sheets_like(path: str) -> bool:
@@ -277,30 +278,47 @@ class FormulaRaceCoreV2StagingAdapter:
         return {
             "LEGACY_RUNTIME_CALLS": int(self.legacy_runtime_calls),
             "GOOGLE_SHEETS_RUNTIME_CALLS": int(self.google_sheets_runtime_calls),
-            "SUPABASE_HTTP_CALLS": len(self._performance_events),
+            "SUPABASE_HTTP_CALLS": int(self._backend_http_call_count),
         }
 
-    def _record_performance(self, kind: str, component: str, started_at: float) -> None:
-        self._performance_events.append({"Kind": kind, "Component": component, "DurationMs": round((perf_counter() - started_at) * 1000, 2)})
+    def _record_performance(self, operation: str, started_at: float, backend_call_count: int) -> None:
+        """Record staging-only timing without retaining request data or secrets."""
+        self._performance_events.append(
+            {
+                "Operation": operation,
+                "DurationMs": round((perf_counter() - started_at) * 1000, 2),
+                "BackendCallCount": int(backend_call_count),
+            }
+        )
 
-    def record_performance_component(self, component: str, started_at: float) -> None:
-        self._record_performance("component", component, started_at)
+    def record_performance_component(self, operation: str, started_at: float, backend_call_count: int = 0) -> None:
+        self._record_performance(operation, started_at, backend_call_count)
 
     def get_performance_report(self) -> dict[str, Any]:
-        grouped: dict[tuple[str, str], list[float]] = {}
+        grouped: dict[str, dict[str, float]] = {}
         for event in self._performance_events:
-            grouped.setdefault((str(event["Kind"]), str(event["Component"])), []).append(float(event["DurationMs"]))
-        return {"CallCount": len(self._performance_events), "TotalMs": round(sum(float(event["DurationMs"]) for event in self._performance_events), 2), "Components": [
-            {"Kind": kind, "Component": component, "Calls": len(durations), "TotalMs": round(sum(durations), 2), "AverageMs": round(sum(durations) / len(durations), 2)}
-            for (kind, component), durations in sorted(grouped.items())
-        ]}
+            operation = str(event["Operation"])
+            summary = grouped.setdefault(operation, {"DurationMs": 0.0, "BackendCallCount": 0.0})
+            summary["DurationMs"] += float(event["DurationMs"])
+            summary["BackendCallCount"] += float(event["BackendCallCount"])
+        return {
+            "Operations": [
+                {
+                    "Operation": operation,
+                    "DurationMs": round(summary["DurationMs"], 2),
+                    "BackendCallCount": int(summary["BackendCallCount"]),
+                }
+                for operation, summary in sorted(grouped.items())
+            ]
+        }
 
     def _timed_request(self, method: str, path: str, *, payload=None, query=None, admin: bool = True):
         started_at = perf_counter()
         try:
             return self.runtime._request(method, path, payload=payload, query=query, admin=admin)
         finally:
-            self._record_performance("supabase", f"{method} {path}", started_at)
+            self._backend_http_call_count += 1
+            self._record_performance(f"{method} {path}", started_at, 1)
 
     def __getattr__(self, name: str):
         return getattr(self.runtime, name)
@@ -873,6 +891,7 @@ class FormulaRaceCoreV2StagingAdapter:
 
     def formula_race_captain_workspace(self, session_token: str, device_id: str) -> dict[str, Any]:
         started_at = perf_counter()
+        backend_call_start = len(self._performance_events)
         token = _require_uuid(session_token, "session_token")
         _trace_uuid_context("formula_race_captain_workspace.request", "team_access_sessions_v2", "session_token", token)
         _trace_uuid_context("formula_race_captain_workspace.request", "team_access_sessions_v2", "device_id", device_id)
@@ -937,7 +956,11 @@ class FormulaRaceCoreV2StagingAdapter:
             "Submissions": [{"SubmissionID": str(item.get("submission_id", "")), "ActivityID": str(item.get("activity_id", "")), "Status": str(item.get("submission_status", "PENDING")), "Judge": str(item.get("reviewed_by", "")), "Score": item.get("score", ""), "SubmittedAt": item.get("submitted_at") or item.get("created_at")} for item in submissions],
             "Session": row,
         }
-        self.record_performance_component("captain.workspace", started_at)
+        self.record_performance_component(
+            "captain.workspace",
+            started_at,
+            len(self._performance_events) - backend_call_start,
+        )
         return workspace
 
     def upload_submission_image(self, storage_path: str, payload: bytes, content_type: str):
@@ -945,7 +968,8 @@ class FormulaRaceCoreV2StagingAdapter:
         try:
             return self.runtime.upload_submission_image(storage_path, payload, content_type)
         finally:
-            self.record_performance_component("captain.storage_upload", started_at)
+            self._backend_http_call_count += 1
+            self.record_performance_component("captain.storage_upload", started_at, 1)
 
     def formula_race_captain_logout(self, session_token: str, device_id: str) -> dict[str, Any]:
         token = _require_uuid(session_token, "session_token")

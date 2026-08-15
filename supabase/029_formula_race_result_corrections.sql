@@ -47,3 +47,33 @@ revoke all on function public.exos_v2_formula_race_save_result(text,text,text,in
 grant execute on function public.exos_v2_formula_race_save_result(text,text,text,integer,integer,numeric,boolean,text,text) to service_role;
 
 commit;
+
+begin;
+
+-- Replaces the 023 lock function so the current 029 chain rejects duplicate
+-- Race Final rows as well as missing active-team rows before any lock write.
+create or replace function public.exos_v2_formula_race_lock_final_results(p_event_id text,p_actor text,p_reason text)
+returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_team_count integer; v_result_count integer; v_distinct_result_team_count integer; v_already_locked integer;
+begin
+ if nullif(trim(p_actor),'') is null or nullif(trim(p_reason),'') is null then raise exception 'Facilitator identity and lock reason are required'; end if;
+ perform pg_advisory_xact_lock(hashtextextended(trim(p_event_id)||'|RACE_FINAL_RESULTS',37));
+ select count(*) into v_team_count from public.teams_v2 where event_id=trim(p_event_id) and is_active=true;
+ select count(*),count(distinct r.team_id) into v_result_count,v_distinct_result_team_count
+ from public.race_results_v2 r join public.teams_v2 t on t.team_id=r.team_id and t.event_id=r.event_id
+ where r.event_id=trim(p_event_id) and r.checkpoint='Race Final' and coalesce((r.result_payload->>'verified')::boolean,false)=true and t.is_active=true;
+ if v_team_count=0 or v_result_count<>v_team_count or v_distinct_result_team_count<>v_team_count then raise exception 'Every active team requires one verified Race Final result before locking'; end if;
+ select count(*) into v_already_locked from public.race_results_v2 where event_id=trim(p_event_id) and checkpoint='Race Final' and locked=true;
+ if v_already_locked=v_team_count then return jsonb_build_object('Locked',true,'EventID',trim(p_event_id),'AlreadyLocked',true); end if;
+ if v_already_locked>0 then raise exception 'Race Final has a partial lock state and requires controlled reconciliation'; end if;
+ with ranked as (
+  select r.race_result_id,row_number() over(order by coalesce((r.result_payload->>'time_ms')::bigint,(r.result_payload->>'finish_time_ms')::bigint,0)+coalesce((r.result_payload->>'penalty_ms')::bigint,0),r.team_id asc) as final_rank
+  from public.race_results_v2 r where r.event_id=trim(p_event_id) and r.checkpoint='Race Final' and coalesce((r.result_payload->>'verified')::boolean,false)=true
+ ) update public.race_results_v2 r set ranking_position=ranked.final_rank,locked=true,updated_at=now(),result_payload=r.result_payload||jsonb_build_object('locked_by',trim(p_actor),'lock_reason',trim(p_reason)) from ranked where r.race_result_id=ranked.race_result_id;
+ return jsonb_build_object('Locked',true,'EventID',trim(p_event_id),'AlreadyLocked',false,'RankingMetric','time_ms + penalty_ms, TeamID ASC');
+end $$;
+
+revoke all on function public.exos_v2_formula_race_lock_final_results(text,text,text) from public;
+grant execute on function public.exos_v2_formula_race_lock_final_results(text,text,text) to service_role;
+
+commit;

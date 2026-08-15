@@ -239,6 +239,79 @@ def test_non_lock_error_is_not_treated_as_expected() -> None:
     assert runner._is_expected_lock_rejection(err, "race result is locked and immutable until explicit unlock") is False
 
 
+def test_final_lock_certification_uses_only_the_disposable_event_and_lock_rpcs() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    certification = source.split("def _certify_final_lock_results", 1)[1].split("def ui_verification", 1)[0]
+    assert "self._save_final_result(" in certification
+    assert "self._lock_final_results(" in certification
+    assert '"exos_v2_formula_race_save_result"' in source
+    assert '"exos_v2_formula_race_lock_final_results"' in source
+    assert "missing_result_rejected" in certification
+    assert "unverified_result_rejected" in certification
+    assert "idempotent_relock" in certification
+    assert "self.event_id" in certification
+
+
+def test_final_lock_certification_exercises_missing_unverified_tie_and_relock_gates() -> None:
+    runner = CoreV2RaceStagingRunner()
+    runner.team_ids = [f"TEAM-{idx:02d}" for idx in range(1, 11)]
+    runner.activity_ids = ["ACTIVITY-1"]
+    rows: dict[str, dict[str, object]] = {}
+
+    def fake_rpc(name: str, payload: dict, admin: bool = True):
+        if name == "exos_v2_formula_race_save_result":
+            team_id = str(payload["p_team_id"])
+            row = rows.get(team_id)
+            if row and row["locked"]:
+                raise RuntimeError('HTTP 400 POST rpc: {"code":"P0001","message":"Race result is locked and immutable until explicit unlock."}')
+            rows[team_id] = {
+                "team_id": team_id,
+                "ranking_position": row.get("ranking_position") if row else None,
+                "locked": False,
+                "result_payload": {
+                    "time_ms": payload["p_time_ms"],
+                    "penalty_ms": payload["p_penalty_ms"],
+                    "bonus": payload["p_bonus"],
+                    "verified": payload["p_verified"],
+                },
+            }
+            return {"RaceResultID": f"RESULT-{team_id}"}
+        if name == "exos_v2_formula_race_lock_final_results":
+            verified = [row for row in rows.values() if row["result_payload"]["verified"]]
+            if len(verified) != 10:
+                raise RuntimeError("Every active team requires one verified Race Final result before locking")
+            if all(row["locked"] for row in verified):
+                return {"Locked": True, "AlreadyLocked": True}
+            if any(row["locked"] for row in verified):
+                raise RuntimeError("Race Final has a partial lock state and requires controlled reconciliation")
+            for position, row in enumerate(
+                sorted(verified, key=lambda row: (row["result_payload"]["time_ms"] + row["result_payload"]["penalty_ms"], row["team_id"])),
+                start=1,
+            ):
+                row["ranking_position"] = position
+                row["locked"] = True
+            return {"Locked": True, "AlreadyLocked": False}
+        raise AssertionError(f"Unexpected RPC: {name}")
+
+    def fake_get(table: str, query: dict):
+        assert table == "race_results_v2"
+        result = [dict(row) for row in rows.values()]
+        if query.get("order") == "ranking_position.asc,team_id.asc":
+            return sorted(result, key=lambda row: (row["ranking_position"] or 999, row["team_id"]))
+        return sorted(result, key=lambda row: row["team_id"])
+
+    runner._rpc = fake_rpc  # type: ignore[method-assign]
+    runner._get = fake_get  # type: ignore[method-assign]
+    runner._certify_final_lock_results()
+
+    for gate in (
+        "missing_result_rejected", "unverified_result_rejected", "idempotent_relock",
+        "penalty_applied_once", "lock_persisted", "locked_mutation_rejected",
+        "ranking_10_teams", "ranking_deterministic", "tie_rule_deterministic",
+    ):
+        assert runner.gates[gate] is True, gate
+
+
 def test_ranking_10_team_produced_contract_with_exact_staging_dataset() -> None:
     runner = CoreV2RaceStagingRunner()
     runner.team_ids = [f"CORE-V2-RACE-UAT-T{idx:02d}-ABCDEF1234" for idx in range(1, 11)]
