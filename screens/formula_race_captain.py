@@ -34,18 +34,19 @@ def _race_css() -> None:
     .race-kicker,.race-overline { color:var(--race-amber); font:800 .70rem/1 Inter,sans-serif; letter-spacing:.15em; text-transform:uppercase; }
     .race-wordmark,.race-team-name,.race-panel-title { font-family:'Barlow Condensed',Impact,sans-serif; text-transform:uppercase; letter-spacing:.03em; }
     .race-wordmark { font-size:1.55rem; font-weight:800; line-height:1; }.race-wordmark b{color:var(--race-red)}
-    .race-team-name { margin:.22rem 0 0; font-size:2.25rem; font-weight:800; line-height:.88; color:#fff; overflow-wrap:anywhere; }
+    .race-team-name { margin:.14rem 0 0; font-size:2.25rem; font-weight:800; line-height:.88; color:#fff; overflow-wrap:anywhere; text-shadow:0 10px 30px rgba(67,182,232,.14); }
     .race-subtle { color:var(--race-muted); font-size:.82rem; }
     .race-login,.race-panel,.race-metric,.race-checkpoint,.race-store-item { border:1px solid var(--race-line); background:linear-gradient(145deg,rgba(18,34,45,.96),rgba(9,18,25,.96)); border-radius:12px; }
     .race-login { max-width:530px; margin:8vh auto 0; padding:1.35rem; }.race-login h1{font:800 3.3rem/.82 'Barlow Condensed',Impact,sans-serif;margin:.4rem 0 1rem;text-transform:uppercase}.race-login h1 b{color:var(--race-red)}
     .race-header { display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; margin:.5rem 0 1rem; }.race-live{color:var(--race-green);font-weight:800;font-size:.72rem;letter-spacing:.08em;white-space:nowrap}
-    .race-metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.55rem; margin:.7rem 0 1rem; }
-    .race-metric { padding:.7rem .75rem; min-width:0; border-top:3px solid var(--race-line); }.race-metric.accent{border-top-color:var(--race-red)} .race-metric strong{display:block;overflow-wrap:anywhere;color:#fff;font:800 1.8rem/.86 'Barlow Condensed',Impact,sans-serif;letter-spacing:.02em}.race-metric small{display:block;margin-bottom:.22rem;color:var(--race-muted);font:700 .62rem Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase}
-    .race-panel { padding:.85rem; margin:.55rem 0; }.race-panel-title{font-size:1.4rem;font-weight:800;margin:0 0 .2rem}.race-current{border-left:4px solid var(--race-red);box-shadow:0 0 0 1px rgba(237,49,57,.14)}.race-stage-track{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.3rem;margin:.5rem 0}.race-stage{padding:.3rem .1rem;border:1px solid var(--race-line);border-radius:6px;text-align:center;color:var(--race-muted);font:800 .62rem Inter,sans-serif;letter-spacing:.04em;white-space:nowrap}.race-stage.active,.race-stage.available{color:var(--race-amber);border-color:rgba(247,183,51,.55)}.race-stage.approved{color:var(--race-green);border-color:rgba(77,211,138,.55)}.race-stage.review,.race-stage.submitted{color:var(--race-blue);border-color:rgba(67,182,232,.55)}.race-stage.rejected{color:#ff8a8e;border-color:rgba(237,49,57,.55)}.race-stage-row{display:grid;grid-template-columns:2.1rem minmax(0,1fr) auto auto;align-items:center;gap:.45rem;padding:.55rem .65rem;margin:.35rem 0;border:1px solid var(--race-line);border-radius:8px;background:rgba(11,25,34,.72)}.race-stage-row.complete{opacity:.58}.race-stage-row strong{font:800 1rem/1 'Barlow Condensed',Impact,sans-serif;text-transform:uppercase;overflow-wrap:anywhere}.race-stage-row small{color:var(--race-muted);font-size:.7rem}.race-proof{margin:.35rem 0 .55rem;padding:.65rem .7rem;border:1px solid var(--race-line);border-radius:8px;background:rgba(7,16,23,.48)}.race-proof-title{color:var(--race-amber);font:800 .68rem Inter,sans-serif;letter-spacing:.13em}.race-status{display:inline-block;padding:.22rem .45rem;border:1px solid var(--race-line);border-radius:999px;color:#c9d3da;font:800 .62rem Inter,sans-serif;letter-spacing:.09em}.race-status.active,.race-status.available{color:var(--race-amber);border-color:rgba(247,183,51,.55)}.race-status.approved{color:var(--race-green);border-color:rgba(77,211,138,.55)}.race-status.review,.race-status.submitted{color:var(--race-blue);border-color:rgba(67,182,232,.55)}.race-status.rejected{color:#ff8a8e;border-color:rgba(237,49,57,.55)}
+    .race-standing{display:flex;align-items:center;gap:.65rem;margin:.5rem 0 .2rem;padding:.55rem 0;border-top:1px solid var(--race-line);border-bottom:1px solid var(--race-line)}.race-standing strong{font:800 2.4rem/.75 'Barlow Condensed',Impact,sans-serif;color:#fff}.race-standing span{font:800 .68rem Inter,sans-serif;letter-spacing:.11em;color:var(--race-muted)}.race-standing em{display:block;color:var(--race-amber);font:800 .72rem Inter,sans-serif;letter-spacing:.08em;font-style:normal}.race-standing.leader{border-color:rgba(247,183,51,.48);background:linear-gradient(90deg,rgba(247,183,51,.12),transparent 65%)}.race-standing.leader strong{color:var(--race-amber)}.race-standing.podium strong{color:#d8e8f0}
+    .race-metric-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.55rem; margin:.55rem 0 .8rem; }
+    .race-metric { padding:.45rem .15rem; min-width:0; border-bottom:2px solid var(--race-line); }.race-metric.accent{border-bottom-color:var(--race-red)} .race-metric strong{display:block;overflow-wrap:anywhere;color:#fff;font:800 1.8rem/.86 'Barlow Condensed',Impact,sans-serif;letter-spacing:.02em}.race-metric small{display:block;margin-bottom:.22rem;color:var(--race-muted);font:700 .62rem Inter,sans-serif;letter-spacing:.1em;text-transform:uppercase}
+    .race-panel { padding:.85rem; margin:.55rem 0; }.race-panel-title{font-size:1.4rem;font-weight:800;margin:0 0 .2rem}.race-current{position:relative;overflow:hidden;border-left:4px solid var(--race-red);background:linear-gradient(120deg,rgba(237,49,57,.16),rgba(16,38,53,.88) 42%,rgba(9,18,25,.96));box-shadow:0 14px 38px rgba(0,0,0,.17)}.race-current:after{content:'';position:absolute;right:-55px;top:-80px;width:190px;height:190px;border:1px solid rgba(67,182,232,.19);border-radius:50%;box-shadow:0 0 0 22px rgba(67,182,232,.04),0 0 0 45px rgba(67,182,232,.03)}.race-current>*{position:relative;z-index:1}.race-journey-label{display:flex;align-items:center;justify-content:space-between;margin:.6rem 0 .25rem;color:var(--race-muted);font:800 .65rem Inter,sans-serif;letter-spacing:.1em}.race-stage-track{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.3rem;margin:.1rem 0 .65rem}.race-stage-track:before{content:'';position:absolute;left:12%;right:12%;top:.73rem;height:1px;background:var(--race-line)}.race-stage{position:relative;padding:.25rem .1rem;text-align:center;color:var(--race-muted);font:800 .62rem Inter,sans-serif;letter-spacing:.04em;white-space:nowrap;background:var(--race-ink)}.race-stage:before{content:'';display:block;width:.68rem;height:.68rem;margin:0 auto .22rem;border:2px solid var(--race-line);border-radius:50%;background:var(--race-ink)}.race-stage.active:before,.race-stage.available:before{border-color:var(--race-amber);box-shadow:0 0 0 3px rgba(247,183,51,.10)}.race-stage.approved:before{border-color:var(--race-green);background:var(--race-green)}.race-stage.review:before,.race-stage.submitted:before{border-color:var(--race-blue);background:var(--race-blue)}.race-stage.selected{color:#fff}.race-stage.selected:before{border-color:var(--race-red);background:var(--race-red);box-shadow:0 0 0 4px rgba(237,49,57,.18)}.race-stage-row{display:grid;grid-template-columns:2.1rem minmax(0,1fr) auto auto;align-items:center;gap:.45rem;padding:.48rem .1rem;margin:.15rem 0;border-bottom:1px solid rgba(38,56,70,.72)}.race-stage-row.complete{opacity:.58}.race-stage-row strong{font:800 1rem/1 'Barlow Condensed',Impact,sans-serif;text-transform:uppercase;overflow-wrap:anywhere}.race-stage-row small{color:var(--race-muted);font-size:.7rem}.race-reward{display:inline-flex;align-items:center;gap:.28rem;margin-top:.42rem;padding:.26rem .46rem;border-radius:999px;background:rgba(247,183,51,.12);color:var(--race-amber);font:800 .72rem Inter,sans-serif;letter-spacing:.05em}.race-reward:before{content:'◆';font-size:.55rem}.race-proof{margin:.35rem 0 .55rem;padding:.65rem .7rem;border-top:1px solid var(--race-line);background:rgba(7,16,23,.34)}.race-proof-title{color:var(--race-amber);font:800 .68rem Inter,sans-serif;letter-spacing:.13em}.race-status{display:inline-block;padding:.22rem .45rem;border:1px solid var(--race-line);border-radius:999px;color:#c9d3da;font:800 .62rem Inter,sans-serif;letter-spacing:.09em}.race-status.active,.race-status.available{color:var(--race-amber);border-color:rgba(247,183,51,.55)}.race-status.approved{color:var(--race-green);border-color:rgba(77,211,138,.55)}.race-status.review,.race-status.submitted{color:var(--race-blue);border-color:rgba(67,182,232,.55)}.race-status.rejected{color:#ff8a8e;border-color:rgba(237,49,57,.55)}
     .race-store-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem; }.race-store-item{padding:.85rem}.race-cost{color:var(--race-amber);font:800 1.45rem 'Barlow Condensed',Impact,sans-serif}.race-note{padding:.7rem .8rem;border-left:3px solid var(--race-blue);background:rgba(67,182,232,.09);color:#d8e8f0;font-size:.86rem}
     div[data-testid="stRadio"] > div { gap:.24rem; } div[data-testid="stRadio"] label { flex:1;justify-content:center;min-width:0;margin:0!important;border:1px solid var(--race-line);border-radius:8px;padding:.42rem .12rem;background:rgba(10,23,32,.7);font-size:.68rem;font-weight:800;letter-spacing:.02em;white-space:nowrap; } div[data-testid="stRadio"] label p{white-space:nowrap!important;overflow:visible!important} div[data-testid="stRadio"] label:has(input:checked){border-color:var(--race-red);background:rgba(237,49,57,.13)}
     div.stButton>button,div[data-testid="stFormSubmitButton"]>button { min-height:42px;border-radius:7px;text-transform:uppercase;font-weight:800;letter-spacing:.04em; } div[data-testid="stMetric"]{background:transparent;border:0;padding:0} [data-testid="stMetricLabel"]{color:var(--race-muted)}div[data-testid="stFileUploader"]{padding:.35rem .45rem;border:1px dashed var(--race-line);border-radius:8px;background:rgba(7,16,23,.35)}div[data-testid="stFileUploader"] small{display:none!important}textarea{min-height:68px!important;background:#0b161f!important;color:#f5f7f8!important}
-    @media (max-width:600px) { .block-container{padding:.35rem .65rem 2.5rem}.race-header{align-items:flex-start;flex-direction:column;gap:.35rem}.race-team-name{font-size:2rem}.race-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.race-store-grid{grid-template-columns:1fr}.race-login{margin:3vh auto 0;padding:1rem}.race-login h1{font-size:2.7rem}.race-stage-row{grid-template-columns:1.8rem minmax(0,1fr) auto}.race-stage-row small{display:none} }
+    @media (max-width:600px) { .block-container{padding:.35rem .65rem 2.5rem}.race-header{align-items:flex-start;flex-direction:column;gap:.35rem}.race-team-name{font-size:2rem}.race-store-grid{grid-template-columns:1fr}.race-login{margin:3vh auto 0;padding:1rem}.race-login h1{font-size:2.7rem}.race-stage-row{grid-template-columns:1.8rem minmax(0,1fr) auto}.race-stage-row small{display:none} }
     </style>
     """, unsafe_allow_html=True)
 
@@ -75,6 +76,26 @@ def _status_class(value: str) -> str:
     if "active" in lower: return "active"
     if "available" in lower: return "available"
     return "locked"
+
+
+def _rank_treatment(rank: Any) -> tuple[str, str]:
+    try:
+        position = int(float(rank))
+    except (TypeError, ValueError):
+        return "", "CHAMPIONSHIP POSITION"
+    if position == 1:
+        return "leader", "CHAMPIONSHIP LEADER"
+    if position <= 3:
+        return "podium", "PODIUM POSITION"
+    return "", "CHAMPIONSHIP POSITION"
+
+
+def _build_phase_copy(value: Any) -> tuple[str, int]:
+    raw = str(value or "NOT_STARTED").upper().replace("_", " ")
+    phases = ["NOT STARTED", "COLLECTING PARTS", "BUILDING", "PAINTING", "READY TO RACE", "COMPLETED"]
+    aliases = {"IN PROGRESS": "BUILDING", "READY": "READY TO RACE"}
+    phase = aliases.get(raw, raw)
+    return phase.title(), phases.index(phase) if phase in phases else 0
 
 
 def _captain_error(error: Exception, item: dict[str, Any] | None = None, balance: Any = None) -> str:
@@ -365,8 +386,15 @@ def show_formula_race_captain(runtime_override=None):
     championship=dict(workspace.get("Championship",{}))
     rank=championship.get("Rank",workspace.get("ChampionshipRank",workspace.get("Rank")))
     score=championship.get("Score",workspace.get("ChampionshipScore"))
-    current=next((row for row in checkpoints if _status_copy(row.get("Status")) in {"ACTIVE","AVAILABLE","REJECTED / RESUBMIT"}), checkpoints[0] if checkpoints else {})
+    checkpoint_ids={str(row.get("ActivityID", "")) for row in checkpoints}
+    selected_id=str(st.session_state.get("race_captain_selected_checkpoint", ""))
+    if selected_id not in checkpoint_ids:
+        selected_id=str(workspace.get("CurrentCheckpoint", {}).get("ActivityID", ""))
+    if selected_id not in checkpoint_ids:
+        selected_id=str(next((row.get("ActivityID", "") for row in checkpoints if _status_copy(row.get("Status")) in {"ACTIVE","AVAILABLE","REJECTED / RESUBMIT"}), checkpoints[0].get("ActivityID", "") if checkpoints else ""))
+    current=next((row for row in checkpoints if str(row.get("ActivityID", "")) == selected_id), checkpoints[0] if checkpoints else {})
     current_status=_status_copy(current.get("Status")); runtime_status=str(checkpoint_runtime.get("status",checkpoint_runtime.get("Status","READY"))).upper()
+    standing_class,standing_copy=_rank_treatment(rank)
     st.markdown("<div class='race-shell'>",unsafe_allow_html=True)
     left,right=st.columns([4,1])
     with left:
@@ -375,8 +403,8 @@ def show_formula_race_captain(runtime_override=None):
     with right:
         if asset.is_file(): st.image(str(asset),width=78)
         st.markdown("<div class='race-live'>● LIVE CAPTAIN</div>",unsafe_allow_html=True)
+    st.markdown(f"<div class='race-standing {standing_class}'><strong>#{html.escape(_display_number(rank))}</strong><span>CHAMPIONSHIP<br><em>{standing_copy}</em></span></div>",unsafe_allow_html=True)
     st.markdown("<div class='race-metric-grid'>" +
-        f"<div class='race-metric'><small>Championship rank</small><strong>#{html.escape(_display_number(rank))}</strong></div>" +
         f"<div class='race-metric'><small>Championship score</small><strong>{html.escape(_display_number(score))}</strong></div>" +
         f"<div class='race-metric'><small>Credits earned</small><strong>{html.escape(_display_number(wallet.get('CreditsEarned',workspace.get('CreditsEarned'))))}</strong></div>" +
         f"<div class='race-metric accent'><small>Wallet balance</small><strong>{html.escape(_display_number(wallet.get('Balance', 0)))}</strong></div></div>",unsafe_allow_html=True)
@@ -390,11 +418,11 @@ def show_formula_race_captain(runtime_override=None):
     )
     if captain_section == "RACE Checkpoints":
         stage_track = "".join(
-            f"<div class='race-stage {_status_class(_status_copy(checkpoint.get('Status')))}'>CP{index}</div>"
+            f"<div class='race-stage {_status_class(_status_copy(checkpoint.get('Status')))} {'selected' if str(checkpoint.get('ActivityID', '')) == selected_id else ''}'>CP{index}</div>"
             for index, checkpoint in enumerate(checkpoints, start=1)
         )
-        if stage_track: st.markdown(f"<div class='race-stage-track'>{stage_track}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='race-panel race-current'><div class='race-overline'>Current checkpoint</div><div class='race-panel-title'>{html.escape(str(current.get('Name','Race Control is preparing the next checkpoint')))}</div><span class='race-status {_status_class(current_status)}'>{html.escape(current_status)}</span><p class='race-subtle'>{html.escape(str(current.get('Instructions','Stand by for the next mission.')))}</p><div class='race-cost'>+{html.escape(_display_number(current.get('Credits',0),'0'))} CREDITS</div></div>",unsafe_allow_html=True)
+        if stage_track: st.markdown(f"<div class='race-journey-label'><span>RACE JOURNEY</span><span>SELECTED: CP{next((index for index, row in enumerate(checkpoints, start=1) if str(row.get('ActivityID', '')) == selected_id), '—')}</span></div><div class='race-stage-track'>{stage_track}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='race-panel race-current'><div class='race-overline'>Your current mission</div><div class='race-panel-title'>{html.escape(str(current.get('Name','Race Control is preparing the next checkpoint')))}</div><span class='race-status {_status_class(current_status)}'>{html.escape(current_status)}</span><p class='race-subtle'>{html.escape(str(current.get('Instructions','Stand by for the next mission.')))}</p><div class='race-reward'>EARN {html.escape(_display_number(current.get('Credits',0),'0'))} CREDITS</div></div>",unsafe_allow_html=True)
         if runtime_status!="LIVE": st.info(f"Race Control has checkpoints {runtime_status.lower()}. Your mission will unlock here when it goes live.")
         current_disabled=runtime_status!="LIVE" or current_status in {"AWAITING REVIEW","APPROVED","SUBMITTED","LOCKED"}
         if current:
@@ -420,9 +448,12 @@ def show_formula_race_captain(runtime_override=None):
             if checkpoint.get("ActivityID") == current.get("ActivityID"): continue
             status=_status_copy(checkpoint.get("Status")); css_class="complete" if status=="APPROVED" else ""
             st.markdown(f"<div class='race-stage-row {css_class}'><span class='race-overline'>CP{index}</span><strong>{html.escape(str(checkpoint.get('Name','Checkpoint')))}</strong><span class='race-status {_status_class(status)}'>{html.escape(status)}</span><span class='race-cost'>+{html.escape(_display_number(checkpoint.get('Credits',0),'0'))}</span></div>",unsafe_allow_html=True)
+            if status not in {"APPROVED", "SUBMITTED", "AWAITING REVIEW", "LOCKED"}:
+                if st.button(f"VIEW CP{index}",key=f"race_view_{checkpoint.get('ActivityID')}",width="stretch"):
+                    st.session_state["race_captain_selected_checkpoint"]=str(checkpoint.get("ActivityID", ""));st.rerun()
     if captain_section == "Wallet & Marketplace":
         purchases=list(workspace.get("Purchases",[])); items=list(workspace.get("Marketplace",[])); spent=sum(float(row.get("Amount",0) or 0) for row in purchases)
-        st.markdown("<div class='race-panel'><div class='race-overline'>TEAM GARAGE / PARTS DEPOT</div><div class='race-panel-title'>Wallet & Marketplace</div><div class='race-metric-grid'>" +
+        st.markdown("<div class='race-panel'><div class='race-overline'>TEAM GARAGE / PARTS DEPOT</div><div class='race-panel-title'>Fund the build</div><p class='race-subtle'>Mission Credits become the components your team takes to the race.</p><div class='race-metric-grid'>" +
             f"<div class='race-metric accent'><small>Wallet balance</small><strong>{html.escape(_display_number(wallet.get('Balance',0)))}</strong></div><div class='race-metric'><small>Credits earned</small><strong>{html.escape(_display_number(wallet.get('CreditsEarned',workspace.get('CreditsEarned'))))}</strong></div><div class='race-metric'><small>Credits spent</small><strong>{html.escape(_display_number(wallet.get('CreditsSpent',workspace.get('CreditsSpent',spent)),'0'))}</strong></div></div></div>",unsafe_allow_html=True)
         if not items: st.info("The Marketplace is not open yet.")
         else:
@@ -440,18 +471,26 @@ def show_formula_race_captain(runtime_override=None):
             st.markdown("<div class='race-panel'><div class='race-panel-title'>Recent purchases</div></div>",unsafe_allow_html=True)
             st.dataframe([{k:v for k,v in row.items() if k not in {"PurchaseID","ItemID","IdempotencyKey"}} for row in purchases],width="stretch",hide_index=True)
     if captain_section == "Build":
-        purchases=list(workspace.get("Purchases",[])); phase=_status_copy(build.get("status",build.get("Status","NOT STARTED"))).title(); progress=max(0,min(100,int(build.get("Progress",0) or 0)))
-        st.markdown(f"<div class='race-panel'><div class='race-overline'>Garage progress</div><div class='race-panel-title'>{html.escape(phase)}</div><p class='race-subtle'>Build status is updated by Race Control.</p></div>",unsafe_allow_html=True)
+        purchases=list(workspace.get("Purchases",[])); phase,phase_index=_build_phase_copy(build.get("status",build.get("Status","NOT STARTED"))); progress=max(0,min(100,int(build.get("Progress",0) or 0)))
+        build_phases=[("NOT STARTED", "START"), ("COLLECTING PARTS", "PARTS"), ("BUILDING", "BUILD"), ("PAINTING", "PAINT"), ("READY TO RACE", "READY"), ("COMPLETED", "DONE")]
+        build_track="".join(f"<div class='race-stage {'approved' if index < phase_index else ('selected' if index == phase_index else '')}'>{label}</div>" for index,(_,label) in enumerate(build_phases))
+        st.markdown(f"<div class='race-panel'><div class='race-overline'>Garage progress</div><div class='race-panel-title'>{html.escape(phase)}</div><p class='race-subtle'>Build status is updated by Race Control. The next race-ready step is visible to your whole team.</p></div><div class='race-stage-track' style='grid-template-columns:repeat(6,minmax(0,1fr))'>{build_track}</div>",unsafe_allow_html=True)
         st.progress(progress,text=f"{progress}% COMPLETE")
         if purchases: st.dataframe([{ "Part":row.get("ItemName",""),"Quantity":row.get("Quantity",0),"Status":row.get("Status","")} for row in purchases],width="stretch",hide_index=True)
-        else: st.info("Your collected parts will appear here once purchases are confirmed.")
+        else: st.info("Your collected components will appear here once purchases are confirmed.")
     if captain_section == "Submissions":
-        st.markdown("<div class='race-panel'><div class='race-overline'>Race history</div><div class='race-panel-title'>Checkpoint record</div><p class='race-subtle'>Your proof and review outcomes, without technical identifiers.</p></div>",unsafe_allow_html=True)
+        st.markdown("<div class='race-panel'><div class='race-overline'>Team race log</div><div class='race-panel-title'>Your race record</div><p class='race-subtle'>Mission proof, review outcomes, components and build milestones—without technical audit detail.</p></div>",unsafe_allow_html=True)
         submissions=list(workspace.get("Submissions", []))
-        if submissions:
-            history=[{"Checkpoint":row.get("CheckpointName",row.get("ActivityName","Checkpoint")),"Status":_status_copy(row.get("Status",row.get("submission_status","SUBMITTED"))),"Reward":row.get("Credits",row.get("CreditValue","—")),"Submitted":row.get("SubmittedAt",row.get("created_at",""))} for row in submissions]
-            st.dataframe(history,width="stretch",hide_index=True)
-        else: st.info("No checkpoint proof has been submitted yet.")
+        log=[]
+        for row in submissions:
+            log.append({"Moment":row.get("SubmittedAt",row.get("created_at","")),"Race log":f"Checkpoint {_status_copy(row.get('Status',row.get('submission_status','SUBMITTED'))).title()}","Detail":row.get("CheckpointName",row.get("ActivityName","Mission proof"))})
+        for row in workspace.get("Purchases",[]):
+            log.append({"Moment":row.get("PurchasedAt",""),"Race log":"Component purchased","Detail":f"{row.get('ItemName','Component')} × {row.get('Quantity',1)}"})
+        if build.get("LastUpdated"):
+            log.append({"Moment":build.get("LastUpdated",""),"Race log":"Garage progress updated","Detail":_build_phase_copy(build.get("status",build.get("Status","NOT STARTED")))[0]})
+        if log:
+            st.dataframe(sorted(log,key=lambda row:str(row.get("Moment", "")),reverse=True),width="stretch",hide_index=True)
+        else: st.info("Your team’s mission, component and build moments will appear here as the race progresses.")
     if st.button("LOG OUT",width="stretch"):
         try:runtime.formula_race_captain_logout(session.get("SessionToken",""),device)
         except (RuntimeDatabaseError,RuntimeError):pass
