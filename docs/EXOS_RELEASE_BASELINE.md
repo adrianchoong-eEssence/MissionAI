@@ -61,6 +61,10 @@ currently present or healthy in any database:
 - `028_formula_race_manual_credit_adjustments.sql` — R.A.C.E.-only,
   service-controlled, idempotent manual credit-ledger adjustment function; it
   depends on the Core v2 ledger and does not alter the frozen Standard runtime.
+- `030_formula_race_configurable_event_architecture.sql` — R.A.C.E.-only
+  configurable station/route/scoring/marketplace/judging/reset contract;
+  depends on 020, 022–024, and 027–029. It is not installed from repository
+  evidence and does not alter the frozen Standard runtime.
 
 ### Rollback, verification, and diagnostics
 

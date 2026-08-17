@@ -438,12 +438,22 @@ def show_formula_race_captain(runtime_override=None):
         current_disabled=runtime_status!="LIVE" or current_status in {"AWAITING REVIEW","APPROVED","SUBMITTED","LOCKED"}
         if current:
             st.markdown("<div class='race-proof'><div class='race-proof-title'>PROOF</div></div>", unsafe_allow_html=True)
-            proof_type=str(current.get("ProofType","Photo")).upper()
-            uploaded=st.file_uploader("Upload photo",type=["jpg","jpeg","png","webp"],disabled=current_disabled or proof_type=="TEXT",key=f"race_proof_{current.get('ActivityID')}")
-            answer=st.text_area("Optional notes",disabled=current_disabled,key=f"race_answer_{current.get('ActivityID')}",height=68)
+            method=str(current.get("ScoringMethod","NON_SCORING")).upper()
+            evidence_requirement=str(current.get("EvidenceRequirement",current.get("ProofType","PHOTO_OPTIONAL"))).upper()
+            uploaded=None
+            if evidence_requirement != "NO_PHOTO":
+                uploaded=st.file_uploader("Photo evidence" + (" (required)" if evidence_requirement == "PHOTO_REQUIRED" else " (optional)"),type=["jpg","jpeg","png","webp"],disabled=current_disabled,key=f"race_proof_{current.get('ActivityID')}")
+            result_value=None
+            if method == "LOWEST_TIME":
+                a,b,c=st.columns(3); minutes=a.number_input("Minutes",min_value=0,step=1,disabled=current_disabled,key=f"race_minutes_{current.get('ActivityID')}"); seconds=b.number_input("Seconds",min_value=0,max_value=59,step=1,disabled=current_disabled,key=f"race_seconds_{current.get('ActivityID')}"); milliseconds=c.number_input("Milliseconds",min_value=0,max_value=999,step=1,disabled=current_disabled,key=f"race_milliseconds_{current.get('ActivityID')}"); result_value=int(minutes)*60000+int(seconds)*1000+int(milliseconds)
+            elif method in {"HIGHEST_COUNT", "SUCCESS_COUNT"}:
+                result_value=st.number_input(str(current.get("ResultLabel", "Result")),min_value=0,step=1,disabled=current_disabled,key=f"race_result_{current.get('ActivityID')}")
+            elif method == "FACILITATOR_SCORE": st.caption("The station facilitator records the official score. Submit completion evidence only.")
+            answer=st.text_area("Notes for the facilitator",disabled=current_disabled,key=f"race_answer_{current.get('ActivityID')}",height=68)
             if st.button("SUBMIT PROOF",type="primary",disabled=current_disabled,key=f"race_submit_{current.get('ActivityID')}"):
                 storage_reference=""
                 try:
+                    if evidence_requirement == "PHOTO_REQUIRED" and not uploaded: raise RuntimeError("Photo evidence is required for this station.")
                     with st.spinner("Submitting proof…"):
                         if uploaded:
                             started_at=perf_counter(); payload,content_type,photo=_optimise_race_photo(uploaded); runtime.record_performance_component("captain.photo_processing",started_at)
@@ -452,8 +462,9 @@ def show_formula_race_captain(runtime_override=None):
                             runtime.upload_submission_image(storage_path,payload,content_type)
                             storage_reference="supabase://exos-submissions/"+storage_path
                         activity_id=str(current.get("ActivityID", ""))
-                        runtime.formula_race_submit_checkpoint(session.get("SessionToken",""),device,activity_id,answer,storage_reference,_submission_idempotency_key(event_id,team_id,activity_id))
-                    st.success("PROOF SUBMITTED · Awaiting Race Control review.");st.rerun()
+                        runtime.formula_race_submit_checkpoint(session.get("SessionToken",""),device,activity_id,answer,storage_reference,_submission_idempotency_key(event_id,team_id,activity_id),result_value=result_value,result_unit=str(current.get("ResultUnit", "") or "CONFIGURED"))
+                    next_checkpoint=dict(workspace.get("NextCheckpoint",{})); next_name=str(next_checkpoint.get("DisplayName",next_checkpoint.get("Name","")))
+                    st.success("STATION COMPLETE · " + (f"NEXT STOP: {next_name}" if next_name else "Awaiting the next configured stop."));st.rerun()
                 except (RuntimeDatabaseError, RuntimeError) as error: st.error(_captain_error(error))
         for index, checkpoint in enumerate(checkpoints, start=1):
             if checkpoint.get("ActivityID") == current.get("ActivityID"): continue

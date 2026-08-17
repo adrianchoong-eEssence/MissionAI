@@ -15,6 +15,10 @@ from typing import Any
 from urllib.parse import urlparse
 
 from data.runtime_database import RuntimeDatabaseError
+from engines.formula_race_configuration import (
+    current_station, normalise_judging_criteria, normalise_marketplace_item,
+    normalise_station, validate_marketplace_items, validate_routes, validate_stations,
+)
 
 KNOWN_PROD_HOSTS = {
     "bqsbkdfzqyiodivhyxnq.supabase.co",
@@ -371,7 +375,7 @@ class FormulaRaceCoreV2StagingAdapter:
             "events_v2",
             {
                 "join_code": f"eq.{str(join_code).strip().upper()}",
-                "select": "event_id,event_name,join_code,lifecycle_status",
+                "select": "event_id,event_name,join_code,lifecycle_status,event_payload",
                 "limit": "1",
             },
         )
@@ -381,6 +385,7 @@ class FormulaRaceCoreV2StagingAdapter:
             "EventName": str(row.get("event_name", "")),
             "JoinCode": str(row.get("join_code", "")),
             "Status": str(row.get("lifecycle_status", "READY")),
+            "EventPayload": _as_dict(row.get("event_payload")),
         }
 
     def get_runtime_event(self, event_id: str) -> dict[str, Any]:
@@ -390,6 +395,7 @@ class FormulaRaceCoreV2StagingAdapter:
             "EventName": str(event_row.get("event_name", "")),
             "JoinCode": str(event_row.get("join_code", "")),
             "Status": str(event_row.get("lifecycle_status", "READY")),
+            "EventPayload": _as_dict(event_row.get("event_payload")),
         }
 
     def _lookup_event(self, event_id: str) -> dict[str, Any]:
@@ -402,7 +408,7 @@ class FormulaRaceCoreV2StagingAdapter:
                 "events_v2",
                 {
                     "event_id": f"eq.{str(key).strip()}",
-                    "select": "event_id,event_name,join_code,lifecycle_status",
+                    "select": "event_id,event_name,join_code,lifecycle_status,event_payload",
                     "limit": "1",
                 },
             )
@@ -414,7 +420,7 @@ class FormulaRaceCoreV2StagingAdapter:
                 "events_v2",
                 {
                     "join_code": f"eq.{str(key).strip().upper()}",
-                    "select": "event_id,event_name,join_code,lifecycle_status",
+                    "select": "event_id,event_name,join_code,lifecycle_status,event_payload",
                     "limit": "1",
                 },
             )
@@ -581,23 +587,79 @@ class FormulaRaceCoreV2StagingAdapter:
         )
         return rows
 
+    def get_formula_race_configuration(self, event_id: str) -> dict[str, Any]:
+        """Load the event-scoped RACE configuration without a legacy fallback."""
+        event = self._lookup_event(event_id)
+        payload = _as_dict(event.get("event_payload"))
+        config = _as_dict(payload.get("RaceConfiguration"))
+        config.setdefault("Version", 1)
+        config.setdefault("TeamRoutes", {})
+        config.setdefault("JudgingCriteria", [])
+        return config
+
+    def get_formula_race_stations(self, event_id: str, *, activities: list[dict[str, Any]] | None = None, configuration: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        config = configuration if configuration is not None else self.get_formula_race_configuration(event_id)
+        configured = {
+            str(row.get("ActivityID", "")): row
+            for row in config.get("Stations", []) if isinstance(row, dict)
+        }
+        stations = []
+        for position, activity in enumerate(activities if activities is not None else self._get_checkpoint_activities(event_id), 1):
+            activity_id = str(activity.get("activity_id", ""))
+            payload = _as_dict(activity.get("activity_payload"))
+            row = normalise_station({
+                **payload, **configured.get(activity_id, {}),
+                "ActivityID": activity_id,
+                "DisplayName": configured.get(activity_id, {}).get("DisplayName", activity.get("activity_name", "")),
+                "DisplayOrder": configured.get(activity_id, {}).get("DisplayOrder", activity.get("activity_order", position)),
+            }, position)
+            stations.append(row)
+        return sorted((row for row in stations if row["Enabled"]), key=lambda row: (row["DisplayOrder"], row["ActivityID"]))
+
+    def save_formula_race_configuration(self, event_id: str, config: dict[str, Any], actor: str) -> dict[str, Any]:
+        """Persist generic RACE setup through the migration's guarded RPC."""
+        changes = dict(config or {})
+        config = {**self.get_formula_race_configuration(event_id), **changes}
+        stations = [normalise_station(row, index) for index, row in enumerate(config.get("Stations", []), 1)]
+        station_errors = validate_stations(stations) if stations else []
+        marketplace_errors = validate_marketplace_items(config.get("Marketplace", []))
+        team_ids = [str(row.get("TeamID", "")) for row in self.get_runtime_teams(event_id)]
+        enabled_ids = [row["ActivityID"] for row in stations if row["Enabled"]]
+        route_errors = validate_routes(config.get("TeamRoutes", {}), team_ids, enabled_ids) if config.get("TeamRoutes") else []
+        if station_errors or marketplace_errors or route_errors:
+            raise RuntimeError("Configuration validation failed: " + " ".join(station_errors + marketplace_errors + route_errors))
+        if "Stations" in changes: changes["Stations"] = stations
+        if "Marketplace" in changes: changes["Marketplace"] = [normalise_marketplace_item(row, index) for index, row in enumerate(config.get("Marketplace", []), 1)]
+        if "JudgingCriteria" in changes: changes["JudgingCriteria"] = normalise_judging_criteria(config.get("JudgingCriteria", []))
+        return self._rpc("exos_v2_formula_race_save_event_configuration", {
+            "p_event_id": str(event_id).strip(), "p_configuration": changes,
+            "p_actor": str(actor).strip(),
+        }) or {}
+
+    def reset_formula_race_event(self, event_id: str, confirmation: str, actor: str) -> dict[str, Any]:
+        return self._rpc("exos_v2_formula_race_reset_event", {
+            "p_event_id": str(event_id).strip(), "p_confirmation": str(confirmation), "p_actor": str(actor).strip(),
+        }) or {}
+
     def get_formula_race_checkpoints(self, event_id: str) -> dict[str, Any]:
         checkpoints = []
         activities = self._get_checkpoint_activities(event_id)
         module_id = str((activities[0] or {}).get("module_id", "")) if activities else f"{event_id}-RACE-CHECKPOINTS"
 
+        stations = {station["ActivityID"]: station for station in self.get_formula_race_stations(event_id)}
         for row in activities:
-            payload = row.get("activity_payload")
-            if not isinstance(payload, dict):
-                payload = {}
+            payload = stations.get(str(row.get("activity_id", "")), normalise_station(row.get("activity_payload") or {}))
             checkpoints.append(
                 {
                     "CheckpointID": str(row.get("activity_id", "")),
                     "ActivityID": str(row.get("activity_id", "")),
                     "Name": str(row.get("activity_name", "")),
-                    "Credits": payload.get("credits", 0),
-                    "ProofType": str(payload.get("proof_type", payload.get("proofType", "Photo"))),
-                    "Instructions": str(payload.get("instructions", "")),
+                    "Credits": payload.get("BaseCredits", 0),
+                    "ProofType": str(payload.get("EvidenceRequirement", "PHOTO_OPTIONAL")),
+                    "Instructions": str(payload.get("ParticipantInstruction", "")),
+                    "ScoringMethod": payload.get("ScoringMethod", "NON_SCORING"),
+                    "ResultLabel": payload.get("ResultLabel", "Result"),
+                    "ResultUnit": payload.get("ResultUnit", ""),
                     "Status": "AVAILABLE",
                 }
             )
@@ -880,12 +942,18 @@ class FormulaRaceCoreV2StagingAdapter:
                 else:
                     status = mapped
 
+        station = normalise_station({
+            **payload, "ActivityID": activity_id, "DisplayName": activity_row.get("activity_name", ""),
+            "DisplayOrder": activity_row.get("activity_order", 0),
+        })
         return {
             "ActivityID": activity_id,
-            "Name": str(activity_row.get("activity_name", "")),
-            "Credits": payload.get("credits", 0),
-            "Instructions": str(payload.get("instructions", "")),
-            "ProofType": str(payload.get("proof_type", payload.get("proofType", "Photo"))),
+            "Name": station["DisplayName"], "ShortCode": station["ShortCode"],
+            "Credits": station["BaseCredits"], "Instructions": station["ParticipantInstruction"],
+            "FacilitatorInstruction": station["FacilitatorInstruction"],
+            "ProofType": station["EvidenceRequirement"], "EvidenceRequirement": station["EvidenceRequirement"],
+            "ScoringMethod": station["ScoringMethod"], "ResultLabel": station["ResultLabel"],
+            "ResultUnit": station["ResultUnit"], "PerformanceCredits": station["PerformanceCredits"],
             "Status": status,
         }
 
@@ -900,7 +968,7 @@ class FormulaRaceCoreV2StagingAdapter:
             {
                 "session_token": f"eq.{token}",
                 "device_id": f"eq.{str(device_id).strip()}",
-                "select": "team_access_session_id,event_id,team_id,is_active,last_seen_at,updated_at",
+                "select": "team_access_session_id,event_id,team_id,is_active,last_seen_at,updated_at,events_v2(event_payload)",
                 "limit": "1",
             },
         )
@@ -922,12 +990,20 @@ class FormulaRaceCoreV2StagingAdapter:
         team_id = str(row.get("team_id", ""))
 
         activities = self._get_checkpoint_activities(event_id)
+        event_link = _as_dict(row.get("events_v2"))
+        configuration = _as_dict(event_link.get("event_payload")).get("RaceConfiguration") if event_link else None
+        configuration = _as_dict(configuration) if configuration is not None else self.get_formula_race_configuration(event_id)
+        configured_stations = {station["ActivityID"]: station for station in self.get_formula_race_stations(event_id, activities=activities, configuration=configuration)}
         activity_ids = [str(activity.get("activity_id", "")) for activity in activities if activity.get("activity_id")]
         runtime_rows = self._get("activity_runtime_v2", {"event_id": f"eq.{event_id}", "team_id": f"eq.{team_id}", "activity_id": _in_filter(activity_ids), "order": "updated_at.desc"}) if activity_ids else []
         runtime_by_activity = {}
         for runtime_row in runtime_rows:
             runtime_by_activity.setdefault(str(runtime_row.get("activity_id", "")), runtime_row)
-        checkpoint_state = [self._checkpoint_payload(activity, runtime_by_activity.get(str(activity.get("activity_id", "")))) for activity in activities]
+        checkpoint_state = []
+        for activity in activities:
+            checkpoint = self._checkpoint_payload(activity, runtime_by_activity.get(str(activity.get("activity_id", ""))))
+            checkpoint.update(configured_stations.get(str(activity.get("activity_id", "")), {}))
+            checkpoint_state.append(checkpoint)
 
         session_status = "LIVE" if any(row.get("Status") in {"LIVE", "OPEN", "ACTIVE"} for row in checkpoint_state) else "READY"
 
@@ -937,7 +1013,21 @@ class FormulaRaceCoreV2StagingAdapter:
         team = next((entry for entry in teams if str(entry.get("TeamID", "")) == team_id), {})
         wallet = {"CreditsEarned": standing.get("CreditsEarned", 0), "CreditsSpent": standing.get("CreditsSpent", 0), "Balance": standing.get("WalletBalance", 0)}
         marketplace = self._marketplace_payload(event_id, team_id)
-        submissions = self._get("submissions_v2", {"event_id": f"eq.{event_id}", "team_id": f"eq.{team_id}", "select": "submission_id,activity_id,submission_status,reviewed_at,reviewed_by,score,submitted_at,created_at", "order": "submitted_at.desc"})
+        submissions = self._get("submissions_v2", {"event_id": f"eq.{event_id}", "team_id": f"eq.{team_id}", "select": "submission_id,activity_id,submission_status,submission_payload,reviewed_at,reviewed_by,score,submitted_at,created_at", "order": "submitted_at.desc"})
+        route = list((configuration.get("TeamRoutes", {}) or {}).get(team_id, []))
+        submitted_rows = [{"ActivityID": row.get("activity_id"), "Status": row.get("submission_status")} for row in submissions]
+        submission_status_by_activity = {}
+        for submitted in submissions:
+            submission_status_by_activity.setdefault(str(submitted.get("activity_id", "")), str(submitted.get("submission_status", "")))
+        for checkpoint in checkpoint_state:
+            submission_status = submission_status_by_activity.get(str(checkpoint.get("ActivityID", "")))
+            if submission_status:
+                checkpoint["Status"] = {"APPROVED": "APPROVED", "REJECTED": "REJECTED / RESUBMIT"}.get(submission_status.upper(), "UNDER REVIEW" if submission_status.upper() in {"PENDING", "SUBMITTED"} else submission_status.upper())
+        current_activity_id, next_activity_id = current_station(route, submitted_rows) if route else ("", "")
+        if route and current_activity_id in route:
+            visible_ids = set(route[:route.index(current_activity_id) + 1])
+            checkpoint_state = [row for row in checkpoint_state if row["ActivityID"] in visible_ids]
+        current_checkpoint = next((checkpoint for checkpoint in checkpoint_state if checkpoint["ActivityID"] == current_activity_id), {}) if current_activity_id else next((checkpoint for checkpoint in checkpoint_state if str(checkpoint.get("Status", "")).upper() not in {"APPROVED", "SUBMITTED", "UNDER REVIEW"}), checkpoint_state[0] if checkpoint_state else {})
         workspace = {
             "EventID": event_id,
             "TeamID": team_id,
@@ -947,13 +1037,15 @@ class FormulaRaceCoreV2StagingAdapter:
             "CreditsEarned": wallet.get("CreditsEarned", 0),
             "CreditsSpent": wallet.get("CreditsSpent", 0),
             "Checkpoints": checkpoint_state,
-            "CurrentCheckpoint": next((checkpoint for checkpoint in checkpoint_state if str(checkpoint.get("Status", "")).upper() not in {"APPROVED", "SUBMITTED", "UNDER REVIEW"}), checkpoint_state[0] if checkpoint_state else {}),
+            "CurrentCheckpoint": current_checkpoint,
+            "NextCheckpoint": dict(configured_stations.get(next_activity_id, {})),
+            "Route": route,
             "CheckpointRuntime": {"status": session_status},
             "Wallet": wallet,
             "BuildStatus": self._build_status_payload(event_id, team_id),
             "Marketplace": marketplace.get("items", []),
             "Purchases": marketplace.get("purchases", []),
-            "Submissions": [{"SubmissionID": str(item.get("submission_id", "")), "ActivityID": str(item.get("activity_id", "")), "Status": str(item.get("submission_status", "PENDING")), "Judge": str(item.get("reviewed_by", "")), "Score": item.get("score", ""), "SubmittedAt": item.get("submitted_at") or item.get("created_at")} for item in submissions],
+            "Submissions": [{"SubmissionID": str(item.get("submission_id", "")), "ActivityID": str(item.get("activity_id", "")), "Status": str(item.get("submission_status", "PENDING")), "ResultValue": _as_dict(item.get("submission_payload")).get("result_value", ""), "ResultUnit": _as_dict(item.get("submission_payload")).get("result_unit", ""), "Judge": str(item.get("reviewed_by", "")), "Score": item.get("score", ""), "SubmittedAt": item.get("submitted_at") or item.get("created_at")} for item in submissions],
             "Session": row,
         }
         self.record_performance_component(
@@ -1207,20 +1299,24 @@ class FormulaRaceCoreV2StagingAdapter:
 
     # Queue 2 authoritative R.A.C.E. mutation boundary. These definitions
     # intentionally supersede the compatibility implementations above.
-    def formula_race_submit_checkpoint(self, session_token: str, device_id: str, activity_id: str, text_response: str = "", storage_reference: str = "", idempotency_key: str = "") -> dict[str, Any]:
+    def formula_race_submit_checkpoint(self, session_token: str, device_id: str, activity_id: str, text_response: str = "", storage_reference: str = "", idempotency_key: str = "", result_value: Any = None, result_unit: str = "") -> dict[str, Any]:
         token = _require_uuid(session_token, "session_token")
         if not str(activity_id).strip():
             raise RuntimeError("Invalid activity id.")
+        rpc_name = "exos_v2_formula_race_submit_station" if result_value is not None or str(result_unit).strip() else "exos_v2_formula_race_submit_checkpoint"
+        payload = {
+            "p_session_token": token,
+            "p_device_id": str(device_id).strip(),
+            "p_activity_id": str(activity_id).strip(),
+            "p_text_response": str(text_response),
+            "p_storage_reference": str(storage_reference),
+            "p_idempotency_key": str(idempotency_key).strip(),
+        }
+        if rpc_name == "exos_v2_formula_race_submit_station":
+            payload.update({"p_result_value": result_value, "p_result_unit": str(result_unit)})
         return self._rpc(
-            "exos_v2_formula_race_submit_checkpoint",
-            {
-                "p_session_token": token,
-                "p_device_id": str(device_id).strip(),
-                "p_activity_id": str(activity_id).strip(),
-                "p_text_response": str(text_response),
-                "p_storage_reference": str(storage_reference),
-                "p_idempotency_key": str(idempotency_key).strip(),
-            },
+            rpc_name,
+            payload,
         ) or {}
 
     def formula_race_purchase(self, session_token: str, device_id: str, item_id: str, quantity: int = 1, idempotency_key: str = "") -> dict[str, Any]:
@@ -1259,18 +1355,26 @@ class FormulaRaceCoreV2StagingAdapter:
             },
         ) or {}
 
-    def formula_race_review_checkpoint(self, submission_id: str, decision: str, reviewer_id: str, notes: str = "", reason: str = "", idempotency_key: str = "") -> dict[str, Any]:
-        return self._rpc(
-            "exos_v2_formula_race_review_checkpoint",
+    def formula_race_review_checkpoint(self, submission_id: str, decision: str, reviewer_id: str, notes: str = "", reason: str = "", idempotency_key: str = "", official_result: Any = None) -> dict[str, Any]:
+        result = self._rpc(
+            "exos_v2_formula_race_verify_station_result",
             {
                 "p_submission_id": _require_uuid(submission_id, "submission_id"),
                 "p_decision": str(decision).strip().upper(),
                 "p_reviewer": str(reviewer_id).strip(),
-                "p_notes": str(notes),
-                "p_reason": str(reason),
+                "p_official_result": official_result,
+                "p_notes": str(reason or notes),
                 "p_idempotency_key": str(idempotency_key).strip(),
             },
         ) or {}
+        if str(decision).upper() in {"APPROVE", "APPROVED"}:
+            rows = self._get("submissions_v2", {"submission_id": f"eq.{_require_uuid(submission_id, 'submission_id')}", "select": "event_id,activity_id", "limit": "1"})
+            if rows:
+                result["Ranking"] = self._rpc("exos_v2_formula_race_reconcile_station_ranking", {
+                    "p_event_id": str(rows[0].get("event_id", "")), "p_activity_id": str(rows[0].get("activity_id", "")),
+                    "p_actor": str(reviewer_id).strip(),
+                }) or {}
+        return result
 
     def lock_formula_race_results(self, event_id: str, actor: str, reason: str) -> dict[str, Any]:
         return self._rpc(
@@ -1370,7 +1474,7 @@ class FormulaRaceCoreV2StagingAdapter:
         return {"CreditsEarned": earned, "CreditsSpent": spent, "Balance": earned - spent}
 
     def _marketplace_payload(self, event_id: str, team_id: str, active_only: bool = True) -> dict[str, Any]:
-        item_query = {"event_id": f"eq.{str(event_id)}", "select": "item_id,item_name,unit_cost_credits,stock_limit,is_active"}
+        item_query = {"event_id": f"eq.{str(event_id)}", "select": "item_id,item_name,item_type,unit_cost_credits,stock_limit,is_active,item_payload"}
         if active_only:
             item_query["is_active"] = "eq.true"
         item_rows = self._get("marketplace_items_v2", item_query)
@@ -1404,8 +1508,14 @@ class FormulaRaceCoreV2StagingAdapter:
             item_id = str(row.get("item_id", ""))
             reserved[item_id] = reserved.get(item_id, 0) + _safe_int(row.get("quantity", 0))
         stock_lookup = {str(row.get("item_id")): row for row in item_rows}
-        items = [
-            {
+        items = []
+        for item_id, row in stock_lookup.items():
+            configuration = normalise_marketplace_item({
+                **_as_dict(row.get("item_payload")), "ItemID": item_id, "ItemName": row.get("item_name", ""),
+                "Category": row.get("item_type", "CUSTOM"), "CreditCost": row.get("unit_cost_credits", 0),
+                "StockLimit": row.get("stock_limit"), "Enabled": row.get("is_active", True),
+            })
+            item = {
                 "ItemID": item_id,
                 "ItemName": str(row.get("item_name", "")),
                 "CreditCost": row.get("unit_cost_credits", 0),
@@ -1415,8 +1525,14 @@ class FormulaRaceCoreV2StagingAdapter:
                 ),
                 "Active": bool(row.get("is_active", True)),
             }
-            for item_id, row in stock_lookup.items()
-        ]
+            # Keep legacy projection shape stable until a configured item carries
+            # metadata; Core-v2 data always supplies these fields after 030.
+            if row.get("item_payload") or row.get("item_type"):
+                item.update({"Category": configuration["Category"], "Description": configuration["Description"],
+                             "ImageReference": configuration["ImageReference"], "KnowledgeContent": configuration["KnowledgeContent"],
+                             "DisplayOrder": configuration["DisplayOrder"]})
+            items.append(item)
+        items.sort(key=lambda row: (row.get("DisplayOrder", 0), row["ItemName"]))
         purchases = []
         for row in purchase_rows:
             row_item = stock_lookup.get(str(row.get("item_id", "")), {})

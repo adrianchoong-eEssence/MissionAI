@@ -67,6 +67,11 @@ patches:
 - 024 Core-v2 Captain team-access recovery
 - 027 Core-v2 R.A.C.E. atomic operations (depends on 020, 022, 023, and 024)
 - 028 Core-v2 R.A.C.E. idempotent manual credit adjustments (depends on 020 and 027)
+- 030 Configurable R.A.C.E. event architecture (depends on 020, 022–024,
+  027–029). It adds event-scoped station, route, scoring, marketplace and
+  judging configuration through `events_v2.event_payload`, plus guarded
+  station submission/verification/ranking and a disposable-event reset RPC.
+  It is a forward migration only; its installed status is **UNKNOWN**.
 
 020’s rollback is not a R.A.C.E. forward migration. The older 015–019 Formula
 R.A.C.E. migration series, its rollbacks, seeds, and verification scripts have
@@ -100,6 +105,23 @@ Never collapse R.A.C.E. championship score, credits earned, and wallet balance
 into one Standard score/credit field. Never apply Standard participant recovery
 or Standard programme scoring assumptions to Captain access without an explicit
 R.A.C.E. design and test.
+
+## Configurable event architecture — source contract only
+
+The R.A.C.E.-only Event Setup surface is configuration-driven. Station data is
+stored as an event-scoped `RaceConfiguration` and mirrored into the existing
+`activities_v2.activity_payload.race_station` when configuration is saved.
+No R/A/C/E names, fixed station count, team count, or Marketplace catalogue are
+Core concepts. Team routes are event/team scoped; a successful Captain
+submission advances the route immediately, while verification controls the
+official result and Credits separately. The Captain projection shows completed
+and current route stations only.
+
+`030_formula_race_configurable_event_architecture.sql` is deliberately not a
+claim of deployment. Before an environment uses these paths, query its migration
+history, apply the documented dependency chain to staging, and run the
+disposable-event reset and route/verification UAT checklist. The protected UAT
+event `CORE-V2-RACE-UAT-EVT-4CF0CEAF5F` must not be reset by the setup surface.
 
 ## Queue 2 canonical R.A.C.E. contracts
 

@@ -14,7 +14,7 @@ def test_demo_contract_is_explicit_and_complete():
 def test_all_promised_navigation_destinations_exist():
     assert formula_race.NAV == [
         "Overview", "Programme", "Teams", "Reviews", "Parts Depot", "Build",
-        "Championship", "Race", "Control",
+        "Championship", "Race", "Control", "Event Setup",
     ]
 
 

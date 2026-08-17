@@ -324,7 +324,7 @@ def _snapshot(db, event_id: str):
     )
 
 
-NAV = ["Overview", "Programme", "Teams", "Reviews", "Parts Depot", "Build", "Championship", "Race", "Control"]
+NAV = ["Overview", "Programme", "Teams", "Reviews", "Parts Depot", "Build", "Championship", "Race", "Control", "Event Setup"]
 MATERIALS = [("Cardboard sheet", 40), ("Wheel set", 120), ("Axle kit", 60), ("Glue sticks", 15)]
 CRITERIA = [("Design & innovation", 25), ("Build quality", 25), ("Team identity", 20), ("Performance", 30)]
 
@@ -738,6 +738,93 @@ def control_centre(s, control=None):
     if not control: st.warning("DEMO DATA · No live mutation is performed.")
 
 
+def station_results(snapshot, control, runtime):
+    _title("Official verification", "Station Results", "Verification controls official results and Credits; Captain submission already advances its configured route.")
+    teams = {team.id: team.name for team in snapshot.teams}
+    stations = {row["ActivityID"]: row for row in runtime.get_formula_race_stations(snapshot.event_id)}
+    rows = runtime.get_canonical_submissions(snapshot.event_id)
+    table = []
+    for row in rows:
+        station = stations.get(str(row.get("MissionID", "")), {})
+        payload = row.get("SubmissionPayload", {}) or {}
+        table.append({"Submission": row.get("SubmissionID", ""), "Station": station.get("DisplayName", row.get("MissionID", "")), "Team": teams.get(str(row.get("TeamID", "")), row.get("TeamID", "")), "Submitted": payload.get("result_value", "—"), "Evidence": row.get("EvidenceType", "NONE"), "Status": row.get("Status", ""), "Official": payload.get("official_result", row.get("Score", "")), "Rank": payload.get("official_rank", "PENDING")})
+    st.dataframe(table, width="stretch", hide_index=True)
+    pending = [row for row in rows if str(row.get("Status", "")).upper() in {"SUBMITTED", "PENDING", "UNDER REVIEW"}]
+    if not pending: return
+    labels = {f"{teams.get(str(row.get('TeamID','')), row.get('TeamID',''))} · {stations.get(str(row.get('MissionID','')),{}).get('DisplayName',row.get('MissionID',''))}": row for row in pending}
+    with st.form("race_station_result_verify"):
+        row = labels[st.selectbox("Submission", list(labels))]
+        station = stations.get(str(row.get("MissionID", "")), {})
+        value = st.number_input(str(station.get("ResultLabel", "Official result")), value=float((row.get("SubmissionPayload", {}) or {}).get("result_value", 0) or 0), disabled=str(station.get("ScoringMethod", "")).upper() == "NON_SCORING")
+        actor = st.text_input("Facilitator identity", key="station_results_actor")
+        note = st.text_input("Correction / verification note")
+        verify = st.form_submit_button("VERIFY OFFICIAL RESULT", type="primary")
+    if verify:
+        control.review_race_checkpoint(str(row.get("SubmissionID", "")), "APPROVE", actor, note, note, f"station-verify:{row.get('SubmissionID','')}", value)
+        st.success("Official result verified. Ranking reconciles after every active team is verified."); _refresh_after_race_control_write()
+
+
+def event_setup(snapshot, runtime):
+    """R.A.C.E.-only configuration; the protected UAT event cannot be reset."""
+    _title("R.A.C.E. configuration", "Event Setup", "Configure event-scoped stations, routes, inventory, judging and Captain access without source changes.")
+    event_id, config = snapshot.event_id, runtime.get_formula_race_configuration(snapshot.event_id)
+    actor = st.text_input("Configuration actor", key="race_setup_actor")
+    stations = [normalise_station(row, index) for index, row in enumerate(runtime.get_formula_race_stations(event_id), 1)]
+    tabs = st.tabs(["Stations", "Routes", "Marketplace", "Judging", "Captain PINs", "Safe Reset"])
+    with tabs[0]:
+        cols = ["ActivityID", "DisplayOrder", "ShortCode", "DisplayName", "ParticipantInstruction", "FacilitatorInstruction", "ScoringMethod", "ResultLabel", "ResultUnit", "EvidenceRequirement", "BaseCredits", "Enabled", "ImageReference"]
+        edited = st.data_editor(pd.DataFrame(stations)[cols] if stations else pd.DataFrame(columns=cols), num_rows="dynamic", width="stretch", key="race_station_editor")
+        values = [{**row, "ActivityID": str(row.get("ActivityID", "")).strip() or f"{event_id}-STATION-{index:02d}"} for index, row in enumerate(edited.to_dict("records"), 1)]
+        st.download_button("Download station template", pd.DataFrame(values).drop(columns=["ActivityID"], errors="ignore").to_csv(index=False), "race-stations.csv", "text/csv")
+        upload = st.file_uploader("Import station CSV (preview before apply)", type="csv", key="race_station_import")
+        imported = [{**(stations[index] if index < len(stations) else {"ActivityID": f"{event_id}-STATION-{index+1:02d}"}), **row} for index, row in enumerate(csv.DictReader(io.StringIO(upload.getvalue().decode("utf-8-sig"))))] if upload else []
+        if imported: st.dataframe(imported, width="stretch", hide_index=True)
+        a, b = st.columns(2)
+        if a.button("SAVE STATIONS", type="primary", disabled=not actor):
+            errors = validate_stations(values)
+            if errors: st.error(" ".join(errors))
+            else: runtime.save_formula_race_configuration(event_id, {"Stations": values}, actor); _refresh_after_race_control_write()
+        if b.button("APPLY IMPORT", disabled=not actor or not imported):
+            errors = validate_stations(imported)
+            if errors: st.error(" ".join(errors))
+            else: runtime.save_formula_race_configuration(event_id, {"Stations": imported}, actor); _refresh_after_race_control_write()
+    with tabs[1]:
+        teams = runtime.get_runtime_teams(event_id); ids = [str(team.get("TeamID", "")) for team in teams]; routes = config.get("TeamRoutes", {}) or {}
+        if st.button("GENERATE BALANCED ROUTES", disabled=not stations): st.session_state["race_planned_routes"] = generate_balanced_routes(ids, [row["ActivityID"] for row in stations if row["Enabled"]])
+        routes = st.session_state.get("race_planned_routes", routes)
+        editor = st.data_editor(pd.DataFrame([{ "TeamID": team.get("TeamID", ""), "Team": team.get("TeamName", ""), "Route": ", ".join(routes.get(str(team.get("TeamID", "")), []))} for team in teams]), hide_index=True, width="stretch", key="race_routes_editor")
+        if st.button("SAVE TEAM ROUTES", type="primary", disabled=not actor):
+            saved = {str(row["TeamID"]): [part.strip() for part in str(row["Route"]).split(",") if part.strip()] for row in editor.to_dict("records")}
+            runtime.save_formula_race_configuration(event_id, {"TeamRoutes": saved}, actor); _refresh_after_race_control_write()
+    with tabs[2]:
+        items = [normalise_marketplace_item(row, index) for index, row in enumerate(config.get("Marketplace", []) or runtime._marketplace_payload(event_id, "", active_only=False).get("items", []), 1)]
+        editor = st.data_editor(pd.DataFrame(items), num_rows="dynamic", width="stretch", key="race_marketplace_editor")
+        values = [{**row, "ItemID": str(row.get("ItemID", "")).strip() or f"{event_id}-ITEM-{index:02d}"} for index, row in enumerate(editor.to_dict("records"), 1)]
+        st.download_button("Download marketplace template", pd.DataFrame(values).to_csv(index=False), "race-marketplace.csv", "text/csv")
+        if st.button("SAVE MARKETPLACE", type="primary", disabled=not actor):
+            errors = validate_marketplace_items(values)
+            if errors: st.error(" ".join(errors))
+            else: runtime.save_formula_race_configuration(event_id, {"Marketplace": values}, actor); _refresh_after_race_control_write()
+    with tabs[3]:
+        criteria = st.data_editor(pd.DataFrame(config.get("JudgingCriteria", []) or [{"DisplayOrder": 1, "CriterionName": "", "Description": "", "MaximumScore": 10, "Enabled": True}]), num_rows="dynamic", width="stretch", key="race_judging_editor")
+        st.download_button("Download judging template", criteria.to_csv(index=False), "race-judging.csv", "text/csv")
+        if st.button("SAVE JUDGING CRITERIA", type="primary", disabled=not actor): runtime.save_formula_race_configuration(event_id, {"JudgingCriteria": criteria.to_dict("records")}, actor); _refresh_after_race_control_write()
+    with tabs[4]:
+        if st.button("GENERATE / RESET CAPTAIN PINS", type="primary", disabled=not actor):
+            pins=[]
+            for team in runtime.get_runtime_teams(event_id):
+                pin="".join(secrets.choice("0123456789") for _ in range(6)); runtime.set_team_pin(event_id, str(team.get("TeamID", "")), pin, actor); pins.append({"Team Number": team.get("TeamID", ""), "Team Name": team.get("TeamName", ""), "Captain PIN": pin})
+            st.session_state["race_generated_pins"] = pins
+        if st.session_state.get("race_generated_pins"): st.download_button("Download one-time Captain PIN list", pd.DataFrame(st.session_state["race_generated_pins"]).to_csv(index=False), "captain-pins-once.csv", "text/csv")
+    with tabs[5]:
+        st.warning("Reset preserves event, teams, configuration, Marketplace catalogue, judging configuration and PIN credentials.")
+        if event_id == "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F": st.info("The RACE UAT event is protected: reset is disabled.")
+        else:
+            confirmation = st.text_input(f"Type RESET {event_id}", key="race_reset_confirmation")
+            if st.button("RESET DISPOSABLE RACE EVENT", type="primary", disabled=not actor or confirmation != f"RESET {event_id}"):
+                runtime.reset_formula_race_event(event_id, confirmation, actor); _refresh_after_race_control_write()
+
+
 def show_formula_race(db=None, event_id=""):
     _css()
     _staging_banner()
@@ -800,8 +887,8 @@ def show_formula_race(db=None, event_id=""):
     elif page=="Teams": teams(snapshot)
     elif page=="Build": build_status(snapshot,control)
     elif page=="Reviews":
-        view=st.radio("Review view",["Review Queue","Photo Gallery","Judging"],horizontal=True,label_visibility="collapsed")
-        reviews(snapshot,control,runtime) if view=="Review Queue" else (gallery(snapshot,runtime) if view=="Photo Gallery" else judging(snapshot,control))
+        view=st.radio("Review view",["Station Results", "Review Queue","Photo Gallery","Judging"],horizontal=True,label_visibility="collapsed")
+        station_results(snapshot,control,runtime) if view=="Station Results" else (reviews(snapshot,control,runtime) if view=="Review Queue" else (gallery(snapshot,runtime) if view=="Photo Gallery" else judging(snapshot,control)))
     elif page=="Parts Depot":
         if snapshot.is_demo: marketplace(snapshot)
         else:
@@ -815,5 +902,8 @@ def show_formula_race(db=None, event_id=""):
     elif page=="Race":
         view=st.radio("Race view",["Race Status","Race Results"],horizontal=True,label_visibility="collapsed")
         drag_results(snapshot,control) if view=="Race Results" else race_map(snapshot)
+    elif page=="Event Setup":
+        if snapshot.is_demo: st.info("Event Setup is available only for a selected live R.A.C.E. event.")
+        else: event_setup(snapshot, runtime)
     else:
         control_centre(snapshot,control)
