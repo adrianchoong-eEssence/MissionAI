@@ -641,6 +641,45 @@ class FormulaRaceCoreV2StagingAdapter:
             "p_event_id": str(event_id).strip(), "p_confirmation": str(confirmation), "p_actor": str(actor).strip(),
         }) or {}
 
+    def get_formula_race_configuration_preparation_preview(self, event_id: str) -> dict[str, Any]:
+        """Read the exact preserved and cleared surfaces before a R.A.C.E.-only preparation reset."""
+        clean_event_id = str(event_id).strip()
+        event = self.get_runtime_event(clean_event_id)
+        teams = self.get_runtime_teams(clean_event_id)
+        credentials = self._get(
+            "team_access_credentials_v2",
+            {
+                "event_id": f"eq.{clean_event_id}",
+                "credential_purpose": "eq.TEAM_PIN",
+                "is_active": "eq.true",
+                "select": "team_access_credential_id",
+            },
+        )
+        counts = {}
+        for table in (
+            "submissions_v2",
+            "marketplace_transactions_v2",
+            "credit_transactions_v2",
+            "build_status_v2",
+            "judging_scores_v2",
+            "race_results_v2",
+        ):
+            rows = self._get(table, {"event_id": f"eq.{clean_event_id}", "select": "event_id"})
+            counts[table] = len(rows)
+        return {
+            "EventID": event.get("EventID", clean_event_id),
+            "JoinCode": event.get("JoinCode", ""),
+            "ActiveTeamCount": len(teams),
+            "CaptainPinCredentialCount": len(credentials),
+            "CanonicalSubmissionCount": counts["submissions_v2"],
+            "MarketplacePurchaseCount": counts["marketplace_transactions_v2"],
+            "CreditTransactionCount": counts["credit_transactions_v2"],
+            "BuildStateCount": counts["build_status_v2"],
+            "JudgingResultCount": counts["judging_scores_v2"],
+            "RaceResultCount": counts["race_results_v2"],
+            "Configuration": self.get_formula_race_configuration(clean_event_id),
+        }
+
     def get_formula_race_checkpoints(self, event_id: str) -> dict[str, Any]:
         checkpoints = []
         activities = self._get_checkpoint_activities(event_id)

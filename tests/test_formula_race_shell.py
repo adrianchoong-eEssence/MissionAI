@@ -137,6 +137,21 @@ def test_event_setup_station_editor_exposes_the_030_facilitator_controls_and_his
     assert 'st.subheader("Judging editor")' in source
 
 
+def test_protected_uat_exposes_only_configuration_preparation_with_preview_and_typed_confirmation():
+    source = Path("screens/formula_race.py").read_text()
+
+    assert '_PROTECTED_RACE_UAT_EVENT_ID = "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"' in source
+    assert '_PROTECTED_RACE_UAT_JOIN_CODE = "RACE4CF0CE"' in source
+    assert 'st.subheader("Prepare Event for Configuration")' in source
+    assert '"PREPARE EVENT FOR CONFIGURATION"' in source
+    assert 'expected_confirmation = f"PREPARE {_PROTECTED_RACE_UAT_EVENT_ID}"' in source
+    assert "get_formula_race_configuration_preparation_preview(event_id)" in source
+    assert 'runtime.reset_formula_race_event(event_id, f"RESET {event_id}", actor)' in source
+    assert 'after.get("CanonicalSubmissionCount") == 0' in source
+    assert 'after.get("CaptainPinCredentialCount") == preview.get("CaptainPinCredentialCount")' in source
+    assert '"RESET DISPOSABLE RACE EVENT"' in source
+
+
 def test_event_setup_station_edit_save_and_reload_uses_the_canonical_configuration_path(monkeypatch):
     class Context:
         def __init__(self, ui): self.ui = ui

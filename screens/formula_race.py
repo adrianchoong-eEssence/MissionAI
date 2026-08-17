@@ -44,6 +44,8 @@ def _normalize_join_code(value: str) -> str:
 
 
 _RACE_EVIDENCE_PREFIX = "supabase://exos-submissions/"
+_PROTECTED_RACE_UAT_EVENT_ID = "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
+_PROTECTED_RACE_UAT_JOIN_CODE = "RACE4CF0CE"
 
 
 def _active_race_teams(runtime, event_id: str) -> list[dict]:
@@ -1027,7 +1029,51 @@ def event_setup(snapshot, runtime):
             st.caption("PINs are available only in this generation result. Save the export now; plaintext PINs are not retained.")
     with tabs[5]:
         st.warning("Reset preserves event, teams, configuration, Marketplace catalogue, judging configuration and PIN credentials.")
-        if event_id == "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F": st.info("The RACE UAT event is protected: reset is disabled.")
+        if event_id == _PROTECTED_RACE_UAT_EVENT_ID:
+            st.subheader("Prepare Event for Configuration")
+            st.info("The ordinary destructive reset remains protected. This one-time staging/UAT preparation action uses the certified migration-030 reset contract to clear transactional UAT state while preserving this event's identity, teams and Captain PIN credentials.")
+            preview = runtime.get_formula_race_configuration_preparation_preview(event_id)
+            st.dataframe([
+                {"Preserved": "EventID", "Current": preview.get("EventID", "")},
+                {"Preserved": "Join Code", "Current": preview.get("JoinCode", "")},
+                {"Preserved": "Active Teams", "Current": preview.get("ActiveTeamCount", 0)},
+                {"Preserved": "Active Captain PIN credentials", "Current": preview.get("CaptainPinCredentialCount", 0)},
+                {"Cleared": "Canonical submissions", "Current": preview.get("CanonicalSubmissionCount", 0)},
+                {"Cleared": "Marketplace purchases", "Current": preview.get("MarketplacePurchaseCount", 0)},
+                {"Cleared": "Credit / wallet transactions", "Current": preview.get("CreditTransactionCount", 0)},
+                {"Cleared": "Build state", "Current": preview.get("BuildStateCount", 0)},
+                {"Cleared": "Judging results", "Current": preview.get("JudgingResultCount", 0)},
+                {"Cleared": "Race results / final lock", "Current": preview.get("RaceResultCount", 0)},
+            ], width="stretch", hide_index=True)
+            expected_confirmation = f"PREPARE {_PROTECTED_RACE_UAT_EVENT_ID}"
+            confirmation = st.text_input(f"Type {expected_confirmation}", key="race_configuration_preparation_confirmation")
+            if not actor:
+                st.info("Enter a Configuration Actor above before preparing this protected UAT event.")
+            if st.button(
+                "PREPARE EVENT FOR CONFIGURATION",
+                type="primary",
+                disabled=not actor or confirmation != expected_confirmation,
+            ):
+                if preview.get("JoinCode") != _PROTECTED_RACE_UAT_JOIN_CODE or preview.get("ActiveTeamCount") != 10 or preview.get("CaptainPinCredentialCount") != 10:
+                    st.error("Preparation preflight failed: protected event identity, 10 active teams and 10 active Captain PIN credentials are required.")
+                else:
+                    try:
+                        result = runtime.reset_formula_race_event(event_id, f"RESET {event_id}", actor)
+                        after = runtime.get_formula_race_configuration_preparation_preview(event_id)
+                        prepared = bool(
+                            result.get("Reset")
+                            and after.get("JoinCode") == _PROTECTED_RACE_UAT_JOIN_CODE
+                            and after.get("ActiveTeamCount") == 10
+                            and after.get("CaptainPinCredentialCount") == preview.get("CaptainPinCredentialCount")
+                            and after.get("CanonicalSubmissionCount") == 0
+                        )
+                        if prepared:
+                            st.success("Configuration preparation complete: transactional UAT state is cleared and station editing is unlocked.")
+                            _refresh_after_race_control_write()
+                        else:
+                            st.error("Preparation reset completed but post-reset preservation verification did not pass. Do not continue configuration until reviewed.")
+                    except RuntimeError as error:
+                        st.error(str(error))
         else:
             confirmation = st.text_input(f"Type RESET {event_id}", key="race_reset_confirmation")
             if st.button("RESET DISPOSABLE RACE EVENT", type="primary", disabled=not actor or confirmation != f"RESET {event_id}"):

@@ -110,6 +110,32 @@ def test_race_adapter_debug_get_runtime_teams_tracks_expected_filter():
     assert len(result["rows"]) == 10
 
 
+def test_configuration_preparation_preview_reads_only_preserved_and_transactional_surfaces():
+    with _staging_env():
+        runtime = _fake_runtime_factory()
+        runtime.rows.update(
+            {
+                "team_access_credentials_v2": [{"team_access_credential_id": f"PIN-{index}"} for index in range(10)],
+                "submissions_v2": [{"event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"}],
+                "marketplace_transactions_v2": [{"event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"}],
+                "credit_transactions_v2": [{"event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"}],
+                "build_status_v2": [{"event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"}],
+                "judging_scores_v2": [{"event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"}],
+                "race_results_v2": [{"event_id": "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"}],
+            }
+        )
+        preview = FormulaRaceCoreV2StagingAdapter(runtime).get_formula_race_configuration_preparation_preview(
+            "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
+        )
+
+    assert preview["EventID"] == "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F"
+    assert preview["JoinCode"] == "RACE4CF0CE"
+    assert preview["ActiveTeamCount"] == 10
+    assert preview["CaptainPinCredentialCount"] == 10
+    assert preview["CanonicalSubmissionCount"] == 1
+    assert preview["RaceResultCount"] == 1
+
+
 def test_race_adapter_exposes_submission_evidence_storage_reference():
     with _staging_env():
         runtime = _fake_runtime_factory()
