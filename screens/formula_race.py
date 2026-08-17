@@ -807,7 +807,11 @@ def event_setup(snapshot, runtime):
     """R.A.C.E.-only configuration; the protected UAT event cannot be reset."""
     _title("R.A.C.E. configuration", "Event Setup", "Configure event-scoped stations, routes, inventory, judging and Captain access without source changes.")
     event_id, config = snapshot.event_id, runtime.get_formula_race_configuration(snapshot.event_id)
-    actor = st.text_input("Configuration actor", key="race_setup_actor")
+    actor = st.text_input(
+        "Configuration Actor (required to save changes)",
+        key="race_setup_actor",
+        help="Enter the facilitator name recorded with the canonical migration-030 configuration change.",
+    )
     configured_stations = [normalise_station(row, index) for index, row in enumerate(runtime.get_formula_race_stations(event_id), 1)]
     station_draft_key = f"race_station_draft:{event_id}"
     station_edit_key = f"race_station_edit:{event_id}"
@@ -820,8 +824,10 @@ def event_setup(snapshot, runtime):
     with tabs[0]:
         st.subheader("Station editor")
         st.caption("Add, edit, disable and preview stations here. Station content is event-scoped and does not require SQL or source changes.")
+        if not actor:
+            st.info("Enter a Configuration Actor above to enable SAVE STATION CONFIGURATION. You can review station fields before saving.")
         if stations_locked:
-            st.warning("Station configuration is locked because this event already has submissions. Migration 030 blocks structural station changes to protect historical R.A.C.E. data.")
+            st.warning("Station configuration is locked because this event already has submissions. Migration 030 blocks station changes to protect historical R.A.C.E. data. Safe setup action: configure stations on a clean event before the first Captain submission; do not reset this protected UAT event.")
         if st.button("ADD STATION", type="primary", disabled=stations_locked, key=f"race_add_station:{event_id}"):
             activity_id = f"{event_id}-STATION-{uuid.uuid4().hex[:8].upper()}"
             stations.append(normalise_station({

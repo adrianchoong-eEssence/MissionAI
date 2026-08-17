@@ -137,6 +137,72 @@ def test_event_setup_station_editor_exposes_the_030_facilitator_controls_and_his
     assert 'st.subheader("Judging editor")' in source
 
 
+def test_event_setup_station_edit_save_and_reload_uses_the_canonical_configuration_path(monkeypatch):
+    class Context:
+        def __init__(self, ui): self.ui = ui
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def __getattr__(self, name): return getattr(self.ui, name)
+
+    class StreamlitStub:
+        def __init__(self, clicked):
+            self.clicked, self.session_state, self.markdowns = clicked, {}, []
+        def markdown(self, value, *args, **kwargs): self.markdowns.append(value)
+        def title(self, *args, **kwargs): pass
+        def subheader(self, *args, **kwargs): pass
+        def text_input(self, label, **kwargs):
+            if label == "Configuration Actor (required to save changes)": return "Facilitator"
+            if label == "Display Name": return "Updated station name"
+            return kwargs.get("value", "")
+        def text_area(self, *args, **kwargs): return kwargs.get("value", "")
+        def number_input(self, *args, **kwargs): return kwargs.get("value", 0)
+        def selectbox(self, label, options, **kwargs): return options[kwargs.get("index", 0)]
+        def checkbox(self, *args, **kwargs): return kwargs.get("value", False)
+        def multiselect(self, *args, **kwargs): return kwargs.get("default", [])
+        def tabs(self, labels): return [Context(self) for _ in labels]
+        def columns(self, count): return [Context(self) for _ in range(count if isinstance(count, int) else len(count))]
+        def container(self, **kwargs): return Context(self)
+        def expander(self, *args, **kwargs): return Context(self)
+        def button(self, label, *args, **kwargs): return label in self.clicked
+        def data_editor(self, frame, **kwargs): return frame
+        def dataframe(self, *args, **kwargs): pass
+        def download_button(self, *args, **kwargs): pass
+        def caption(self, *args, **kwargs): pass
+        def warning(self, *args, **kwargs): pass
+        def info(self, *args, **kwargs): pass
+        def error(self, *args, **kwargs): pass
+        def success(self, *args, **kwargs): pass
+        def rerun(self): pass
+
+    class Runtime:
+        def __init__(self):
+            self.stations = [{"ActivityID": "CP-1", "DisplayName": "Original station", "ShortCode": "S1", "Enabled": True}]
+            self.saved = []
+        def get_formula_race_configuration(self, event_id): return {"TeamRoutes": {}, "Marketplace": [], "JudgingCriteria": []}
+        def get_formula_race_stations(self, event_id): return self.stations
+        def get_canonical_submissions(self, event_id): return []
+        def get_runtime_teams(self, event_id): return []
+        def _marketplace_payload(self, *args, **kwargs): return {"items": []}
+        def save_formula_race_configuration(self, event_id, configuration, actor):
+            self.saved.append((event_id, configuration, actor))
+            self.stations = configuration["Stations"]
+
+    runtime = Runtime()
+    first_ui = StreamlitStub({"EDIT", "SAVE", "SAVE STATION CONFIGURATION"})
+    monkeypatch.setattr(formula_race, "st", first_ui)
+    monkeypatch.setattr(formula_race, "_refresh_after_race_control_write", lambda: None)
+    formula_race.event_setup(SimpleNamespace(event_id="EVT-DISPOSABLE"), runtime)
+
+    assert len(runtime.saved) == 1
+    assert runtime.saved[0][2] == "Facilitator"
+    assert runtime.stations[0]["DisplayName"] == "Updated station name"
+
+    refreshed_ui = StreamlitStub(set())
+    monkeypatch.setattr(formula_race, "st", refreshed_ui)
+    formula_race.event_setup(SimpleNamespace(event_id="EVT-DISPOSABLE"), runtime)
+    assert any("Updated station name" in value for value in refreshed_ui.markdowns)
+
+
 def test_captain_pin_export_is_unique_and_excludes_internal_team_ids():
     teams = [{"TeamID": f"INTERNAL-{index}", "TeamName": f"Team {index}", "IsActive": True} for index in range(1, 11)]
     values = iter(["111111", "111111", "222222", "333333", "444444", "555555", "666666", "777777", "888888", "999999", "000000"])
