@@ -286,6 +286,10 @@ def test_030_disposable_configuration_and_reset_certification_is_part_of_the_exi
     assert "JudgingCriteria" in source
     assert "reset_configuration_preserved" in source
     assert "reset_zero_state" in source
+    assert "reset_station_mutation_unlocked" in source
+    assert "reset_captain_login" in source
+    assert "Disposable post-reset station guard certification" in source
+    assert "POST-RESET" in source
 
 
 def test_030_certification_never_names_the_protected_race_uat_event() -> None:

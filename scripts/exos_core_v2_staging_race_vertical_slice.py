@@ -389,6 +389,7 @@ class CoreV2RaceStagingRunner:
 
         self.captain_device = f"CORE-V2-RACE-DEVICE-{run_id}"
         self.session_token = ""
+        self.captain_pin = ""
         self.checkpoint_rows = []
         self.submission_ids = []
         self.configured_marketplace_item_id = ""
@@ -437,6 +438,8 @@ class CoreV2RaceStagingRunner:
             "reset_execution": False,
             "reset_configuration_preserved": False,
             "reset_zero_state": False,
+            "reset_station_mutation_unlocked": False,
+            "reset_captain_login": False,
             "google_sheets_runtime_calls": False,
             "cleanup": False,
         }
@@ -1063,6 +1066,7 @@ class CoreV2RaceStagingRunner:
         if not self.gates["pin_reset"]:
             raise RuntimeError("Disposable captain PIN reset failed")
         self.session_token = reset_token
+        self.captain_pin = reset_pin
 
         activity_runtime_rows = self._post(
             "activity_runtime_v2",
@@ -1784,6 +1788,39 @@ class CoreV2RaceStagingRunner:
         if not (self.gates["reset_configuration_preserved"] and self.gates["reset_zero_state"]):
             raise RuntimeError("Migration 030 reset did not preserve configuration with a transactional zero-state")
 
+        # A station save with the preserved configuration proves that the 030
+        # submission guard is clear after reset, without changing this fixture's
+        # programme content.
+        station_save = self._canonical_race_control_adapter().save_formula_race_configuration(
+            self.event_id,
+            {"Stations": self._race_configuration_snapshot["Stations"]},
+            "Disposable post-reset station guard certification",
+        )
+        self.gates["reset_station_mutation_unlocked"] = bool(
+            isinstance(station_save, dict) and station_save.get("Saved") and station_save.get("EventID") == self.event_id
+        )
+
+        # Reset intentionally clears sessions, not PIN credentials. A new login
+        # on a fresh device proves the preserved credential remains usable.
+        captain_login = self._rpc(
+            "exos_v2_team_access_login",
+            {
+                "p_join_code": self.join_code,
+                "p_team_id": self.team_ids[0],
+                "p_pin": self.captain_pin,
+                "p_device_id": f"{self.captain_device}-POST-RESET",
+            },
+            admin=False,
+        )
+        self.gates["reset_captain_login"] = bool(
+            isinstance(captain_login, dict)
+            and captain_login.get("EventID") == self.event_id
+            and captain_login.get("TeamID") == self.team_ids[0]
+            and captain_login.get("SessionToken")
+        )
+        if not (self.gates["reset_station_mutation_unlocked"] and self.gates["reset_captain_login"]):
+            raise RuntimeError("Migration 030 reset did not restore station mutability and Captain PIN login")
+
     def cleanup(self) -> None:
         submission_rows = self._get(
             "submissions_v2",
@@ -1929,6 +1966,8 @@ class CoreV2RaceStagingRunner:
         print(f"030 reset execution: {'PASS' if self.gates['reset_execution'] else 'FAIL'}")
         print(f"030 configuration preserved after reset: {'PASS' if self.gates['reset_configuration_preserved'] else 'FAIL'}")
         print(f"030 transactional zero-state: {'PASS' if self.gates['reset_zero_state'] else 'FAIL'}")
+        print(f"030 station mutation unlocked after reset: {'PASS' if self.gates['reset_station_mutation_unlocked'] else 'FAIL'}")
+        print(f"030 Captain PIN login after reset: {'PASS' if self.gates['reset_captain_login'] else 'FAIL'}")
         print(f"Google Sheets runtime calls: {'YES' if self.gates['google_sheets_runtime_calls'] else 'NO'}")
         print(f"Cleanup: {'PASS' if self.gates['cleanup'] else 'FAIL'}")
         print(f"EventID: {self.event_id}")
