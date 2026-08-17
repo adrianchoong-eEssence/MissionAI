@@ -817,9 +817,16 @@ def event_setup(snapshot, runtime):
     configured_stations = [normalise_station(row, index) for index, row in enumerate(runtime.get_formula_race_stations(event_id), 1)]
     station_draft_key = f"race_station_draft:{event_id}"
     station_edit_key = f"race_station_edit:{event_id}"
+    station_reference_uploads_key = f"race_station_reference_uploads:{event_id}"
     if station_draft_key not in st.session_state:
         st.session_state[station_draft_key] = [dict(row) for row in configured_stations]
+    if station_reference_uploads_key not in st.session_state:
+        st.session_state[station_reference_uploads_key] = {}
     stations = st.session_state[station_draft_key]
+    original_station_references = {
+        str(row.get("ActivityID", "")): str(row.get("ImageReference", "") or "")
+        for row in configured_stations
+    }
     historical_submissions = runtime.get_canonical_submissions(event_id) or []
     stations_locked = bool(historical_submissions)
     tabs = st.tabs(["Stations", "Team Routes", "Parts Depot", "Judging", "Teams & Access", "Reset Event"])
@@ -857,6 +864,7 @@ def event_setup(snapshot, runtime):
                 header, action = st.columns([4, 1])
                 header.markdown(f"### {station.get('DisplayOrder', index + 1)} · {station.get('DisplayName') or 'Untitled station'}")
                 header.caption(f"{station.get('ShortCode', '')} · {station.get('ScoringMethod', '')} · {'Enabled' if station.get('Enabled') else 'Disabled'}")
+                header.caption("Reference image: configured" if station.get("ImageReference") else "Reference image: none")
                 if action.button("EDIT", key=f"race_edit_station:{activity_id}", disabled=stations_locked):
                     st.session_state[station_edit_key] = activity_id
                     editing_activity_id = activity_id
@@ -891,8 +899,41 @@ def event_setup(snapshot, runtime):
                     performance = {"PerSuccess": st.number_input("Credits per success", min_value=0, value=int(performance.get("PerSuccess", 0) or 0), key=f"race_station_success_credits:{activity_id}")}
                 else:
                     performance = {}
+                reference_image = str(station.get("ImageReference", "") or "")
+                reference_action_key = f"race_station_reference_action:{activity_id}"
+                if reference_image:
+                    reference_url = runtime.get_formula_race_station_reference_image_url(reference_image)
+                    if reference_url:
+                        st.image(reference_url, caption="Facilitator reference image", use_container_width=True)
+                    reference_col, remove_col = st.columns(2)
+                    if reference_col.button("CHANGE IMAGE", key=f"race_change_station_image:{activity_id}"):
+                        st.session_state[reference_action_key] = "UPLOAD"
+                    if remove_col.button("REMOVE IMAGE", key=f"race_remove_station_image:{activity_id}"):
+                        stations[index] = normalise_station({**station, "ImageReference": ""})
+                        st.session_state[reference_action_key] = ""
+                        st.info("Reference image removed from the draft. Save station configuration to apply it.")
+                        continue
+                elif st.button("UPLOAD IMAGE", key=f"race_upload_station_image:{activity_id}"):
+                    st.session_state[reference_action_key] = "UPLOAD"
+                uploaded_reference = None
+                if st.session_state.get(reference_action_key) == "UPLOAD":
+                    uploaded_reference = st.file_uploader(
+                        "Station reference image (facilitator instruction only)",
+                        type=["jpg", "jpeg", "png", "webp", "heic"],
+                        key=f"race_station_reference_file:{activity_id}",
+                        help="Private event/station image. This is not Captain proof or participant evidence.",
+                    )
                 save_col, cancel_col, disable_col = st.columns(3)
                 if save_col.button("SAVE", type="primary", key=f"race_save_station:{activity_id}", disabled=stations_locked):
+                    if uploaded_reference is not None:
+                        try:
+                            reference_image = runtime.upload_formula_race_station_reference_image(
+                                event_id, activity_id, uploaded_reference,
+                            )
+                            st.session_state[station_reference_uploads_key][reference_image] = activity_id
+                        except (RuntimeError, ValueError) as error:
+                            st.error(str(error))
+                            continue
                     stations[index] = normalise_station({
                         **station,
                         "DisplayOrder": display_order,
@@ -907,8 +948,10 @@ def event_setup(snapshot, runtime):
                         "BaseCredits": base_credits,
                         "PerformanceCredits": performance,
                         "Enabled": enabled,
+                        "ImageReference": reference_image,
                     })
                     st.session_state[station_edit_key] = ""
+                    st.session_state[reference_action_key] = ""
                     st.success("Station draft updated. Save station configuration to publish it to this event.")
                 if cancel_col.button("CANCEL", key=f"race_cancel_station:{activity_id}"):
                     st.session_state[station_edit_key] = ""
@@ -927,14 +970,26 @@ def event_setup(snapshot, runtime):
             else:
                 try:
                     runtime.save_formula_race_configuration(event_id, {"Stations": stations}, actor)
+                    for station in stations:
+                        activity_id = str(station.get("ActivityID", ""))
+                        old_reference = original_station_references.get(activity_id, "")
+                        new_reference = str(station.get("ImageReference", "") or "")
+                        if old_reference and old_reference != new_reference:
+                            runtime.delete_formula_race_station_reference_image(
+                                event_id, activity_id, old_reference,
+                            )
                     st.session_state.pop(station_draft_key, None)
                     st.session_state.pop(station_edit_key, None)
+                    st.session_state.pop(station_reference_uploads_key, None)
                     _refresh_after_race_control_write()
                 except RuntimeError as error:
                     st.error(str(error))
         if cancel_col.button("CANCEL STATION CHANGES", disabled=stations_locked):
+            for reference, activity_id in st.session_state.get(station_reference_uploads_key, {}).items():
+                runtime.delete_formula_race_station_reference_image(event_id, activity_id, reference)
             st.session_state.pop(station_draft_key, None)
             st.session_state.pop(station_edit_key, None)
+            st.session_state.pop(station_reference_uploads_key, None)
             st.rerun()
     with tabs[1]:
         st.subheader("Team Routes editor")

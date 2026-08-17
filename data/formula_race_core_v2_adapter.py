@@ -15,6 +15,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 from data.runtime_database import RuntimeDatabaseError
+from data.mission_media import (
+    delete_formula_race_station_reference,
+    get_formula_race_station_reference_url,
+    upload_formula_race_station_reference,
+)
 from engines.formula_race_configuration import (
     current_station, normalise_judging_criteria, normalise_marketplace_item,
     normalise_station, validate_marketplace_items, validate_routes, validate_stations,
@@ -699,11 +704,28 @@ class FormulaRaceCoreV2StagingAdapter:
                     "ScoringMethod": payload.get("ScoringMethod", "NON_SCORING"),
                     "ResultLabel": payload.get("ResultLabel", "Result"),
                     "ResultUnit": payload.get("ResultUnit", ""),
+                    "ImageReference": payload.get("ImageReference", ""),
                     "Status": "AVAILABLE",
                 }
             )
 
         return {"Checkpoints": checkpoints, "Status": "READY", "ModuleID": module_id}
+
+    def upload_formula_race_station_reference_image(self, event_id: str, activity_id: str, uploaded_file) -> str:
+        """Store a private facilitator reference, scoped to its event and station."""
+        return upload_formula_race_station_reference(
+            self.runtime, uploaded_file, event_id, activity_id,
+        )
+
+    def get_formula_race_station_reference_image_url(self, reference: str) -> str:
+        """Resolve a signed URL only when the Captain needs to display it."""
+        return get_formula_race_station_reference_url(self.runtime, reference)
+
+    def delete_formula_race_station_reference_image(self, event_id: str, activity_id: str, reference: str):
+        """Never delete a media object outside this station's private scope."""
+        return delete_formula_race_station_reference(
+            self.runtime, event_id, activity_id, reference,
+        )
 
     def formula_race_team_status(self, event_id: str) -> list[dict[str, Any]]:
         sessions = self._get(
@@ -993,6 +1015,7 @@ class FormulaRaceCoreV2StagingAdapter:
             "ProofType": station["EvidenceRequirement"], "EvidenceRequirement": station["EvidenceRequirement"],
             "ScoringMethod": station["ScoringMethod"], "ResultLabel": station["ResultLabel"],
             "ResultUnit": station["ResultUnit"], "PerformanceCredits": station["PerformanceCredits"],
+            "ImageReference": station["ImageReference"],
             "Status": status,
         }
 

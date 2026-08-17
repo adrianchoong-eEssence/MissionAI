@@ -191,6 +191,8 @@ def test_captain_workspace_batches_runtime_and_reuses_marketplace_projection():
     assert workspace.count("self._marketplace_payload(event_id, team_id)") == 1
     assert '"activity_id": _in_filter(activity_ids)' in workspace
     assert '"Submissions": [' in workspace
+    assert '"ImageReference": station["ImageReference"]' in source
+    assert "get_formula_race_station_reference_image_url" not in workspace
 
 
 def test_adapter_performance_report_has_safe_endpoint_timings_only():

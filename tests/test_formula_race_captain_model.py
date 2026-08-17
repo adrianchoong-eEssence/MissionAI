@@ -33,3 +33,14 @@ def test_captain_navigation_uses_explicit_selectable_sections():
     assert 'st.tabs(["RACE Checkpoints","Wallet & Marketplace","Submissions"])' not in source
     assert "formula_race_purchase" in source
     assert "Build status is updated by Race Control" in source
+
+
+def test_captain_displays_optional_station_reference_before_instruction_and_keeps_proof_separate():
+    source = Path("screens/formula_race_captain.py").read_text()
+
+    assert 'reference_image = str(current.get("ImageReference", "") or "")' in source
+    assert "get_formula_race_station_reference_image_url(reference_image)" in source
+    assert '"<div class=\'race-reference-label\'>STATION REFERENCE</div>"' in source
+    assert "st.image(reference_url, use_container_width=True)" in source
+    assert source.index("reference_image = str(current.get") < source.index("<div class='race-panel race-current race-current-detail'>")
+    assert source.index("<div class='race-panel race-current race-current-detail'>") < source.index("<div class='race-proof'>")

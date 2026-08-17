@@ -9,6 +9,7 @@ from data.upload_safety import validate_image_content, validate_upload
 
 BUCKET = "exos-mission-media"
 REFERENCE_PREFIX = f"supabase://{BUCKET}/"
+RACE_STATION_REFERENCE_ROOT = "formula-race/stations"
 
 MEDIA_LIMITS = {
     "image": 10 * 1024 * 1024,
@@ -42,6 +43,63 @@ def _storage_path(reference):
     if value.startswith(REFERENCE_PREFIX):
         return value[len(REFERENCE_PREFIX):]
     return ""
+
+
+def _race_station_reference_prefix(event_id, activity_id):
+    """Return the private, exact scope for one R.A.C.E. station reference."""
+    return (
+        f"{RACE_STATION_REFERENCE_ROOT}/"
+        f"{_safe_segment(event_id, 'unassigned-event')}/"
+        f"{_safe_segment(activity_id, 'unassigned-station')}/reference/"
+    )
+
+
+def upload_formula_race_station_reference(runtime, uploaded_file, event_id, activity_id):
+    """Validate and store one facilitator-only station reference image privately.
+
+    The supplied runtime keeps this helper usable by the Core-v2 adapter and
+    avoids routing a R.A.C.E. asset through the generic global runtime.
+    """
+    if uploaded_file is None:
+        return ""
+    extensions, mime_types = MEDIA_FORMATS["image"]
+    image_bytes = validate_upload(
+        uploaded_file, extensions, mime_types, MEDIA_LIMITS["image"],
+        "station reference image",
+    )
+    validate_image_content(image_bytes, "station reference image")
+    storage_path = (
+        _race_station_reference_prefix(event_id, activity_id)
+        +
+        f"{uuid.uuid4().hex[:12]}-"
+        f"{_safe_segment(getattr(uploaded_file, 'name', ''), 'reference-image')}"
+    )
+    runtime.upload_mission_media(
+        storage_path=storage_path,
+        media_bytes=image_bytes,
+        content_type=str(getattr(uploaded_file, "type", "") or "application/octet-stream"),
+    )
+    return REFERENCE_PREFIX + storage_path
+
+
+def get_formula_race_station_reference_url(runtime, reference, expires_in=1800):
+    """Resolve a private reference image without exposing its storage path."""
+    storage_path = _storage_path(reference)
+    if not storage_path:
+        return str(reference or "").strip()
+    try:
+        return runtime.create_mission_media_url(storage_path, expires_in=expires_in)
+    except RuntimeDatabaseError:
+        return ""
+
+
+def delete_formula_race_station_reference(runtime, event_id, activity_id, reference):
+    """Delete only an image owned by this exact event/station scope."""
+    storage_path = _storage_path(reference)
+    expected_prefix = _race_station_reference_prefix(event_id, activity_id)
+    if not storage_path or not storage_path.startswith(expected_prefix):
+        return []
+    return runtime.delete_mission_media([storage_path])
 
 
 def upload_mission_media(uploaded_file, template_id, media_kind):

@@ -137,6 +137,21 @@ def test_event_setup_station_editor_exposes_the_030_facilitator_controls_and_his
     assert 'st.subheader("Judging editor")' in source
 
 
+def test_station_reference_image_controls_are_facilitator_only_and_persist_with_station_configuration():
+    source = Path("screens/formula_race.py").read_text()
+
+    for label in (
+        '"UPLOAD IMAGE"', '"CHANGE IMAGE"', '"REMOVE IMAGE"',
+        '"Station reference image (facilitator instruction only)"',
+        '"Reference image: configured"', '"Reference image: none"',
+    ):
+        assert label in source
+    assert "upload_formula_race_station_reference_image" in source
+    assert "delete_formula_race_station_reference_image" in source
+    assert '"ImageReference": reference_image' in source
+    assert "station_reference_uploads_key" in source
+
+
 def test_protected_uat_exposes_only_configuration_preparation_with_preview_and_typed_confirmation():
     source = Path("screens/formula_race.py").read_text()
 
@@ -170,6 +185,9 @@ def test_event_setup_station_edit_save_and_reload_uses_the_canonical_configurati
             if label == "Display Name": return "Updated station name"
             return kwargs.get("value", "")
         def text_area(self, *args, **kwargs): return kwargs.get("value", "")
+        def file_uploader(self, label, *args, **kwargs):
+            return SimpleNamespace(name="reference.png", type="image/png") if label.startswith("Station reference image") else None
+        def image(self, *args, **kwargs): pass
         def number_input(self, *args, **kwargs): return kwargs.get("value", 0)
         def selectbox(self, label, options, **kwargs): return options[kwargs.get("index", 0)]
         def checkbox(self, *args, **kwargs): return kwargs.get("value", False)
@@ -193,6 +211,7 @@ def test_event_setup_station_edit_save_and_reload_uses_the_canonical_configurati
         def __init__(self):
             self.stations = [{"ActivityID": "CP-1", "DisplayName": "Original station", "ShortCode": "S1", "Enabled": True}]
             self.saved = []
+            self.uploads, self.deleted = [], []
         def get_formula_race_configuration(self, event_id): return {"TeamRoutes": {}, "Marketplace": [], "JudgingCriteria": []}
         def get_formula_race_stations(self, event_id): return self.stations
         def get_canonical_submissions(self, event_id): return []
@@ -201,9 +220,14 @@ def test_event_setup_station_edit_save_and_reload_uses_the_canonical_configurati
         def save_formula_race_configuration(self, event_id, configuration, actor):
             self.saved.append((event_id, configuration, actor))
             self.stations = configuration["Stations"]
+        def upload_formula_race_station_reference_image(self, event_id, activity_id, uploaded_file):
+            self.uploads.append((event_id, activity_id, uploaded_file.name))
+            return "supabase://exos-mission-media/formula-race/stations/EVT-DISPOSABLE/CP-1/reference/new-reference.png"
+        def get_formula_race_station_reference_image_url(self, reference): return f"https://private.example.test/{reference.rsplit('/', 1)[-1]}"
+        def delete_formula_race_station_reference_image(self, event_id, activity_id, reference): self.deleted.append((event_id, activity_id, reference))
 
     runtime = Runtime()
-    first_ui = StreamlitStub({"EDIT", "SAVE", "SAVE STATION CONFIGURATION"})
+    first_ui = StreamlitStub({"EDIT", "UPLOAD IMAGE", "SAVE", "SAVE STATION CONFIGURATION"})
     monkeypatch.setattr(formula_race, "st", first_ui)
     monkeypatch.setattr(formula_race, "_refresh_after_race_control_write", lambda: None)
     formula_race.event_setup(SimpleNamespace(event_id="EVT-DISPOSABLE"), runtime)
@@ -211,6 +235,8 @@ def test_event_setup_station_edit_save_and_reload_uses_the_canonical_configurati
     assert len(runtime.saved) == 1
     assert runtime.saved[0][2] == "Facilitator"
     assert runtime.stations[0]["DisplayName"] == "Updated station name"
+    assert runtime.stations[0]["ImageReference"].endswith("new-reference.png")
+    assert runtime.uploads == [("EVT-DISPOSABLE", "CP-1", "reference.png")]
 
     refreshed_ui = StreamlitStub(set())
     monkeypatch.setattr(formula_race, "st", refreshed_ui)
