@@ -1,8 +1,6 @@
 """Client-promised Formula R.A.C.E. product shell."""
 from __future__ import annotations
 
-import csv
-import io
 import os
 import secrets
 import uuid
@@ -20,6 +18,7 @@ from engines.formula_race_configuration import (
     normalise_marketplace_item,
     normalise_station,
     validate_marketplace_items,
+    validate_routes,
     validate_stations,
 )
 
@@ -809,46 +808,202 @@ def event_setup(snapshot, runtime):
     _title("R.A.C.E. configuration", "Event Setup", "Configure event-scoped stations, routes, inventory, judging and Captain access without source changes.")
     event_id, config = snapshot.event_id, runtime.get_formula_race_configuration(snapshot.event_id)
     actor = st.text_input("Configuration actor", key="race_setup_actor")
-    stations = [normalise_station(row, index) for index, row in enumerate(runtime.get_formula_race_stations(event_id), 1)]
+    configured_stations = [normalise_station(row, index) for index, row in enumerate(runtime.get_formula_race_stations(event_id), 1)]
+    station_draft_key = f"race_station_draft:{event_id}"
+    station_edit_key = f"race_station_edit:{event_id}"
+    if station_draft_key not in st.session_state:
+        st.session_state[station_draft_key] = [dict(row) for row in configured_stations]
+    stations = st.session_state[station_draft_key]
+    historical_submissions = runtime.get_canonical_submissions(event_id) or []
+    stations_locked = bool(historical_submissions)
     tabs = st.tabs(["Stations", "Team Routes", "Parts Depot", "Judging", "Teams & Access", "Reset Event"])
     with tabs[0]:
-        cols = ["ActivityID", "DisplayOrder", "ShortCode", "DisplayName", "ParticipantInstruction", "FacilitatorInstruction", "ScoringMethod", "ResultLabel", "ResultUnit", "EvidenceRequirement", "BaseCredits", "Enabled", "ImageReference"]
-        edited = st.data_editor(pd.DataFrame(stations)[cols] if stations else pd.DataFrame(columns=cols), num_rows="dynamic", width="stretch", key="race_station_editor")
-        values = [{**row, "ActivityID": str(row.get("ActivityID", "")).strip() or f"{event_id}-STATION-{index:02d}"} for index, row in enumerate(edited.to_dict("records"), 1)]
-        st.download_button("Download station template", pd.DataFrame(values).drop(columns=["ActivityID"], errors="ignore").to_csv(index=False), "race-stations.csv", "text/csv")
-        upload = st.file_uploader("Import station CSV (preview before apply)", type="csv", key="race_station_import")
-        imported = [{**(stations[index] if index < len(stations) else {"ActivityID": f"{event_id}-STATION-{index+1:02d}"}), **row} for index, row in enumerate(csv.DictReader(io.StringIO(upload.getvalue().decode("utf-8-sig"))))] if upload else []
-        if imported: st.dataframe(imported, width="stretch", hide_index=True)
-        a, b = st.columns(2)
-        if a.button("SAVE STATIONS", type="primary", disabled=not actor):
-            errors = validate_stations(values)
-            if errors: st.error(" ".join(errors))
-            else: runtime.save_formula_race_configuration(event_id, {"Stations": values}, actor); _refresh_after_race_control_write()
-        if b.button("APPLY IMPORT", disabled=not actor or not imported):
-            errors = validate_stations(imported)
-            if errors: st.error(" ".join(errors))
-            else: runtime.save_formula_race_configuration(event_id, {"Stations": imported}, actor); _refresh_after_race_control_write()
+        st.subheader("Station editor")
+        st.caption("Add, edit, disable and preview stations here. Station content is event-scoped and does not require SQL or source changes.")
+        if stations_locked:
+            st.warning("Station configuration is locked because this event already has submissions. Migration 030 blocks structural station changes to protect historical R.A.C.E. data.")
+        if st.button("ADD STATION", type="primary", disabled=stations_locked, key=f"race_add_station:{event_id}"):
+            activity_id = f"{event_id}-STATION-{uuid.uuid4().hex[:8].upper()}"
+            stations.append(normalise_station({
+                "ActivityID": activity_id,
+                "DisplayOrder": len(stations) + 1,
+                "ShortCode": f"S{len(stations) + 1}",
+                "DisplayName": "New station",
+                "ParticipantInstruction": "",
+                "FacilitatorInstruction": "",
+                "ScoringMethod": "FACILITATOR_SCORE",
+                "ResultLabel": "Score",
+                "ResultUnit": "points",
+                "EvidenceRequirement": "PHOTO_OPTIONAL",
+                "BaseCredits": 0,
+                "Enabled": True,
+            }))
+            st.session_state[station_edit_key] = activity_id
+
+        editing_activity_id = st.session_state.get(station_edit_key, "")
+        scoring_options = ["FACILITATOR_SCORE", "LOWEST_TIME", "HIGHEST_COUNT", "SUCCESS_COUNT", "NON_SCORING"]
+        evidence_options = ["PHOTO_REQUIRED", "PHOTO_OPTIONAL", "NO_PHOTO"]
+        for index, station in enumerate(stations):
+            activity_id = str(station.get("ActivityID", ""))
+            with st.container(border=True):
+                header, action = st.columns([4, 1])
+                header.markdown(f"### {station.get('DisplayOrder', index + 1)} · {station.get('DisplayName') or 'Untitled station'}")
+                header.caption(f"{station.get('ShortCode', '')} · {station.get('ScoringMethod', '')} · {'Enabled' if station.get('Enabled') else 'Disabled'}")
+                if action.button("EDIT", key=f"race_edit_station:{activity_id}", disabled=stations_locked):
+                    st.session_state[station_edit_key] = activity_id
+                    editing_activity_id = activity_id
+                if editing_activity_id != activity_id:
+                    continue
+
+                order_col, code_col = st.columns(2)
+                display_order = order_col.number_input("Display Order", min_value=1, value=int(station.get("DisplayOrder", index + 1) or index + 1), key=f"race_station_order:{activity_id}")
+                short_code = code_col.text_input("Short Code", value=str(station.get("ShortCode", "")), key=f"race_station_code:{activity_id}")
+                display_name = st.text_input("Display Name", value=str(station.get("DisplayName", "")), key=f"race_station_name:{activity_id}")
+                participant_instruction = st.text_area("Participant Instruction", value=str(station.get("ParticipantInstruction", "")), key=f"race_station_participant:{activity_id}")
+                facilitator_instruction = st.text_area("Facilitator Instruction", value=str(station.get("FacilitatorInstruction", "")), key=f"race_station_facilitator:{activity_id}")
+                method_col, evidence_col = st.columns(2)
+                current_method = str(station.get("ScoringMethod", "FACILITATOR_SCORE"))
+                scoring_method = method_col.selectbox("Scoring Method", scoring_options, index=scoring_options.index(current_method) if current_method in scoring_options else 0, key=f"race_station_method:{activity_id}")
+                current_evidence = str(station.get("EvidenceRequirement", "PHOTO_OPTIONAL"))
+                evidence_requirement = evidence_col.selectbox("Evidence Requirement", evidence_options, index=evidence_options.index(current_evidence) if current_evidence in evidence_options else 1, key=f"race_station_evidence:{activity_id}")
+                result_col, credits_col = st.columns(2)
+                result_label = result_col.text_input("Result Label", value=str(station.get("ResultLabel", "Result")), key=f"race_station_result_label:{activity_id}")
+                result_unit = result_col.text_input("Result Unit", value=str(station.get("ResultUnit", "")), key=f"race_station_result_unit:{activity_id}")
+                base_credits = credits_col.number_input("Base Credits", min_value=0, value=int(station.get("BaseCredits", 0) or 0), key=f"race_station_base_credits:{activity_id}")
+                enabled = credits_col.checkbox("Enabled", value=bool(station.get("Enabled", True)), key=f"race_station_enabled:{activity_id}")
+                performance = dict(station.get("PerformanceCredits", {}) or {})
+                if scoring_method in {"LOWEST_TIME", "HIGHEST_COUNT"}:
+                    st.caption("Performance Credits by finishing rank")
+                    rank_columns = st.columns(3)
+                    rank_credits = dict(performance.get("RankCredits", {}) or {})
+                    for rank, column in enumerate(rank_columns, 1):
+                        rank_credits[str(rank)] = column.number_input(f"Rank {rank} Credits", min_value=0, value=int(rank_credits.get(str(rank), 0) or 0), key=f"race_station_rank_{rank}:{activity_id}")
+                    performance = {"RankCredits": rank_credits}
+                elif scoring_method == "SUCCESS_COUNT":
+                    performance = {"PerSuccess": st.number_input("Credits per success", min_value=0, value=int(performance.get("PerSuccess", 0) or 0), key=f"race_station_success_credits:{activity_id}")}
+                else:
+                    performance = {}
+                save_col, cancel_col, disable_col = st.columns(3)
+                if save_col.button("SAVE", type="primary", key=f"race_save_station:{activity_id}", disabled=stations_locked):
+                    stations[index] = normalise_station({
+                        **station,
+                        "DisplayOrder": display_order,
+                        "ShortCode": short_code,
+                        "DisplayName": display_name,
+                        "ParticipantInstruction": participant_instruction,
+                        "FacilitatorInstruction": facilitator_instruction,
+                        "ScoringMethod": scoring_method,
+                        "ResultLabel": result_label,
+                        "ResultUnit": result_unit,
+                        "EvidenceRequirement": evidence_requirement,
+                        "BaseCredits": base_credits,
+                        "PerformanceCredits": performance,
+                        "Enabled": enabled,
+                    })
+                    st.session_state[station_edit_key] = ""
+                    st.success("Station draft updated. Save station configuration to publish it to this event.")
+                if cancel_col.button("CANCEL", key=f"race_cancel_station:{activity_id}"):
+                    st.session_state[station_edit_key] = ""
+                if disable_col.button("DISABLE", key=f"race_disable_station:{activity_id}", disabled=stations_locked or not station.get("Enabled", True)):
+                    stations[index] = normalise_station({**station, "Enabled": False})
+                    st.session_state[station_edit_key] = ""
+                    st.info("Station disabled in the draft. Save station configuration to apply this non-destructive change.")
+
+        with st.expander("Preview pending station configuration", expanded=bool(stations)):
+            st.dataframe(pd.DataFrame(stations)[["DisplayOrder", "ShortCode", "DisplayName", "ScoringMethod", "EvidenceRequirement", "BaseCredits", "Enabled"]] if stations else pd.DataFrame(), width="stretch", hide_index=True)
+        save_col, cancel_col = st.columns(2)
+        if save_col.button("SAVE STATION CONFIGURATION", type="primary", disabled=not actor or stations_locked):
+            errors = validate_stations(stations)
+            if errors:
+                st.error(" ".join(errors))
+            else:
+                try:
+                    runtime.save_formula_race_configuration(event_id, {"Stations": stations}, actor)
+                    st.session_state.pop(station_draft_key, None)
+                    st.session_state.pop(station_edit_key, None)
+                    _refresh_after_race_control_write()
+                except RuntimeError as error:
+                    st.error(str(error))
+        if cancel_col.button("CANCEL STATION CHANGES", disabled=stations_locked):
+            st.session_state.pop(station_draft_key, None)
+            st.session_state.pop(station_edit_key, None)
+            st.rerun()
     with tabs[1]:
+        st.subheader("Team Routes editor")
         teams = _active_race_teams(runtime, event_id); ids = [str(team.get("TeamID", "")) for team in teams]; routes = config.get("TeamRoutes", {}) or {}
-        if st.button("GENERATE BALANCED ROUTES", disabled=not stations): st.session_state["race_planned_routes"] = generate_balanced_routes(ids, [row["ActivityID"] for row in stations if row["Enabled"]])
-        routes = st.session_state.get("race_planned_routes", routes)
-        editor = st.data_editor(pd.DataFrame([{ "TeamID": team.get("TeamID", ""), "Team": team.get("TeamName", ""), "Route": ", ".join(routes.get(str(team.get("TeamID", "")), []))} for team in teams]), hide_index=True, width="stretch", key="race_routes_editor")
+        enabled_stations = [row for row in stations if row.get("Enabled")]
+        station_ids = [str(row.get("ActivityID", "")) for row in enabled_stations]
+        station_labels = {str(row.get("ActivityID", "")): f"{row.get('ShortCode', '')} · {row.get('DisplayName', '')}" for row in enabled_stations}
+        if st.button("GENERATE BALANCED ROUTES", disabled=not station_ids):
+            st.session_state[f"race_planned_routes:{event_id}"] = generate_balanced_routes(ids, station_ids)
+        routes = st.session_state.get(f"race_planned_routes:{event_id}", routes)
+        saved = {}
+        for team in teams:
+            team_id = str(team.get("TeamID", ""))
+            saved[team_id] = st.multiselect(
+                f"Route for {team.get('TeamName', team_id)}",
+                station_ids,
+                default=[station_id for station_id in routes.get(team_id, []) if station_id in station_ids],
+                format_func=lambda station_id: station_labels.get(station_id, station_id),
+                key=f"race_route:{event_id}:{team_id}",
+            )
         if st.button("SAVE TEAM ROUTES", type="primary", disabled=not actor):
-            saved = {str(row["TeamID"]): [part.strip() for part in str(row["Route"]).split(",") if part.strip()] for row in editor.to_dict("records")}
-            runtime.save_formula_race_configuration(event_id, {"TeamRoutes": saved}, actor); _refresh_after_race_control_write()
+            errors = validate_routes(saved, ids, station_ids)
+            if errors:
+                st.error(" ".join(errors))
+            else:
+                try:
+                    runtime.save_formula_race_configuration(event_id, {"TeamRoutes": saved}, actor)
+                    _refresh_after_race_control_write()
+                except RuntimeError as error:
+                    st.error(str(error))
     with tabs[2]:
+        st.subheader("Parts Depot editor")
+        st.caption("Add or edit event-scoped parts, credits and stock. Changes are previewed in this editable catalogue before saving.")
         items = [normalise_marketplace_item(row, index) for index, row in enumerate(config.get("Marketplace", []) or runtime._marketplace_payload(event_id, "", active_only=False).get("items", []), 1)]
+        parts_draft_key = f"race_parts_draft:{event_id}"
+        if parts_draft_key not in st.session_state:
+            st.session_state[parts_draft_key] = items
+        if st.button("ADD PART", key=f"race_add_part:{event_id}"):
+            st.session_state[parts_draft_key].append(normalise_marketplace_item({
+                "ItemID": f"{event_id}-ITEM-{uuid.uuid4().hex[:8].upper()}",
+                "DisplayOrder": len(st.session_state[parts_draft_key]) + 1,
+                "Category": "MATERIAL",
+                "ItemName": "New part",
+                "CreditCost": 0,
+                "Enabled": True,
+            }))
+        items = st.session_state[parts_draft_key]
         editor = st.data_editor(pd.DataFrame(items), num_rows="dynamic", width="stretch", key="race_marketplace_editor")
         values = [{**row, "ItemID": str(row.get("ItemID", "")).strip() or f"{event_id}-ITEM-{index:02d}"} for index, row in enumerate(editor.to_dict("records"), 1)]
         st.download_button("Download marketplace template", pd.DataFrame(values).to_csv(index=False), "race-marketplace.csv", "text/csv")
         if st.button("SAVE MARKETPLACE", type="primary", disabled=not actor):
             errors = validate_marketplace_items(values)
             if errors: st.error(" ".join(errors))
-            else: runtime.save_formula_race_configuration(event_id, {"Marketplace": values}, actor); _refresh_after_race_control_write()
+            else:
+                try:
+                    runtime.save_formula_race_configuration(event_id, {"Marketplace": values}, actor)
+                    st.session_state.pop(parts_draft_key, None)
+                    _refresh_after_race_control_write()
+                except RuntimeError as error:
+                    st.error(str(error))
     with tabs[3]:
-        criteria = st.data_editor(pd.DataFrame(config.get("JudgingCriteria", []) or [{"DisplayOrder": 1, "CriterionName": "", "Description": "", "MaximumScore": 10, "Enabled": True}]), num_rows="dynamic", width="stretch", key="race_judging_editor")
+        st.subheader("Judging editor")
+        st.caption("Add or edit judging criteria, descriptions, maximum scores and enabled state before saving.")
+        criteria_draft_key = f"race_judging_draft:{event_id}"
+        if criteria_draft_key not in st.session_state:
+            st.session_state[criteria_draft_key] = config.get("JudgingCriteria", []) or [{"DisplayOrder": 1, "CriterionName": "", "Description": "", "MaximumScore": 10, "Enabled": True}]
+        if st.button("ADD JUDGING CRITERION", key=f"race_add_judging:{event_id}"):
+            st.session_state[criteria_draft_key].append({"DisplayOrder": len(st.session_state[criteria_draft_key]) + 1, "CriterionName": "", "Description": "", "MaximumScore": 10, "Enabled": True})
+        criteria = st.data_editor(pd.DataFrame(st.session_state[criteria_draft_key]), num_rows="dynamic", width="stretch", key="race_judging_editor")
         st.download_button("Download judging template", criteria.to_csv(index=False), "race-judging.csv", "text/csv")
-        if st.button("SAVE JUDGING CRITERIA", type="primary", disabled=not actor): runtime.save_formula_race_configuration(event_id, {"JudgingCriteria": criteria.to_dict("records")}, actor); _refresh_after_race_control_write()
+        if st.button("SAVE JUDGING CRITERIA", type="primary", disabled=not actor):
+            try:
+                runtime.save_formula_race_configuration(event_id, {"JudgingCriteria": criteria.to_dict("records")}, actor)
+                st.session_state.pop(criteria_draft_key, None)
+                _refresh_after_race_control_write()
+            except RuntimeError as error:
+                st.error(str(error))
     with tabs[4]:
         teams = _active_race_teams(runtime, event_id)
         st.caption(f"Canonical active teams: {len(teams)}")

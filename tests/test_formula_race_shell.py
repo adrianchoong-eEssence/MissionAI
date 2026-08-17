@@ -64,30 +64,43 @@ def test_event_setup_renders_all_configuration_sections_without_writes(monkeypat
         def __enter__(self): return self
         def __exit__(self, *args): return False
         def button(self, *args, **kwargs): return False
+        def markdown(self, *args, **kwargs): pass
+        def caption(self, *args, **kwargs): pass
 
     class StreamlitStub:
         session_state = {}
         def __init__(self): self.tab_labels = []
         def markdown(self, *args, **kwargs): pass
         def title(self, *args, **kwargs): pass
+        def subheader(self, *args, **kwargs): pass
         def text_input(self, *args, **kwargs): return ""
         def tabs(self, labels): self.tab_labels = labels; return [Context() for _ in labels]
-        def columns(self, count): return [Context() for _ in range(count)]
+        def columns(self, count): return [Context() for _ in range(count if isinstance(count, int) else len(count))]
+        def container(self, **kwargs): return Context()
+        def expander(self, *args, **kwargs): return Context()
         def data_editor(self, frame, **kwargs): return frame
         def download_button(self, *args, **kwargs): pass
         def file_uploader(self, *args, **kwargs): return None
         def button(self, *args, **kwargs): return False
+        def number_input(self, *args, **kwargs): return kwargs.get("value", 0)
+        def text_area(self, *args, **kwargs): return kwargs.get("value", "")
+        def selectbox(self, label, options, **kwargs): return options[kwargs.get("index", 0)]
+        def checkbox(self, *args, **kwargs): return kwargs.get("value", False)
+        def multiselect(self, *args, **kwargs): return kwargs.get("default", [])
         def dataframe(self, *args, **kwargs): pass
         def caption(self, *args, **kwargs): pass
         def warning(self, *args, **kwargs): pass
         def info(self, *args, **kwargs): pass
         def error(self, *args, **kwargs): pass
+        def success(self, *args, **kwargs): pass
+        def rerun(self): pass
 
     class Runtime:
         writes = 0
         def get_formula_race_configuration(self, event_id): return {"TeamRoutes": {}, "Marketplace": [], "JudgingCriteria": []}
         def get_formula_race_stations(self, event_id): return [{"ActivityID": "CP-1", "DisplayName": "Station", "ShortCode": "S1"}]
         def get_runtime_teams(self, event_id): return [{"TeamID": f"T-{index}", "TeamName": f"Team {index}", "IsActive": True} for index in range(1, 11)]
+        def get_canonical_submissions(self, event_id): return []
         def _marketplace_payload(self, *args, **kwargs): return {"items": []}
         def save_formula_race_configuration(self, *args, **kwargs): self.writes += 1
         def set_team_pin(self, *args, **kwargs): self.writes += 1
@@ -99,6 +112,29 @@ def test_event_setup_renders_all_configuration_sections_without_writes(monkeypat
 
     assert stub.tab_labels == ["Stations", "Team Routes", "Parts Depot", "Judging", "Teams & Access", "Reset Event"]
     assert runtime.writes == 0
+
+
+def test_event_setup_station_editor_exposes_the_030_facilitator_controls_and_history_guard():
+    source = Path("screens/formula_race.py").read_text()
+
+    for label in (
+        '"ADD STATION"', '"EDIT"', '"SAVE"', '"CANCEL"', '"DISABLE"',
+        '"SAVE STATION CONFIGURATION"', '"CANCEL STATION CHANGES"',
+        '"Display Order"', '"Short Code"', '"Display Name"',
+        '"Participant Instruction"', '"Facilitator Instruction"',
+        '"Scoring Method"', '"Evidence Requirement"', '"Base Credits"',
+        '"Credits per success"',
+    ):
+        assert label in source
+    assert 'f"Rank {rank} Credits"' in source
+    for method in ("FACILITATOR_SCORE", "LOWEST_TIME", "HIGHEST_COUNT", "SUCCESS_COUNT"):
+        assert method in source
+    assert "historical_submissions = runtime.get_canonical_submissions(event_id) or []" in source
+    assert "Station configuration is locked because this event already has submissions" in source
+    assert "runtime.save_formula_race_configuration(event_id, {\"Stations\": stations}, actor)" in source
+    assert 'st.subheader("Team Routes editor")' in source
+    assert 'st.subheader("Parts Depot editor")' in source
+    assert 'st.subheader("Judging editor")' in source
 
 
 def test_captain_pin_export_is_unique_and_excludes_internal_team_ids():
@@ -119,28 +155,41 @@ def test_event_setup_generates_one_unique_pin_per_active_team_and_immediately_fo
         def __enter__(self): return self
         def __exit__(self, *args): return False
         def button(self, *args, **kwargs): return False
+        def markdown(self, *args, **kwargs): pass
+        def caption(self, *args, **kwargs): pass
 
     class StreamlitStub:
         def __init__(self): self.session_state, self.downloads = {}, []
         def markdown(self, *args, **kwargs): pass
         def title(self, *args, **kwargs): pass
+        def subheader(self, *args, **kwargs): pass
         def text_input(self, *args, **kwargs): return "Race Control"
         def tabs(self, labels): return [Context() for _ in labels]
-        def columns(self, count): return [Context() for _ in range(count)]
+        def columns(self, count): return [Context() for _ in range(count if isinstance(count, int) else len(count))]
+        def container(self, **kwargs): return Context()
+        def expander(self, *args, **kwargs): return Context()
         def data_editor(self, frame, **kwargs): return frame
         def download_button(self, label, data, *args, **kwargs): self.downloads.append((label, data))
         def file_uploader(self, *args, **kwargs): return None
         def button(self, label, *args, **kwargs): return label == "GENERATE / RESET CAPTAIN PINS"
+        def number_input(self, *args, **kwargs): return kwargs.get("value", 0)
+        def text_area(self, *args, **kwargs): return kwargs.get("value", "")
+        def selectbox(self, label, options, **kwargs): return options[kwargs.get("index", 0)]
+        def checkbox(self, *args, **kwargs): return kwargs.get("value", False)
+        def multiselect(self, *args, **kwargs): return kwargs.get("default", [])
         def dataframe(self, *args, **kwargs): pass
         def caption(self, *args, **kwargs): pass
         def warning(self, *args, **kwargs): pass
         def info(self, *args, **kwargs): pass
         def error(self, *args, **kwargs): pass
+        def success(self, *args, **kwargs): pass
+        def rerun(self): pass
 
     class Runtime:
         def __init__(self): self.pin_writes = []
         def get_formula_race_configuration(self, event_id): return {"TeamRoutes": {}, "Marketplace": [], "JudgingCriteria": []}
         def get_formula_race_stations(self, event_id): return [{"ActivityID": "CP-1", "DisplayName": "Station", "ShortCode": "S1"}]
+        def get_canonical_submissions(self, event_id): return []
         def get_runtime_teams(self, event_id):
             return [{"TeamID": f"INTERNAL-{index}", "TeamName": f"Team {index}", "IsActive": True} for index in range(1, 11)]
         def _marketplace_payload(self, *args, **kwargs): return {"items": []}
@@ -153,7 +202,7 @@ def test_event_setup_generates_one_unique_pin_per_active_team_and_immediately_fo
     assert len(runtime.pin_writes) == 10
     assert len({row[2] for row in runtime.pin_writes}) == 10
     assert "race_generated_pins" not in stub.session_state
-    assert len(stub.downloads) == 4  # Three templates plus the immediate PIN export.
+    assert len(stub.downloads) == 3  # Two templates plus the immediate PIN export.
     pin_export = stub.downloads[-1][1]
     assert "Team Number,Team Name,Captain PIN" in pin_export
     assert "INTERNAL-" not in pin_export
