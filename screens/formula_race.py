@@ -1,9 +1,13 @@
 """Client-promised Formula R.A.C.E. product shell."""
 from __future__ import annotations
 
+import csv
+import io
 import os
+import secrets
 import uuid
 from urllib.parse import urlparse
+import pandas as pd
 import streamlit as st
 
 from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRaceProvider, RaceSnapshot, Team, Transaction, Submission
@@ -11,6 +15,13 @@ from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
 from data.runtime_database import get_runtime_database
 from data.control_runtime import ControlRuntime
 from engines.formula_race import BUILD_STATUSES,JUDGING_CATEGORIES,final_standings
+from engines.formula_race_configuration import (
+    generate_balanced_routes,
+    normalise_marketplace_item,
+    normalise_station,
+    validate_marketplace_items,
+    validate_stations,
+)
 
 
 def _staging_runtime_enabled() -> bool:
@@ -34,6 +45,35 @@ def _normalize_join_code(value: str) -> str:
 
 
 _RACE_EVIDENCE_PREFIX = "supabase://exos-submissions/"
+
+
+def _active_race_teams(runtime, event_id: str) -> list[dict]:
+    """Return canonical active teams only; no display name is treated as a key."""
+    return [
+        dict(team)
+        for team in (runtime.get_runtime_teams(event_id) or [])
+        if bool(team.get("IsActive", True))
+    ]
+
+
+def _generate_unique_captain_pin_rows(teams: list[dict], pin_factory=None) -> list[dict]:
+    """Build printable one-time PIN rows without placing internal TeamIDs in them."""
+    make_pin = pin_factory or (lambda: "".join(secrets.choice("0123456789") for _ in range(6)))
+    used_pins: set[str] = set()
+    rows: list[dict] = []
+    for team_number, team in enumerate(teams, 1):
+        pin = str(make_pin())
+        while pin in used_pins:
+            pin = str(make_pin())
+        used_pins.add(pin)
+        rows.append(
+            {
+                "Team Number": team_number,
+                "Team Name": str(team.get("TeamName", "")),
+                "Captain PIN": pin,
+            }
+        )
+    return rows
 
 
 def _resolve_race_private_evidence(runtime, storage_reference: str) -> str:
@@ -770,7 +810,7 @@ def event_setup(snapshot, runtime):
     event_id, config = snapshot.event_id, runtime.get_formula_race_configuration(snapshot.event_id)
     actor = st.text_input("Configuration actor", key="race_setup_actor")
     stations = [normalise_station(row, index) for index, row in enumerate(runtime.get_formula_race_stations(event_id), 1)]
-    tabs = st.tabs(["Stations", "Routes", "Marketplace", "Judging", "Captain PINs", "Safe Reset"])
+    tabs = st.tabs(["Stations", "Team Routes", "Parts Depot", "Judging", "Teams & Access", "Reset Event"])
     with tabs[0]:
         cols = ["ActivityID", "DisplayOrder", "ShortCode", "DisplayName", "ParticipantInstruction", "FacilitatorInstruction", "ScoringMethod", "ResultLabel", "ResultUnit", "EvidenceRequirement", "BaseCredits", "Enabled", "ImageReference"]
         edited = st.data_editor(pd.DataFrame(stations)[cols] if stations else pd.DataFrame(columns=cols), num_rows="dynamic", width="stretch", key="race_station_editor")
@@ -789,7 +829,7 @@ def event_setup(snapshot, runtime):
             if errors: st.error(" ".join(errors))
             else: runtime.save_formula_race_configuration(event_id, {"Stations": imported}, actor); _refresh_after_race_control_write()
     with tabs[1]:
-        teams = runtime.get_runtime_teams(event_id); ids = [str(team.get("TeamID", "")) for team in teams]; routes = config.get("TeamRoutes", {}) or {}
+        teams = _active_race_teams(runtime, event_id); ids = [str(team.get("TeamID", "")) for team in teams]; routes = config.get("TeamRoutes", {}) or {}
         if st.button("GENERATE BALANCED ROUTES", disabled=not stations): st.session_state["race_planned_routes"] = generate_balanced_routes(ids, [row["ActivityID"] for row in stations if row["Enabled"]])
         routes = st.session_state.get("race_planned_routes", routes)
         editor = st.data_editor(pd.DataFrame([{ "TeamID": team.get("TeamID", ""), "Team": team.get("TeamName", ""), "Route": ", ".join(routes.get(str(team.get("TeamID", "")), []))} for team in teams]), hide_index=True, width="stretch", key="race_routes_editor")
@@ -810,12 +850,20 @@ def event_setup(snapshot, runtime):
         st.download_button("Download judging template", criteria.to_csv(index=False), "race-judging.csv", "text/csv")
         if st.button("SAVE JUDGING CRITERIA", type="primary", disabled=not actor): runtime.save_formula_race_configuration(event_id, {"JudgingCriteria": criteria.to_dict("records")}, actor); _refresh_after_race_control_write()
     with tabs[4]:
+        teams = _active_race_teams(runtime, event_id)
+        st.caption(f"Canonical active teams: {len(teams)}")
         if st.button("GENERATE / RESET CAPTAIN PINS", type="primary", disabled=not actor):
-            pins=[]
-            for team in runtime.get_runtime_teams(event_id):
-                pin="".join(secrets.choice("0123456789") for _ in range(6)); runtime.set_team_pin(event_id, str(team.get("TeamID", "")), pin, actor); pins.append({"Team Number": team.get("TeamID", ""), "Team Name": team.get("TeamName", ""), "Captain PIN": pin})
-            st.session_state["race_generated_pins"] = pins
-        if st.session_state.get("race_generated_pins"): st.download_button("Download one-time Captain PIN list", pd.DataFrame(st.session_state["race_generated_pins"]).to_csv(index=False), "captain-pins-once.csv", "text/csv")
+            if not teams or any(not str(team.get("TeamID", "")).strip() or not str(team.get("TeamName", "")).strip() for team in teams):
+                st.error("Captain PIN generation requires canonical active teams with TeamID and Team Name.")
+            else:
+                pins = _generate_unique_captain_pin_rows(teams)
+                for team, pin_row in zip(teams, pins):
+                    runtime.set_team_pin(event_id, str(team.get("TeamID", "")), pin_row["Captain PIN"], actor)
+                st.session_state["race_generated_pins"] = pins
+        one_time_pins = st.session_state.pop("race_generated_pins", None)
+        if one_time_pins:
+            st.download_button("Download one-time Captain PIN list", pd.DataFrame(one_time_pins).to_csv(index=False), "captain-pins-once.csv", "text/csv")
+            st.caption("PINs are available only in this generation result. Save the export now; plaintext PINs are not retained.")
     with tabs[5]:
         st.warning("Reset preserves event, teams, configuration, Marketplace catalogue, judging configuration and PIN credentials.")
         if event_id == "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F": st.info("The RACE UAT event is protected: reset is disabled.")

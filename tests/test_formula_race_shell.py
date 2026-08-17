@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRaceProvider, snapshot_as_contract
 from screens import formula_race
@@ -56,3 +57,103 @@ def test_live_provider_scopes_every_read_to_selected_event():
         def get_runtime_control_state(self, event_id): assert event_id == "RACE-1"; return {}
     snapshot = LiveFormulaRaceProvider(DB()).snapshot("RACE-1")
     assert snapshot.event_id == "RACE-1" and snapshot.source == "LIVE"
+
+
+def test_event_setup_renders_all_configuration_sections_without_writes(monkeypatch):
+    class Context:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def button(self, *args, **kwargs): return False
+
+    class StreamlitStub:
+        session_state = {}
+        def __init__(self): self.tab_labels = []
+        def markdown(self, *args, **kwargs): pass
+        def title(self, *args, **kwargs): pass
+        def text_input(self, *args, **kwargs): return ""
+        def tabs(self, labels): self.tab_labels = labels; return [Context() for _ in labels]
+        def columns(self, count): return [Context() for _ in range(count)]
+        def data_editor(self, frame, **kwargs): return frame
+        def download_button(self, *args, **kwargs): pass
+        def file_uploader(self, *args, **kwargs): return None
+        def button(self, *args, **kwargs): return False
+        def dataframe(self, *args, **kwargs): pass
+        def caption(self, *args, **kwargs): pass
+        def warning(self, *args, **kwargs): pass
+        def info(self, *args, **kwargs): pass
+        def error(self, *args, **kwargs): pass
+
+    class Runtime:
+        writes = 0
+        def get_formula_race_configuration(self, event_id): return {"TeamRoutes": {}, "Marketplace": [], "JudgingCriteria": []}
+        def get_formula_race_stations(self, event_id): return [{"ActivityID": "CP-1", "DisplayName": "Station", "ShortCode": "S1"}]
+        def get_runtime_teams(self, event_id): return [{"TeamID": f"T-{index}", "TeamName": f"Team {index}", "IsActive": True} for index in range(1, 11)]
+        def _marketplace_payload(self, *args, **kwargs): return {"items": []}
+        def save_formula_race_configuration(self, *args, **kwargs): self.writes += 1
+        def set_team_pin(self, *args, **kwargs): self.writes += 1
+        def reset_formula_race_event(self, *args, **kwargs): self.writes += 1
+
+    stub, runtime = StreamlitStub(), Runtime()
+    monkeypatch.setattr(formula_race, "st", stub)
+    formula_race.event_setup(SimpleNamespace(event_id="EVT-DISPOSABLE"), runtime)
+
+    assert stub.tab_labels == ["Stations", "Team Routes", "Parts Depot", "Judging", "Teams & Access", "Reset Event"]
+    assert runtime.writes == 0
+
+
+def test_captain_pin_export_is_unique_and_excludes_internal_team_ids():
+    teams = [{"TeamID": f"INTERNAL-{index}", "TeamName": f"Team {index}", "IsActive": True} for index in range(1, 11)]
+    values = iter(["111111", "111111", "222222", "333333", "444444", "555555", "666666", "777777", "888888", "999999", "000000"])
+
+    rows = formula_race._generate_unique_captain_pin_rows(teams, pin_factory=lambda: next(values))
+
+    assert len(rows) == 10
+    assert len({row["Captain PIN"] for row in rows}) == 10
+    assert list(rows[0]) == ["Team Number", "Team Name", "Captain PIN"]
+    assert all("TeamID" not in row and "INTERNAL-" not in str(row) for row in rows)
+    assert [row["Team Number"] for row in rows] == list(range(1, 11))
+
+
+def test_event_setup_generates_one_unique_pin_per_active_team_and_immediately_forgets_plaintext(monkeypatch):
+    class Context:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def button(self, *args, **kwargs): return False
+
+    class StreamlitStub:
+        def __init__(self): self.session_state, self.downloads = {}, []
+        def markdown(self, *args, **kwargs): pass
+        def title(self, *args, **kwargs): pass
+        def text_input(self, *args, **kwargs): return "Race Control"
+        def tabs(self, labels): return [Context() for _ in labels]
+        def columns(self, count): return [Context() for _ in range(count)]
+        def data_editor(self, frame, **kwargs): return frame
+        def download_button(self, label, data, *args, **kwargs): self.downloads.append((label, data))
+        def file_uploader(self, *args, **kwargs): return None
+        def button(self, label, *args, **kwargs): return label == "GENERATE / RESET CAPTAIN PINS"
+        def dataframe(self, *args, **kwargs): pass
+        def caption(self, *args, **kwargs): pass
+        def warning(self, *args, **kwargs): pass
+        def info(self, *args, **kwargs): pass
+        def error(self, *args, **kwargs): pass
+
+    class Runtime:
+        def __init__(self): self.pin_writes = []
+        def get_formula_race_configuration(self, event_id): return {"TeamRoutes": {}, "Marketplace": [], "JudgingCriteria": []}
+        def get_formula_race_stations(self, event_id): return [{"ActivityID": "CP-1", "DisplayName": "Station", "ShortCode": "S1"}]
+        def get_runtime_teams(self, event_id):
+            return [{"TeamID": f"INTERNAL-{index}", "TeamName": f"Team {index}", "IsActive": True} for index in range(1, 11)]
+        def _marketplace_payload(self, *args, **kwargs): return {"items": []}
+        def set_team_pin(self, event_id, team_id, pin, actor): self.pin_writes.append((event_id, team_id, pin, actor))
+
+    stub, runtime = StreamlitStub(), Runtime()
+    monkeypatch.setattr(formula_race, "st", stub)
+    formula_race.event_setup(SimpleNamespace(event_id="EVT-DISPOSABLE"), runtime)
+
+    assert len(runtime.pin_writes) == 10
+    assert len({row[2] for row in runtime.pin_writes}) == 10
+    assert "race_generated_pins" not in stub.session_state
+    assert len(stub.downloads) == 4  # Three templates plus the immediate PIN export.
+    pin_export = stub.downloads[-1][1]
+    assert "Team Number,Team Name,Captain PIN" in pin_export
+    assert "INTERNAL-" not in pin_export
