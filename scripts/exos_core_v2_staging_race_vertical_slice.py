@@ -143,7 +143,7 @@ class CoreV2RaceStagingRunner:
 
     @staticmethod
     def _runner_version() -> str:
-        return "exos-core-v2-race-vertical-slice-v8"
+        return "exos-core-v2-race-vertical-slice-v9"
 
     @staticmethod
     def _coerce_bool(value: object) -> bool:
@@ -391,6 +391,8 @@ class CoreV2RaceStagingRunner:
         self.session_token = ""
         self.checkpoint_rows = []
         self.submission_ids = []
+        self.configured_marketplace_item_id = ""
+        self._race_configuration_snapshot = {}
 
         self.gates = {
             "staging_connectivity": False,
@@ -400,6 +402,15 @@ class CoreV2RaceStagingRunner:
             "wrong_pin_rejection": False,
             "captain_reconnect": False,
             "four_checkpoints": False,
+            "configuration_saved": False,
+            "station_methods": False,
+            "team_routes": False,
+            "submission_gated_progression": False,
+            "approval_independent_unlock": False,
+            "configurable_credits": False,
+            "marketplace_configuration": False,
+            "judging_configuration": False,
+            "pin_reset": False,
             "checkpoint_submission": False,
             "facilitator_review": False,
             "credits_ledger": False,
@@ -422,6 +433,10 @@ class CoreV2RaceStagingRunner:
             "tie_rule_deterministic": False,
             "result_locking": False,
             "final_ranking": False,
+            "reset_preview": False,
+            "reset_execution": False,
+            "reset_configuration_preserved": False,
+            "reset_zero_state": False,
             "google_sheets_runtime_calls": False,
             "cleanup": False,
         }
@@ -1015,6 +1030,40 @@ class CoreV2RaceStagingRunner:
         if not (self.gates["captain_login"] and self.gates["captain_reconnect"] and wrong_pin_ok):
             raise RuntimeError("Captain identity controls failed")
 
+        # Migration 030 promises PIN credentials survive reset. Prove the
+        # generated credential can be rotated on this disposable team first.
+        reset_pin = f"RESET-{selected_team_id[-6:]}"
+        reset_result = self._rpc(
+            "exos_v2_set_team_access_pin",
+            {
+                "p_event_id": self.event_id,
+                "p_team_id": selected_team_id,
+                "p_pin": reset_pin,
+                "p_actor": "QA Bot PIN reset",
+            },
+        )
+        reset_login = self._rpc(
+            "exos_v2_team_access_login",
+            {
+                "p_join_code": self.join_code,
+                "p_team_id": selected_team_id,
+                "p_pin": reset_pin,
+                "p_device_id": self.captain_device,
+            },
+            admin=False,
+        )
+        reset_token = str(reset_login.get("SessionToken", "")) if isinstance(reset_login, dict) else ""
+        self.gates["pin_reset"] = bool(
+            isinstance(reset_result, dict)
+            and reset_result.get("Configured")
+            and isinstance(reset_login, dict)
+            and reset_login.get("TeamID") == selected_team_id
+            and reset_token
+        )
+        if not self.gates["pin_reset"]:
+            raise RuntimeError("Disposable captain PIN reset failed")
+        self.session_token = reset_token
+
         activity_runtime_rows = self._post(
             "activity_runtime_v2",
             {
@@ -1037,6 +1086,210 @@ class CoreV2RaceStagingRunner:
             and isinstance(activity_runtime_rows, list)
             and len(activity_runtime_rows) >= 1
         )
+
+    def configure_030_architecture(self) -> None:
+        """Configure every 030 surface on this generated event before runtime data exists."""
+        if len(self.checkpoint_rows) != 4:
+            raise RuntimeError("030 certification requires four disposable checkpoint activities")
+
+        station_ids = [str(row.get("activity_id", "")) for row in self.checkpoint_rows]
+        if not all(station_ids):
+            raise RuntimeError("Disposable checkpoint IDs are incomplete")
+
+        scoring_methods = (
+            "FACILITATOR_SCORE",
+            "LOWEST_TIME",
+            "HIGHEST_COUNT",
+            "SUCCESS_COUNT",
+        )
+        base_credits = (17, 3, 4, 1)
+        performance = (
+            {},
+            {"RankCredits": {"1": 11, "2": 6}},
+            {"RankCredits": {"1": 9, "2": 5}},
+            {"PerSuccess": 2},
+        )
+        stations = []
+        for index, activity_id in enumerate(station_ids, 1):
+            method = scoring_methods[index - 1]
+            stations.append(
+                {
+                    "ActivityID": activity_id,
+                    "DisplayOrder": index,
+                    "ShortCode": f"S{index}",
+                    "DisplayName": f"Disposable 030 Station {index}",
+                    "ParticipantInstruction": f"Submit the configured result for disposable station {index}.",
+                    "FacilitatorInstruction": f"Verify disposable station {index}.",
+                    "ScoringMethod": method,
+                    "ResultLabel": "Score" if method == "FACILITATOR_SCORE" else "Measured result",
+                    "ResultUnit": "points" if method == "FACILITATOR_SCORE" else ("ms" if method == "LOWEST_TIME" else "count"),
+                    "ResultMinimum": 0,
+                    "ResultMaximum": 10 if method == "FACILITATOR_SCORE" else 100000,
+                    "TiePolicy": "TEAM_ID",
+                    "EvidenceRequirement": "PHOTO_OPTIONAL",
+                    "BaseCredits": base_credits[index - 1],
+                    "PerformanceCredits": performance[index - 1],
+                    "Enabled": True,
+                }
+            )
+
+        self.configured_marketplace_item_id = f"CORE-V2-RACE-CONFIG-ITEM-{self.event_id[-10:]}"
+        configuration = {
+            "Stations": stations,
+            "TeamRoutes": {
+                team_id: station_ids[position % len(station_ids):] + station_ids[:position % len(station_ids)]
+                for position, team_id in enumerate(self.team_ids)
+            },
+            "Marketplace": [
+                {
+                    "ItemID": self.configured_marketplace_item_id,
+                    "DisplayOrder": 1,
+                    "Category": "TOOL",
+                    "ItemName": "Disposable 030 Engine Kit",
+                    "Description": "Certification-only configured marketplace item.",
+                    "CreditCost": 5,
+                    "StockLimit": 2,
+                    "Enabled": True,
+                }
+            ],
+            "JudgingCriteria": [
+                {
+                    "DisplayOrder": 1,
+                    "CriterionName": "Configuration fidelity",
+                    "Description": "Uses the configured Formula R.A.C.E. event architecture.",
+                    "MaximumScore": 10,
+                    "Enabled": True,
+                },
+                {
+                    "DisplayOrder": 2,
+                    "CriterionName": "Execution quality",
+                    "Description": "Completes the disposable staging journey safely.",
+                    "MaximumScore": 10,
+                    "Enabled": True,
+                },
+            ],
+        }
+        adapter = self._canonical_race_control_adapter()
+        saved = adapter.save_formula_race_configuration(
+            self.event_id,
+            configuration,
+            "Disposable staging certification",
+        )
+        persisted = adapter.get_formula_race_configuration(self.event_id)
+        persisted_stations = adapter.get_formula_race_stations(self.event_id, configuration=persisted)
+        persisted_by_id = {str(row.get("ActivityID", "")): row for row in persisted_stations}
+        persisted_marketplace = persisted.get("Marketplace", [])
+        persisted_judging = persisted.get("JudgingCriteria", [])
+
+        self._race_configuration_snapshot = {
+            "Stations": persisted.get("Stations", []),
+            "TeamRoutes": persisted.get("TeamRoutes", {}),
+            "Marketplace": persisted_marketplace,
+            "JudgingCriteria": persisted_judging,
+        }
+        self.gates["configuration_saved"] = bool(
+            isinstance(saved, dict) and saved.get("Saved") and saved.get("EventID") == self.event_id
+        )
+        self.gates["station_methods"] = (
+            [persisted_by_id.get(activity_id, {}).get("ScoringMethod") for activity_id in station_ids]
+            == list(scoring_methods)
+        )
+        self.gates["team_routes"] = all(
+            persisted.get("TeamRoutes", {}).get(team_id) == configuration["TeamRoutes"][team_id]
+            for team_id in self.team_ids
+        )
+        self.gates["configurable_credits"] = bool(
+            persisted_by_id.get(station_ids[0], {}).get("BaseCredits") == 17
+            and persisted_by_id.get(station_ids[1], {}).get("PerformanceCredits", {}).get("RankCredits", {}).get("1") == 11
+            and persisted_by_id.get(station_ids[3], {}).get("PerformanceCredits", {}).get("PerSuccess") == 2
+        )
+        self.gates["marketplace_configuration"] = bool(
+            isinstance(persisted_marketplace, list)
+            and persisted_marketplace
+            and persisted_marketplace[0].get("ItemID") == self.configured_marketplace_item_id
+            and persisted_marketplace[0].get("Category") == "TOOL"
+        )
+        self.gates["judging_configuration"] = bool(
+            isinstance(persisted_judging, list)
+            and [row.get("CriterionName") for row in persisted_judging] == [
+                "Configuration fidelity",
+                "Execution quality",
+            ]
+        )
+        if not all(
+            self.gates[gate]
+            for gate in (
+                "configuration_saved",
+                "station_methods",
+                "team_routes",
+                "configurable_credits",
+                "marketplace_configuration",
+                "judging_configuration",
+            )
+        ):
+            raise RuntimeError("Migration 030 configuration did not persist on the disposable event")
+
+    def certify_030_submission_progression(self) -> None:
+        """Prove that configured route progression is submission-gated, not approval-gated."""
+        team_id = self.captain_participant.get("team_id") or self.team_ids[0]
+        expected_route = self._race_configuration_snapshot.get("TeamRoutes", {}).get(team_id, [])
+        if len(expected_route) < 2:
+            raise RuntimeError("Disposable captain route is not configured")
+
+        adapter = self._canonical_race_control_adapter()
+        before = adapter.formula_race_captain_workspace(self.session_token, self.captain_device)
+        if before.get("CurrentCheckpoint", {}).get("ActivityID") != expected_route[0]:
+            raise RuntimeError("Configured route did not project the captain's first station")
+        submission = adapter.formula_race_submit_checkpoint(
+            self.session_token,
+            self.captain_device,
+            expected_route[0],
+            text_response="Disposable migration-030 station proof",
+            idempotency_key=f"030-submit-{self.event_id}",
+            result_value=9,
+            result_unit="points",
+        )
+        submission_id = str(submission.get("SubmissionID", "")) if isinstance(submission, dict) else ""
+        after_submit = adapter.formula_race_captain_workspace(self.session_token, self.captain_device)
+        self.gates["checkpoint_submission"] = bool(submission_id and submission.get("Status") == "SUBMITTED")
+        self.gates["submission_gated_progression"] = bool(
+            self.gates["checkpoint_submission"]
+            and after_submit.get("CurrentCheckpoint", {}).get("ActivityID") == expected_route[1]
+            and any(
+                row.get("SubmissionID") == submission_id and row.get("Status") == "SUBMITTED"
+                for row in after_submit.get("Submissions", [])
+            )
+        )
+        # This is intentionally evaluated before facilitator verification.
+        self.gates["approval_independent_unlock"] = self.gates["submission_gated_progression"]
+        if not self.gates["submission_gated_progression"]:
+            raise RuntimeError("Configured station submission did not unlock the next route station")
+
+        verification = adapter.formula_race_review_checkpoint(
+            submission_id,
+            "APPROVE",
+            "Disposable staging reviewer",
+            notes="Configured station verified after the route already advanced.",
+            idempotency_key=f"030-verify-{self.event_id}",
+            official_result=9,
+        )
+        credit_rows = self._get(
+            "credit_transactions_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "team_id": f"eq.{team_id}",
+                "transaction_type": "eq.RACE_STATION_BASE",
+                "select": "amount,transaction_type,reason",
+            },
+        )
+        earned = sum(int(row.get("amount", 0) or 0) for row in (credit_rows or []))
+        self.gates["facilitator_review"] = bool(
+            isinstance(verification, dict) and verification.get("Decision") == "APPROVE"
+        )
+        self.gates["credits_ledger"] = bool(earned == 17)
+        self.gates["wallet_reconciliation"] = bool(isinstance(credit_rows, list) and earned == 17)
+        if not (self.gates["facilitator_review"] and self.gates["credits_ledger"]):
+            raise RuntimeError("Configured station verification or Credits mapping failed")
 
     def submit_and_review(self) -> None:
         checkpoints = self._get(
@@ -1125,20 +1378,9 @@ class CoreV2RaceStagingRunner:
 
     def marketplace_journey(self) -> None:
         team_id = self.captain_participant.get("team_id") or self.team_ids[0]
-        item_id = f"CORE-V2-RACE-ITEM-{self.event_id[-6:]}"
-
-        self._post(
-            "marketplace_items_v2",
-            {
-                "event_id": self.event_id,
-                "item_id": item_id,
-                "item_name": "Engine Kit",
-                "item_type": "STANDARD",
-                "unit_cost_credits": 5,
-                "stock_limit": 2,
-                "is_active": True,
-            },
-        )
+        item_id = self.configured_marketplace_item_id
+        if not item_id:
+            raise RuntimeError("Migration 030 marketplace configuration was not initialized")
 
         first = self._rpc(
             "exos_v2_ledger_credit",
@@ -1153,34 +1395,22 @@ class CoreV2RaceStagingRunner:
             },
             admin=True,
         )
-        purchase = self._post(
-            "marketplace_transactions_v2",
-            {
-                "event_id": self.event_id,
-                "team_id": team_id,
-                "item_id": item_id,
-                "credit_transaction_id": first if isinstance(first, str) else str(first),
-                "quantity": 1,
-                "amount_paid": 5,
-                "status": "COMPLETED",
-                "idempotency_key": f"purchase-{self.event_id}",
-            },
+        purchase = self._canonical_race_control_adapter().formula_race_purchase(
+            self.session_token,
+            self.captain_device,
+            item_id,
+            quantity=1,
+            idempotency_key=f"purchase-{self.event_id}",
         )
 
         stock_fail = False
         try:
-            self._post(
-                "marketplace_transactions_v2",
-                {
-                    "event_id": self.event_id,
-                    "team_id": team_id,
-                    "item_id": item_id,
-                    "credit_transaction_id": first if isinstance(first, str) else str(first),
-                    "quantity": 99,
-                    "amount_paid": 495,
-                    "status": "COMPLETED",
-                    "idempotency_key": f"purchase-over-{uuid.uuid4().hex}",
-                },
+            self._canonical_race_control_adapter().formula_race_purchase(
+                self.session_token,
+                self.captain_device,
+                item_id,
+                quantity=99,
+                idempotency_key=f"purchase-over-{uuid.uuid4().hex}",
             )
         except RuntimeError:
             stock_fail = True
@@ -1190,7 +1420,7 @@ class CoreV2RaceStagingRunner:
             {
                 "event_id": f"eq.{self.event_id}",
                 "item_id": f"eq.{item_id}",
-            "select": "stock_limit",
+                "select": "item_type,unit_cost_credits,stock_limit,item_payload",
             },
         )
 
@@ -1199,9 +1429,11 @@ class CoreV2RaceStagingRunner:
 
         self.gates["marketplace"] = bool(
             isinstance(first, str)
-            and isinstance(purchase, list)
+            and isinstance(purchase, dict)
             and isinstance(stock_rows, list)
             and len(stock_rows) == 1
+            and stock_rows[0].get("item_type") == "TOOL"
+            and stock_rows[0].get("unit_cost_credits") == 5
         )
 
     def build_judging_and_results(self) -> None:
@@ -1439,6 +1671,119 @@ class CoreV2RaceStagingRunner:
         )
         self.ui_checks["runtime_snapshot"] = bool(dashboard_ok and workspace_ok and state_ok)
 
+    def certify_030_reset(self) -> None:
+        """Preview, execute and verify the 030 reset boundary on this disposable event."""
+        event_rows = self._get(
+            "events_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "select": "event_id,join_code,event_payload",
+                "limit": "1",
+            },
+        )
+        if not isinstance(event_rows, list) or len(event_rows) != 1:
+            raise RuntimeError("Disposable event was not available for the 030 reset preview")
+
+        preview_counts = {}
+        for table in (
+            "submissions_v2",
+            "credit_transactions_v2",
+            "marketplace_transactions_v2",
+            "judging_scores_v2",
+            "race_results_v2",
+            "team_access_sessions_v2",
+        ):
+            rows = self._get(table, {"event_id": f"eq.{self.event_id}", "select": "event_id"})
+            preview_counts[table] = len(rows) if isinstance(rows, list) else -1
+        preview_event = event_rows[0]
+        preview_config = (preview_event.get("event_payload") or {}).get("RaceConfiguration", {})
+        preview_submission_ids = self.get_submission_ids_for_event(self.event_id)
+        self.gates["reset_preview"] = bool(
+            preview_event.get("join_code") == self.join_code
+            and {key: preview_config.get(key) for key in self._race_configuration_snapshot}
+            == self._race_configuration_snapshot
+            and all(count > 0 for count in preview_counts.values())
+        )
+        if not self.gates["reset_preview"]:
+            raise RuntimeError("Disposable 030 reset preview did not find the expected live state")
+
+        reset = self._canonical_race_control_adapter().reset_formula_race_event(
+            self.event_id,
+            f"RESET {self.event_id}",
+            "Disposable staging certification",
+        )
+        self.gates["reset_execution"] = bool(
+            isinstance(reset, dict) and reset.get("Reset") and reset.get("EventID") == self.event_id
+        )
+        if not self.gates["reset_execution"]:
+            raise RuntimeError("Migration 030 reset RPC did not confirm execution")
+
+        event_after = self._get(
+            "events_v2",
+            {
+                "event_id": f"eq.{self.event_id}",
+                "select": "event_id,join_code,event_payload",
+                "limit": "1",
+            },
+        )
+        teams_after = self._get("teams_v2", {"event_id": f"eq.{self.event_id}", "select": "team_id"})
+        credentials_after = self._get(
+            "team_access_credentials_v2",
+            {"event_id": f"eq.{self.event_id}", "select": "team_id,is_active"},
+        )
+        marketplace_after = self._get(
+            "marketplace_items_v2",
+            {"event_id": f"eq.{self.event_id}", "select": "item_id,item_payload"},
+        )
+        activities_after = self._get(
+            "activities_v2",
+            {"programme_id": f"eq.{self.programme_id}", "select": "activity_id,activity_payload"},
+        )
+        event_payload_after = (event_after[0].get("event_payload") or {}) if isinstance(event_after, list) and event_after else {}
+        config_after = event_payload_after.get("RaceConfiguration", {})
+        self.gates["reset_configuration_preserved"] = bool(
+            isinstance(event_after, list)
+            and len(event_after) == 1
+            and event_after[0].get("join_code") == self.join_code
+            and {key: config_after.get(key) for key in self._race_configuration_snapshot} == self._race_configuration_snapshot
+            and isinstance(teams_after, list)
+            and len(teams_after) == len(self.team_ids)
+            and isinstance(credentials_after, list)
+            and len(credentials_after) == len(self.team_ids)
+            and isinstance(marketplace_after, list)
+            and any(row.get("item_id") == self.configured_marketplace_item_id for row in marketplace_after)
+            and isinstance(activities_after, list)
+            and len(activities_after) == len(self.activity_ids)
+            and all((row.get("activity_payload") or {}).get("race_station") for row in activities_after)
+        )
+
+        zero_tables = (
+            "projector_state_v2",
+            "race_results_v2",
+            "judging_scores_v2",
+            "build_status_v2",
+            "marketplace_transactions_v2",
+            "credit_transactions_v2",
+            "score_transactions_v2",
+            "activity_runtime_v2",
+            "submissions_v2",
+            "reviews_v2",
+            "team_access_sessions_v2",
+        )
+        zero_state = True
+        for table in zero_tables:
+            rows = self._get(table, {"event_id": f"eq.{self.event_id}", "select": "event_id"})
+            zero_state = zero_state and isinstance(rows, list) and not rows
+        if preview_submission_ids:
+            evidence_rows = self._get(
+                "submission_evidence_v2",
+                {"submission_id": _in_filter(preview_submission_ids), "select": "submission_id"},
+            )
+            zero_state = zero_state and isinstance(evidence_rows, list) and not evidence_rows
+        self.gates["reset_zero_state"] = bool(zero_state)
+        if not (self.gates["reset_configuration_preserved"] and self.gates["reset_zero_state"]):
+            raise RuntimeError("Migration 030 reset did not preserve configuration with a transactional zero-state")
+
     def cleanup(self) -> None:
         submission_rows = self._get(
             "submissions_v2",
@@ -1548,6 +1893,15 @@ class CoreV2RaceStagingRunner:
         print(f"Wrong PIN rejection: {'PASS' if self.gates['wrong_pin_rejection'] else 'FAIL'}")
         print(f"Captain reconnect: {'PASS' if self.gates['captain_reconnect'] else 'FAIL'}")
         print(f"4 checkpoints: {'PASS' if self.gates['four_checkpoints'] else 'FAIL'}")
+        print(f"030 configuration saved: {'PASS' if self.gates['configuration_saved'] else 'FAIL'}")
+        print(f"030 configurable station methods: {'PASS' if self.gates['station_methods'] else 'FAIL'}")
+        print(f"030 per-team routes: {'PASS' if self.gates['team_routes'] else 'FAIL'}")
+        print(f"030 submission-gated progression: {'PASS' if self.gates['submission_gated_progression'] else 'FAIL'}")
+        print(f"030 approval-independent unlock: {'PASS' if self.gates['approval_independent_unlock'] else 'FAIL'}")
+        print(f"030 configurable Credits: {'PASS' if self.gates['configurable_credits'] else 'FAIL'}")
+        print(f"030 marketplace configuration: {'PASS' if self.gates['marketplace_configuration'] else 'FAIL'}")
+        print(f"030 judging configuration: {'PASS' if self.gates['judging_configuration'] else 'FAIL'}")
+        print(f"030 PIN generation/reset: {'PASS' if self.gates['pin_reset'] else 'FAIL'}")
         print(f"Checkpoint submission: {'PASS' if self.gates['checkpoint_submission'] else 'FAIL'}")
         print(f"Facilitator review: {'PASS' if self.gates['facilitator_review'] else 'FAIL'}")
         print(f"Credits ledger: {'PASS' if self.gates['credits_ledger'] else 'FAIL'}")
@@ -1571,6 +1925,10 @@ class CoreV2RaceStagingRunner:
         print(f"Tie handling deterministic: {'PASS' if self.gates['tie_rule_deterministic'] else 'FAIL'}")
         print("RACE premium UI: DEFERRED (UI/UX overhaul; not an engine gate)")
         print(f"RACE UI runtime snapshot: {'PASS' if self.ui_checks['runtime_snapshot'] else 'FAIL'}")
+        print(f"030 reset preview: {'PASS' if self.gates['reset_preview'] else 'FAIL'}")
+        print(f"030 reset execution: {'PASS' if self.gates['reset_execution'] else 'FAIL'}")
+        print(f"030 configuration preserved after reset: {'PASS' if self.gates['reset_configuration_preserved'] else 'FAIL'}")
+        print(f"030 transactional zero-state: {'PASS' if self.gates['reset_zero_state'] else 'FAIL'}")
         print(f"Google Sheets runtime calls: {'YES' if self.gates['google_sheets_runtime_calls'] else 'NO'}")
         print(f"Cleanup: {'PASS' if self.gates['cleanup'] else 'FAIL'}")
         print(f"EventID: {self.event_id}")
@@ -1587,10 +1945,12 @@ class CoreV2RaceStagingRunner:
             self.create_race_event()
             self.create_programme_and_checkpoints()
             self.captain_flow()
-            self.submit_and_review()
+            self.configure_030_architecture()
+            self.certify_030_submission_progression()
             self.marketplace_journey()
             self.build_judging_and_results()
             self.ui_verification()
+            self.certify_030_reset()
             self._assert_no_legacy_runtime_calls()
             return 0
         except Exception as exc:

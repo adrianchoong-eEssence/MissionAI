@@ -267,6 +267,37 @@ def test_premium_ui_is_deferred_and_not_an_engine_gate() -> None:
     assert '"race_premium_ui"' not in gates
 
 
+def test_030_disposable_configuration_and_reset_certification_is_part_of_the_existing_runner() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "def configure_030_architecture" in source
+    assert "def certify_030_submission_progression" in source
+    assert "def certify_030_reset" in source
+    assert "save_formula_race_configuration(" in source
+    assert "formula_race_submit_checkpoint(" in source
+    assert "formula_race_review_checkpoint(" in source
+    assert "reset_formula_race_event(" in source
+    assert "FACILITATOR_SCORE" in source
+    assert "LOWEST_TIME" in source
+    assert "HIGHEST_COUNT" in source
+    assert "SUCCESS_COUNT" in source
+    assert "TeamRoutes" in source
+    assert "Marketplace" in source
+    assert "JudgingCriteria" in source
+    assert "reset_configuration_preserved" in source
+    assert "reset_zero_state" in source
+
+
+def test_030_certification_never_names_the_protected_race_uat_event() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F" not in source
+    assert "RACE4CF0CE" not in source
+    assert "uuid.uuid4().hex[:10].upper()" in source
+    assert "finally:" in source
+    assert "self.cleanup()" in source
+
+
 def test_final_lock_certification_exercises_missing_unverified_tie_and_relock_gates() -> None:
     runner = CoreV2RaceStagingRunner()
     runner.team_ids = [f"TEAM-{idx:02d}" for idx in range(1, 11)]
