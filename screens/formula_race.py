@@ -888,7 +888,9 @@ def event_setup(snapshot, runtime):
                 base_credits = credits_col.number_input("Base Credits", min_value=0, value=int(station.get("BaseCredits", 0) or 0), key=f"race_station_base_credits:{activity_id}")
                 enabled = credits_col.checkbox("Enabled", value=bool(station.get("Enabled", True)), key=f"race_station_enabled:{activity_id}")
                 performance = dict(station.get("PerformanceCredits", {}) or {})
-                if scoring_method in {"LOWEST_TIME", "HIGHEST_COUNT"}:
+                if scoring_method == "FACILITATOR_SCORE":
+                    performance = {"PerScorePoint": st.number_input("Credits per score point", min_value=0, value=int(performance.get("PerScorePoint", 0) or 0), key=f"race_station_score_point_credits:{activity_id}")}
+                elif scoring_method in {"LOWEST_TIME", "HIGHEST_COUNT"}:
                     st.caption("Performance Credits by finishing rank")
                     rank_columns = st.columns(3)
                     rank_credits = dict(performance.get("RankCredits", {}) or {})

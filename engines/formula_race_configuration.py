@@ -72,6 +72,9 @@ def validate_stations(stations: list[dict[str, Any]]) -> list[str]:
         if len(values) != len(set(values)): errors.append(f"{title} values must be unique within the event.")
     for row in rows:
         if row["BaseCredits"] < 0: errors.append(f"{row['ShortCode'] or row['ActivityID']}: Base Credits cannot be negative.")
+        performance = row.get("PerformanceCredits", {})
+        if row["ScoringMethod"] == "FACILITATOR_SCORE" and isinstance(performance, dict) and _number(performance.get("PerScorePoint", 0)) < 0:
+            errors.append(f"{row['ShortCode'] or row['ActivityID']}: Credits per score point cannot be negative.")
         minimum, maximum = row.get("ResultMinimum"), row.get("ResultMaximum")
         if minimum not in (None, "") and maximum not in (None, "") and _number(minimum) > _number(maximum):
             errors.append(f"{row['ShortCode'] or row['ActivityID']}: result minimum exceeds maximum.")
@@ -145,7 +148,10 @@ def rank_verified_results(rows: list[dict[str, Any]], method: str, tie_policy: s
 
 
 def performance_credits(station: dict[str, Any], verified_result: dict[str, Any]) -> int:
-    config = normalise_station(station).get("PerformanceCredits", {})
+    station = normalise_station(station)
+    config = station.get("PerformanceCredits", {})
+    if station["ScoringMethod"] == "FACILITATOR_SCORE" and isinstance(config, dict):
+        return max(0, int(_number(config.get("PerScorePoint", 0)) * _number(verified_result.get("OfficialResult", verified_result.get("official_result", 0)))))
     rank = _text(verified_result.get("Rank", verified_result.get("rank")))
     if isinstance(config, dict) and isinstance(config.get("RankCredits"), dict):
         return int(_number(config["RankCredits"].get(rank, 0)))

@@ -123,7 +123,7 @@ def test_event_setup_station_editor_exposes_the_030_facilitator_controls_and_his
         '"Display Order"', '"Short Code"', '"Display Name"',
         '"Participant Instruction"', '"Facilitator Instruction"',
         '"Scoring Method"', '"Evidence Requirement"', '"Base Credits"',
-        '"Credits per success"',
+        '"Credits per success"', '"Credits per score point"',
     ):
         assert label in source
     assert 'f"Rank {rank} Credits"' in source
