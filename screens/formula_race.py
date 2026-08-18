@@ -1036,6 +1036,15 @@ def event_setup(snapshot, runtime):
         enabled_stations = [row for row in stations if row.get("Enabled")]
         station_ids = [str(row.get("ActivityID", "")) for row in enabled_stations]
         station_labels = {str(row.get("ActivityID", "")): f"{row.get('ShortCode', '')} · {row.get('DisplayName', '')}" for row in enabled_stations}
+        if hasattr(runtime, "get_formula_race_route_reconciliation_preview"):
+            route_preview = runtime.get_formula_race_route_reconciliation_preview(event_id)
+            if route_preview.get("NeedsReconciliation"):
+                st.warning("Saved routes reference retired station IDs. This preview makes no changes; review each proposed route before explicitly saving a reconciliation.")
+                st.dataframe(pd.DataFrame(route_preview.get("Teams", []))[[
+                    "Team", "CurrentRouteActivityIDs", "ResolvedStationNames", "ExpectedRoute", "ProposedReplacementActivityIDs",
+                ]], width="stretch", hide_index=True)
+            else:
+                st.caption("Route integrity check: all saved team routes resolve to the current canonical station ActivityIDs.")
         if st.button("GENERATE BALANCED ROUTES", disabled=not station_ids):
             st.session_state[f"race_planned_routes:{event_id}"] = generate_balanced_routes(ids, station_ids)
         routes = st.session_state.get(f"race_planned_routes:{event_id}", routes)

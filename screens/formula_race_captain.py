@@ -397,6 +397,10 @@ def show_formula_race_captain(runtime_override=None):
     championship=dict(workspace.get("Championship",{}))
     rank=championship.get("Rank",workspace.get("ChampionshipRank",workspace.get("Rank")))
     score=championship.get("Score",workspace.get("ChampionshipScore"))
+    route_configuration_issue=dict(workspace.get("RouteConfigurationIssue", {}))
+    if route_configuration_issue.get("StaleActivityIDs"):
+        st.warning("Race Control is reconciling your configured route. Submissions are temporarily unavailable until the route uses the current stations.")
+        return
     checkpoint_ids={str(row.get("ActivityID", "")) for row in checkpoints}
     selected_id=str(st.session_state.get("race_captain_selected_checkpoint", ""))
     if selected_id not in checkpoint_ids:

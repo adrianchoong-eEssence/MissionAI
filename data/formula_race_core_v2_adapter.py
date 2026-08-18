@@ -25,7 +25,7 @@ from engines.formula_race_championship import (
     validate_championship_components,
 )
 from engines.formula_race_configuration import (
-    current_station, normalise_judging_criteria, normalise_marketplace_item,
+    current_station, generate_balanced_routes, normalise_judging_criteria, normalise_marketplace_item,
     normalise_station, validate_marketplace_items, validate_routes, validate_stations,
 )
 
@@ -602,6 +602,7 @@ class FormulaRaceCoreV2StagingAdapter:
         payload = _as_dict(event.get("event_payload"))
         config = _as_dict(payload.get("RaceConfiguration"))
         config.setdefault("Version", 1)
+        config.setdefault("Stations", [])
         config.setdefault("TeamRoutes", {})
         config.setdefault("JudgingCriteria", [])
         config.setdefault("ChampionshipComponents", [])
@@ -609,23 +610,97 @@ class FormulaRaceCoreV2StagingAdapter:
         return config
 
     def get_formula_race_stations(self, event_id: str, *, activities: list[dict[str, Any]] | None = None, configuration: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Project the event's canonical stations, never a mixture of old and new ones.
+
+        A migration-030 configuration is the authority as soon as it contains a
+        Stations list.  Older activities remain in Core v2 for history, so using
+        the activity list as the primary source would otherwise leak retired
+        CP1--CP4 placeholders into Captain and route editors.
+        """
         config = configuration if configuration is not None else self.get_formula_race_configuration(event_id)
-        configured = {
-            str(row.get("ActivityID", "")): row
-            for row in config.get("Stations", []) if isinstance(row, dict)
-        }
+        activity_rows = list(activities if activities is not None else self._get_checkpoint_activities(event_id))
+        activities_by_id = {str(row.get("activity_id", "")): row for row in activity_rows}
+        configured_rows = [
+            normalise_station(row, position)
+            for position, row in enumerate(config.get("Stations", []) or [], 1)
+            if isinstance(row, dict)
+        ]
+
+        if configured_rows:
+            stations = []
+            for position, configured in enumerate(configured_rows, 1):
+                activity_id = str(configured.get("ActivityID", ""))
+                activity = activities_by_id.get(activity_id, {})
+                payload = _as_dict(activity.get("activity_payload"))
+                stored_station = _as_dict(payload.get("race_station"))
+                stations.append(normalise_station({
+                    **stored_station,
+                    **configured,
+                    "ActivityID": activity_id,
+                }, position))
+            return sorted((row for row in stations if row["Enabled"]), key=lambda row: (row["DisplayOrder"], row["ActivityID"]))
+
         stations = []
-        for position, activity in enumerate(activities if activities is not None else self._get_checkpoint_activities(event_id), 1):
+        for position, activity in enumerate(activity_rows, 1):
             activity_id = str(activity.get("activity_id", ""))
             payload = _as_dict(activity.get("activity_payload"))
+            stored_station = _as_dict(payload.get("race_station"))
             row = normalise_station({
-                **payload, **configured.get(activity_id, {}),
+                **payload, **stored_station,
                 "ActivityID": activity_id,
-                "DisplayName": configured.get(activity_id, {}).get("DisplayName", activity.get("activity_name", "")),
-                "DisplayOrder": configured.get(activity_id, {}).get("DisplayOrder", activity.get("activity_order", position)),
+                "DisplayName": stored_station.get("DisplayName", activity.get("activity_name", "")),
+                "DisplayOrder": stored_station.get("DisplayOrder", activity.get("activity_order", position)),
             }, position)
             stations.append(row)
         return sorted((row for row in stations if row["Enabled"]), key=lambda row: (row["DisplayOrder"], row["ActivityID"]))
+
+    def get_formula_race_route_reconciliation_preview(self, event_id: str) -> dict[str, Any]:
+        """Read-only comparison of stored team routes with canonical stations.
+
+        This intentionally makes no configuration writes.  It gives a
+        facilitator enough evidence to decide whether a separate, explicitly
+        confirmed route reconciliation is needed after station IDs change.
+        """
+        clean_event_id = str(event_id).strip()
+        configuration = self.get_formula_race_configuration(clean_event_id)
+        activities = self._get_checkpoint_activities(clean_event_id)
+        stations = self.get_formula_race_stations(
+            clean_event_id, activities=activities, configuration=configuration,
+        )
+        canonical_ids = [str(row.get("ActivityID", "")) for row in stations]
+        canonical_names = {str(row.get("ActivityID", "")): str(row.get("DisplayName", "")) for row in stations}
+        activity_names: dict[str, str] = {}
+        for activity in activities:
+            activity_id = str(activity.get("activity_id", ""))
+            payload = _as_dict(activity.get("activity_payload"))
+            station = _as_dict(payload.get("race_station"))
+            activity_names[activity_id] = str(station.get("DisplayName", activity.get("activity_name", activity_id)))
+        teams = self.get_runtime_teams(clean_event_id)
+        team_ids = [str(team.get("TeamID", "")) for team in teams]
+        routes = _as_dict(configuration.get("TeamRoutes"))
+        expected_routes = generate_balanced_routes(team_ids, canonical_ids)
+        rows = []
+        for team in teams:
+            team_id = str(team.get("TeamID", ""))
+            current_route = [str(activity_id) for activity_id in routes.get(team_id, [])]
+            expected_route = expected_routes.get(team_id, [])
+            stale_ids = [activity_id for activity_id in current_route if activity_id not in canonical_names]
+            rows.append({
+                "TeamID": team_id,
+                "Team": str(team.get("TeamName", team_id)),
+                "CurrentRouteActivityIDs": current_route,
+                "ResolvedStationNames": [canonical_names.get(activity_id, activity_names.get(activity_id, "UNRESOLVED")) for activity_id in current_route],
+                "ExpectedRoute": expected_route,
+                "ProposedReplacementActivityIDs": expected_route if stale_ids else current_route,
+                "StaleActivityIDs": stale_ids,
+                "NeedsReconciliation": bool(stale_ids),
+            })
+        return {
+            "EventID": clean_event_id,
+            "CanonicalStationActivityIDs": canonical_ids,
+            "Teams": rows,
+            "NeedsReconciliation": any(row["NeedsReconciliation"] for row in rows),
+        }
 
     def save_formula_race_configuration(self, event_id: str, config: dict[str, Any], actor: str) -> dict[str, Any]:
         """Persist generic RACE setup through the migration's guarded RPC."""
@@ -698,23 +773,24 @@ class FormulaRaceCoreV2StagingAdapter:
     def get_formula_race_checkpoints(self, event_id: str) -> dict[str, Any]:
         checkpoints = []
         activities = self._get_checkpoint_activities(event_id)
-        module_id = str((activities[0] or {}).get("module_id", "")) if activities else f"{event_id}-RACE-CHECKPOINTS"
-
-        stations = {station["ActivityID"]: station for station in self.get_formula_race_stations(event_id)}
-        for row in activities:
-            payload = stations.get(str(row.get("activity_id", "")), normalise_station(row.get("activity_payload") or {}))
+        activities_by_id = {str(row.get("activity_id", "")): row for row in activities}
+        stations = self.get_formula_race_stations(event_id, activities=activities)
+        module_id = str((activities_by_id.get(str(stations[0].get("ActivityID", "")), {}) or {}).get("module_id", "")) if stations else f"{event_id}-RACE-CHECKPOINTS"
+        for station in stations:
+            activity_id = str(station.get("ActivityID", ""))
+            row = activities_by_id.get(activity_id, {})
             checkpoints.append(
                 {
-                    "CheckpointID": str(row.get("activity_id", "")),
-                    "ActivityID": str(row.get("activity_id", "")),
-                    "Name": str(row.get("activity_name", "")),
-                    "Credits": payload.get("BaseCredits", 0),
-                    "ProofType": str(payload.get("EvidenceRequirement", "PHOTO_OPTIONAL")),
-                    "Instructions": str(payload.get("ParticipantInstruction", "")),
-                    "ScoringMethod": payload.get("ScoringMethod", "NON_SCORING"),
-                    "ResultLabel": payload.get("ResultLabel", "Result"),
-                    "ResultUnit": payload.get("ResultUnit", ""),
-                    "ImageReference": payload.get("ImageReference", ""),
+                    "CheckpointID": activity_id,
+                    "ActivityID": activity_id,
+                    "Name": station.get("DisplayName", ""),
+                    "Credits": station.get("BaseCredits", 0),
+                    "ProofType": str(station.get("EvidenceRequirement", "PHOTO_OPTIONAL")),
+                    "Instructions": str(station.get("ParticipantInstruction", "")),
+                    "ScoringMethod": station.get("ScoringMethod", "NON_SCORING"),
+                    "ResultLabel": station.get("ResultLabel", "Result"),
+                    "ResultUnit": station.get("ResultUnit", ""),
+                    "ImageReference": station.get("ImageReference", ""),
                     "Status": "AVAILABLE",
                 }
             )
@@ -1041,7 +1117,8 @@ class FormulaRaceCoreV2StagingAdapter:
                     status = mapped
 
         station = normalise_station({
-            **payload, "ActivityID": activity_id, "DisplayName": activity_row.get("activity_name", ""),
+            **payload, **_as_dict(payload.get("race_station")),
+            "ActivityID": activity_id, "DisplayName": _as_dict(payload.get("race_station")).get("DisplayName", activity_row.get("activity_name", "")),
             "DisplayOrder": activity_row.get("activity_order", 0),
         })
         return {
@@ -1089,19 +1166,41 @@ class FormulaRaceCoreV2StagingAdapter:
         team_id = str(row.get("team_id", ""))
 
         activities = self._get_checkpoint_activities(event_id)
-        event_link = _as_dict(row.get("events_v2"))
-        configuration = _as_dict(event_link.get("event_payload")).get("RaceConfiguration") if event_link else None
-        configuration = _as_dict(configuration) if configuration is not None else self.get_formula_race_configuration(event_id)
-        configured_stations = {station["ActivityID"]: station for station in self.get_formula_race_stations(event_id, activities=activities, configuration=configuration)}
-        activity_ids = [str(activity.get("activity_id", "")) for activity in activities if activity.get("activity_id")]
+        # Use the same canonical event payload read by Race Control.  The joined
+        # event row is only session context, never a Captain configuration cache.
+        configuration = self.get_formula_race_configuration(event_id)
+        configured_stations = {
+            station["ActivityID"]: station
+            for station in self.get_formula_race_stations(event_id, activities=activities, configuration=configuration)
+        }
+        activities_by_id = {str(activity.get("activity_id", "")): activity for activity in activities}
+        activity_ids = [activity_id for activity_id in configured_stations if activity_id in activities_by_id]
         runtime_rows = self._get("activity_runtime_v2", {"event_id": f"eq.{event_id}", "team_id": f"eq.{team_id}", "activity_id": _in_filter(activity_ids), "order": "updated_at.desc"}) if activity_ids else []
         runtime_by_activity = {}
         for runtime_row in runtime_rows:
             runtime_by_activity.setdefault(str(runtime_row.get("activity_id", "")), runtime_row)
         checkpoint_state = []
-        for activity in activities:
-            checkpoint = self._checkpoint_payload(activity, runtime_by_activity.get(str(activity.get("activity_id", ""))))
-            checkpoint.update(configured_stations.get(str(activity.get("activity_id", "")), {}))
+        for activity_id, station in configured_stations.items():
+            activity = activities_by_id.get(activity_id, {})
+            checkpoint = self._checkpoint_payload(activity, runtime_by_activity.get(activity_id))
+            # Captain has a presentation schema.  Explicitly translate the
+            # canonical station fields instead of appending differently named
+            # configuration keys that its renderer never reads.
+            checkpoint.update({
+                "ActivityID": activity_id,
+                "Name": station["DisplayName"],
+                "ShortCode": station["ShortCode"],
+                "Credits": station["BaseCredits"],
+                "Instructions": station["ParticipantInstruction"],
+                "FacilitatorInstruction": station["FacilitatorInstruction"],
+                "ProofType": station["EvidenceRequirement"],
+                "EvidenceRequirement": station["EvidenceRequirement"],
+                "ScoringMethod": station["ScoringMethod"],
+                "ResultLabel": station["ResultLabel"],
+                "ResultUnit": station["ResultUnit"],
+                "PerformanceCredits": station["PerformanceCredits"],
+                "ImageReference": station["ImageReference"],
+            })
             checkpoint_state.append(checkpoint)
 
         session_status = "LIVE" if any(row.get("Status") in {"LIVE", "OPEN", "ACTIVE"} for row in checkpoint_state) else "READY"
@@ -1121,6 +1220,8 @@ class FormulaRaceCoreV2StagingAdapter:
         )
         submissions = self._get("submissions_v2", {"event_id": f"eq.{event_id}", "team_id": f"eq.{team_id}", "select": "submission_id,activity_id,submission_status,submission_payload,reviewed_at,reviewed_by,score,submitted_at,created_at", "order": "submitted_at.desc"})
         route = list((configuration.get("TeamRoutes", {}) or {}).get(team_id, []))
+        canonical_station_ids = set(configured_stations)
+        stale_route_ids = [activity_id for activity_id in route if activity_id not in canonical_station_ids]
         submitted_rows = [{"ActivityID": row.get("activity_id"), "Status": row.get("submission_status")} for row in submissions]
         submission_status_by_activity = {}
         for submitted in submissions:
@@ -1129,7 +1230,7 @@ class FormulaRaceCoreV2StagingAdapter:
             submission_status = submission_status_by_activity.get(str(checkpoint.get("ActivityID", "")))
             if submission_status:
                 checkpoint["Status"] = {"APPROVED": "APPROVED", "REJECTED": "REJECTED / RESUBMIT"}.get(submission_status.upper(), "UNDER REVIEW" if submission_status.upper() in {"PENDING", "SUBMITTED"} else submission_status.upper())
-        current_activity_id, next_activity_id = current_station(route, submitted_rows) if route else ("", "")
+        current_activity_id, next_activity_id = current_station(route, submitted_rows) if route and not stale_route_ids else ("", "")
         if route and current_activity_id in route:
             visible_ids = set(route[:route.index(current_activity_id) + 1])
             checkpoint_state = [row for row in checkpoint_state if row["ActivityID"] in visible_ids]
@@ -1146,6 +1247,10 @@ class FormulaRaceCoreV2StagingAdapter:
             "CurrentCheckpoint": current_checkpoint,
             "NextCheckpoint": dict(configured_stations.get(next_activity_id, {})),
             "Route": route,
+            "RouteConfigurationIssue": {
+                "StaleActivityIDs": stale_route_ids,
+                "Message": "Race Control must reconcile this team's saved route to the current station IDs before Captain submission is enabled.",
+            } if stale_route_ids else {},
             "CheckpointRuntime": {"status": session_status},
             "Wallet": wallet,
             "BuildStatus": self._build_status_payload(event_id, team_id),
