@@ -20,6 +20,10 @@ from data.mission_media import (
     get_formula_race_station_reference_url,
     upload_formula_race_station_reference,
 )
+from engines.formula_race_championship import (
+    normalise_championship_components,
+    validate_championship_components,
+)
 from engines.formula_race_configuration import (
     current_station, normalise_judging_criteria, normalise_marketplace_item,
     normalise_station, validate_marketplace_items, validate_routes, validate_stations,
@@ -600,6 +604,8 @@ class FormulaRaceCoreV2StagingAdapter:
         config.setdefault("Version", 1)
         config.setdefault("TeamRoutes", {})
         config.setdefault("JudgingCriteria", [])
+        config.setdefault("ChampionshipComponents", [])
+        config.setdefault("ChampionshipTieBreak", "TEAM_ID")
         return config
 
     def get_formula_race_stations(self, event_id: str, *, activities: list[dict[str, Any]] | None = None, configuration: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -629,13 +635,17 @@ class FormulaRaceCoreV2StagingAdapter:
         station_errors = validate_stations(stations) if stations else []
         marketplace_errors = validate_marketplace_items(config.get("Marketplace", []))
         team_ids = [str(row.get("TeamID", "")) for row in self.get_runtime_teams(event_id)]
+        championship_errors = validate_championship_components(
+            config.get("ChampionshipComponents", []), config.get("JudgingCriteria", []), len(team_ids),
+        )
         enabled_ids = [row["ActivityID"] for row in stations if row["Enabled"]]
         route_errors = validate_routes(config.get("TeamRoutes", {}), team_ids, enabled_ids) if config.get("TeamRoutes") else []
-        if station_errors or marketplace_errors or route_errors:
-            raise RuntimeError("Configuration validation failed: " + " ".join(station_errors + marketplace_errors + route_errors))
+        if station_errors or marketplace_errors or route_errors or championship_errors:
+            raise RuntimeError("Configuration validation failed: " + " ".join(station_errors + marketplace_errors + route_errors + championship_errors))
         if "Stations" in changes: changes["Stations"] = stations
         if "Marketplace" in changes: changes["Marketplace"] = [normalise_marketplace_item(row, index) for index, row in enumerate(config.get("Marketplace", []), 1)]
         if "JudgingCriteria" in changes: changes["JudgingCriteria"] = normalise_judging_criteria(config.get("JudgingCriteria", []))
+        if "ChampionshipComponents" in changes: changes["ChampionshipComponents"] = normalise_championship_components(config.get("ChampionshipComponents", []))
         return self._rpc("exos_v2_formula_race_save_event_configuration", {
             "p_event_id": str(event_id).strip(), "p_configuration": changes,
             "p_actor": str(actor).strip(),
@@ -766,6 +776,13 @@ class FormulaRaceCoreV2StagingAdapter:
                 "order": "ranking_position.asc,team_id.asc",
             },
         )
+        photo_rows = self._get(
+            "race_championship_team_photos_v2",
+            {
+                "event_id": f"eq.{str(event_id).strip()}", "is_current": "eq.true",
+                "select": "team_id,build_activity_id,storage_reference,build_context,submitted_at",
+            },
+        )
         return {
             "Checkpoints": checkpoints,
             "BuildStatus": [{**row, "status": _race_build_display(row)} for row in build_rows],
@@ -780,10 +797,16 @@ class FormulaRaceCoreV2StagingAdapter:
                 }
                 for row in results_rows
             ],
+            "TeamPhotos": [{
+                "team_id": str(row.get("team_id", "")), "build_activity_id": row.get("build_activity_id"),
+                "storage_reference": row.get("storage_reference", ""), "build_context": _as_dict(row.get("build_context")),
+                "submitted_at": row.get("submitted_at"),
+            } for row in photo_rows],
+            "Configuration": self.get_formula_race_configuration(event_id),
             "Teams": list(teams) if teams is not None else self.get_runtime_teams(event_id),
         }
 
-    def get_canonical_transaction_report(self, event_id: str, teams: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    def get_canonical_transaction_report(self, event_id: str, teams: list[dict[str, Any]] | None = None, *, configuration: dict[str, Any] | None = None, include_tie_break: bool = True) -> dict[str, Any]:
         tx_rows = self._get(
             "credit_transactions_v2",
             {
@@ -792,7 +815,9 @@ class FormulaRaceCoreV2StagingAdapter:
                 "order": "created_at.asc",
             },
         )
-        scores = self._get("score_transactions_v2", {"event_id": f"eq.{str(event_id).strip()}", "select": "team_id,score_delta,reason,created_at"})
+        scores = self._get("score_transactions_v2", {"event_id": f"eq.{str(event_id).strip()}", "select": "team_id,score_delta,reason,idempotency_key,source_reference,created_at"})
+        configuration = configuration if configuration is not None else self.get_formula_race_configuration(event_id)
+        race_rows = self._get("race_results_v2", {"event_id": f"eq.{str(event_id).strip()}", "checkpoint": "eq.Race Final", "select": "team_id,ranking_position,locked"}) if include_tie_break else []
 
         balances: dict[str, float] = defaultdict(float)
         credits_earned: dict[str, float] = defaultdict(float)
@@ -818,7 +843,9 @@ class FormulaRaceCoreV2StagingAdapter:
                 pass
         team_ids = {str(row.get("TeamID", "")) for row in (teams if teams is not None else self.get_runtime_teams(event_id))}
         team_ids = sorted((team_ids | set(balances) | set(championship_scores)) - {""})
-        ranked_team_ids = sorted(team_ids, key=lambda team_id: (-championship_scores[team_id], team_id))
+        race_ranks = {str(row.get("team_id", "")): int(row.get("ranking_position") or 10**9) for row in race_rows if bool(row.get("locked", False))}
+        tie_break = str(configuration.get("ChampionshipTieBreak", "TEAM_ID")).upper()
+        ranked_team_ids = sorted(team_ids, key=lambda team_id: (-championship_scores[team_id], race_ranks.get(team_id, 10**9), team_id) if tie_break == "RACE_RANK" else (-championship_scores[team_id], team_id))
         live_ranks = {team_id: index for index, team_id in enumerate(ranked_team_ids, start=1)}
 
         leaderboard = [
@@ -863,6 +890,16 @@ class FormulaRaceCoreV2StagingAdapter:
             ],
             "Leaderboard": leaderboard,
             "ScoreTransactions": scores,
+            "ChampionshipBreakdown": [
+                {
+                    "TeamID": str(row.get("team_id", "")), "ComponentID": str(_as_dict(row.get("source_reference")).get("component_id", "")),
+                    "ComponentType": str(_as_dict(row.get("source_reference")).get("component_type", "")),
+                    "SourceReference": str(_as_dict(row.get("source_reference")).get("source_reference", "")),
+                    "Points": row.get("score_delta", 0),
+                }
+                for row in scores if str(row.get("idempotency_key", "")).startswith("race-championship-component|")
+            ],
+            "ChampionshipTieBreak": tie_break,
         }
 
     # ---------------------------
@@ -1070,11 +1107,18 @@ class FormulaRaceCoreV2StagingAdapter:
         session_status = "LIVE" if any(row.get("Status") in {"LIVE", "OPEN", "ACTIVE"} for row in checkpoint_state) else "READY"
 
         teams = self.get_runtime_teams(event_id)
-        report = self.get_canonical_transaction_report(event_id, teams)
+        report = self.get_canonical_transaction_report(event_id, teams, configuration=configuration, include_tie_break=False)
         standing = next((entry for entry in report.get("Leaderboard", []) if str(entry.get("TeamID", "")) == team_id), {})
         team = next((entry for entry in teams if str(entry.get("TeamID", "")) == team_id), {})
         wallet = {"CreditsEarned": standing.get("CreditsEarned", 0), "CreditsSpent": standing.get("CreditsSpent", 0), "Balance": standing.get("WalletBalance", 0)}
         marketplace = self._marketplace_payload(event_id, team_id)
+        team_photo_rows = self._get(
+            "race_championship_team_photos_v2",
+            {
+                "event_id": f"eq.{event_id}", "team_id": f"eq.{team_id}", "is_current": "eq.true",
+                "select": "team_photo_id,build_activity_id,storage_reference,build_context,submitted_at", "limit": "1",
+            },
+        )
         submissions = self._get("submissions_v2", {"event_id": f"eq.{event_id}", "team_id": f"eq.{team_id}", "select": "submission_id,activity_id,submission_status,submission_payload,reviewed_at,reviewed_by,score,submitted_at,created_at", "order": "submitted_at.desc"})
         route = list((configuration.get("TeamRoutes", {}) or {}).get(team_id, []))
         submitted_rows = [{"ActivityID": row.get("activity_id"), "Status": row.get("submission_status")} for row in submissions]
@@ -1107,6 +1151,8 @@ class FormulaRaceCoreV2StagingAdapter:
             "BuildStatus": self._build_status_payload(event_id, team_id),
             "Marketplace": marketplace.get("items", []),
             "Purchases": marketplace.get("purchases", []),
+            "ChampionshipComponents": configuration.get("ChampionshipComponents", []),
+            "TeamPhoto": dict(team_photo_rows[0]) if team_photo_rows else {},
             "Submissions": [{"SubmissionID": str(item.get("submission_id", "")), "ActivityID": str(item.get("activity_id", "")), "Status": str(item.get("submission_status", "PENDING")), "ResultValue": _as_dict(item.get("submission_payload")).get("result_value", ""), "ResultUnit": _as_dict(item.get("submission_payload")).get("result_unit", ""), "Judge": str(item.get("reviewed_by", "")), "Score": item.get("score", ""), "SubmittedAt": item.get("submitted_at") or item.get("created_at")} for item in submissions],
             "Session": row,
         }
@@ -1268,38 +1314,27 @@ class FormulaRaceCoreV2StagingAdapter:
         return self._post("build_status_v2", payload) or {}
 
     def save_formula_race_judging(self, event_id: str, team_id: str, scores: dict[str, Any], reason: str, actor: str):
-        activities = self._get_checkpoint_activities(event_id)
-        activity_id = str(activities[0].get("activity_id")) if activities else f"{event_id}-CHECKPOINT"
         rows = []
         for dimension, score in (scores or {}).items():
-            existing = self._get(
-                "judging_scores_v2",
-                {
-                    "event_id": f"eq.{str(event_id)}",
-                    "team_id": f"eq.{str(team_id)}",
-                    "activity_id": f"eq.{activity_id}",
-                    "judge_name": f"eq.{str(actor).strip()}",
-                    "score_dimension": f"eq.{str(dimension).strip()}",
-                    "select": "judging_score_id",
-                    "limit": "1",
-                },
-            )
-            payload = {
-                "event_id": str(event_id),
-                "team_id": str(team_id),
-                "activity_id": activity_id,
-                "judge_name": str(actor).strip(),
-                "score_dimension": str(dimension).strip(),
-                "score_value": float(score or 0),
-                "decision": "SUBMITTED",
-                "rationale": str(reason or "").strip(),
-                "recorded_at": _now_iso(),
-            }
-            if existing:
-                rows.append(self._patch("judging_scores_v2", {"judging_score_id": f"eq.{existing[0].get('judging_score_id')}"}, payload) or {})
-            else:
-                rows.append(self._post("judging_scores_v2", payload) or {})
+            rows.append(self._rpc("exos_v2_formula_race_save_judging_score", {
+                "p_event_id": str(event_id), "p_team_id": str(team_id),
+                "p_judge": str(actor).strip(), "p_criterion": str(dimension).strip(),
+                "p_score": float(score or 0), "p_reason": str(reason or "").strip(),
+            }) or {})
         return rows
+
+    def formula_race_submit_team_photo(self, session_token: str, device_id: str, storage_reference: str) -> dict[str, Any]:
+        return self._rpc("exos_v2_formula_race_submit_team_photo", {
+            "p_session_token": _require_uuid(session_token, "session_token"),
+            "p_device_id": str(device_id).strip(), "p_storage_reference": str(storage_reference).strip(),
+        }) or {}
+
+    def get_formula_race_team_photo_url(self, storage_reference: str) -> str:
+        value = str(storage_reference or "")
+        prefix = "supabase://exos-submissions/"
+        if not value.startswith(prefix):
+            return ""
+        return self.runtime.create_submission_image_url(value[len(prefix):])
 
     def save_formula_race_result(self, event_id: str, team_id: str, time_ms: int, penalty_ms: int, bonus: float, verified: bool, reason: str, actor: str):
         activities = self._get_checkpoint_activities(event_id)

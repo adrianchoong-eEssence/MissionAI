@@ -505,6 +505,33 @@ def show_formula_race_captain(runtime_override=None):
         build_track="".join(f"<div class='race-stage {'approved' if index < phase_index else ('selected' if index == phase_index else '')}'>{label}</div>" for index,(_,label) in enumerate(build_phases))
         st.markdown(f"<div class='race-panel'><div class='race-overline'>Garage progress</div><div class='race-panel-title'>{html.escape(phase)}</div><p class='race-subtle'>Build status is updated by Race Control. The next race-ready step is visible to your whole team.</p></div><div class='race-stage-track' style='grid-template-columns:repeat(6,minmax(0,1fr))'>{build_track}</div>",unsafe_allow_html=True)
         st.progress(progress,text=f"{progress}% COMPLETE")
+        photo_component_enabled = any(
+            str(component.get("ComponentType", "")).upper() == "TEAM_PHOTO" and bool(component.get("Enabled", True))
+            for component in workspace.get("ChampionshipComponents", [])
+        )
+        if photo_component_enabled:
+            st.markdown("<div class='race-panel'><div class='race-overline'>Build complete</div><div class='race-panel-title'>Team Photo</div><p class='race-subtle'>Upload one completed-car photo with your team. This private Day 2 submission is separate from checkpoint proof.</p></div>", unsafe_allow_html=True)
+            team_photo = dict(workspace.get("TeamPhoto", {}) or {})
+            if team_photo.get("storage_reference"):
+                photo_url = runtime.get_formula_race_team_photo_url(team_photo["storage_reference"])
+                if photo_url:
+                    st.image(photo_url, caption="Submitted Team Photo", use_container_width=True)
+                st.caption("Team Photo submitted. Upload a replacement only if your facilitator asks for a correction.")
+            team_photo_upload = st.file_uploader("Upload Team Photo", type=["jpg", "jpeg", "png", "webp"], key="race_team_photo_upload")
+            build_complete = phase == "COMPLETED"
+            if not build_complete:
+                st.caption("Team Photo unlocks when Race Control marks the Team Garage build complete.")
+            if st.button("SUBMIT TEAM PHOTO", type="primary", disabled=team_photo_upload is None or not build_complete, key="race_team_photo_submit"):
+                try:
+                    with st.spinner("Submitting Team Photo…"):
+                        payload, content_type, _photo = _optimise_race_photo(team_photo_upload)
+                        storage_path = f"team-photos/{event_id}/{team_id}/{uuid.uuid4()}-{team_photo_upload.name.rsplit('.', 1)[0]}.jpg"
+                        runtime.upload_submission_image(storage_path, payload, content_type)
+                        runtime.formula_race_submit_team_photo(session.get("SessionToken", ""), device, "supabase://exos-submissions/" + storage_path)
+                    st.success("TEAM PHOTO SUBMITTED · Your facilitator can now review it with the configured judging criterion.")
+                    st.rerun()
+                except (RuntimeDatabaseError, RuntimeError) as error:
+                    st.error(_captain_error(error))
         if purchases: st.dataframe([{ "Part":row.get("ItemName",""),"Quantity":row.get("Quantity",0),"Status":row.get("Status","")} for row in purchases],width="stretch",hide_index=True)
         else: st.info("Your collected components will appear here once purchases are confirmed.")
     if captain_section == "Submissions":

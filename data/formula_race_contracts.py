@@ -201,6 +201,9 @@ class LiveFormulaRaceProvider:
             except Exception:
                 captain_status = {}
         leaderboard = {str(row.get("TeamID", "")): row for row in report.get("Leaderboard", [])}
+        if isinstance(operations, dict):
+            operations["ChampionshipBreakdown"] = report.get("ChampionshipBreakdown", [])
+            operations["ChampionshipTieBreak"] = report.get("ChampionshipTieBreak", "TEAM_ID")
         balances = {
             str(row.get("team_id", row.get("TeamID", ""))): row
             for row in report.get("TeamBalances", [])

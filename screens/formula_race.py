@@ -21,6 +21,10 @@ from engines.formula_race_configuration import (
     validate_routes,
     validate_stations,
 )
+from engines.formula_race_championship import (
+    COMPONENT_TYPES, TIE_BREAKS, normalise_championship_component,
+    championship_component_points, normalise_championship_components, validate_championship_components,
+)
 
 
 def _staging_runtime_enabled() -> bool:
@@ -505,7 +509,15 @@ def championship(s, final=False):
     else: _team_rows(s)
     if not final:
         st.subheader("Championship Table")
-        st.dataframe([{"Rank": t.rank, "Team": t.name, "Championship Score": t.score, "Wallet": t.balance, "Build": f"{t.build}%"} for t in s.teams], width="stretch", hide_index=True)
+        components = s.operations.get("Configuration", {}).get("ChampionshipComponents", [])
+        component_names = {str(row.get("ComponentID", "")): str(row.get("DisplayName", "Component")) for row in components}
+        breakdown = s.operations.get("ChampionshipBreakdown", [])
+        rows = []
+        for team in s.teams:
+            values = {component_names.get(str(row.get("ComponentID", "")), str(row.get("ComponentID", ""))): row.get("Points", 0) for row in breakdown if str(row.get("TeamID", "")) == team.id}
+            rows.append({"Rank": team.rank, "Team": team.name, **values, "Total Championship Points": team.score})
+        st.dataframe(rows, width="stretch", hide_index=True)
+        st.caption(f"Tie-break: {s.operations.get('ChampionshipTieBreak', 'TEAM_ID')} · Credits and Wallet are excluded from Championship Points.")
     if final: st.success("Final result locking is available from Race Control after canonical verification.")
 
 
@@ -623,7 +635,7 @@ def race_map(s):
 
 
 def judging(s, control=None):
-    _title("Efficient one-team scoring", "Judging", "Criteria remain dynamic from the certified configuration. Save and correction actions remain audited.")
+    _title("Efficient one-team scoring", "Judging", "Official criterion scores reconcile configured Championship Components without affecting Credits or Marketplace currency.")
     names=[t.name for t in s.teams]
     st.session_state.setdefault("race_judge_index", 0)
     index=min(max(int(st.session_state["race_judge_index"]),0),len(names)-1)
@@ -633,16 +645,41 @@ def judging(s, control=None):
     if p.button("← Previous team",width="stretch"): st.session_state.race_judge_index=(selected_index-1)%len(names); st.rerun()
     if n.button("Next team →",width="stretch"): st.session_state.race_judge_index=(selected_index+1)%len(names); st.rerun()
     total=0.0
-    categories=JUDGING_CATEGORIES if control else tuple(name for name,_ in CRITERIA)
+    configuration = s.operations.get("Configuration", {}) if control else {}
+    configured_criteria = [row for row in configuration.get("JudgingCriteria", []) if row.get("Enabled", True) and row.get("CriterionName")]
+    categories = configured_criteria or ([{"CriterionName": name, "MaximumScore": 10} for name in JUDGING_CATEGORIES] if control else [{"CriterionName": name, "MaximumScore": 10} for name, _ in CRITERIA])
+    selected = next(t for t in s.teams if t.name == team)
+    if control:
+        photo = next((row for row in s.operations.get("TeamPhotos", []) if str(row.get("team_id", "")) == selected.id), {})
+        build = next((row for row in s.operations.get("BuildStatus", []) if str(row.get("team_id", "")) == selected.id), {})
+        st.caption(f"Build status: {build.get('status', 'Not Started')} · Team Photo: {'submitted' if photo else 'not submitted'}")
+        if photo.get("storage_reference"):
+            photo_url = control.runtime.get_formula_race_team_photo_url(photo["storage_reference"])
+            if photo_url:
+                st.image(photo_url, caption=f"{selected.name} · completed-car Team Photo", use_container_width=True)
     scores={}
     for criterion in categories:
-        score=st.slider(criterion,0,10,7,key=f"score_{team}_{criterion}");scores[criterion]=score;total+=score
+        criterion_name = str(criterion.get("CriterionName", ""))
+        maximum = max(1, int(float(criterion.get("MaximumScore", 10) or 10)))
+        score=st.slider(criterion_name,0,maximum,min(7, maximum),key=f"score_{team}_{criterion_name}");scores[criterion_name]=score;total+=score
     st.metric("Total score",f"{total:.1f}"); st.progress((selected_index+1)/len(names),text=f"Judging progress · {selected_index+1} of {len(names)} teams")
+    if control:
+        criterion_maxima = {str(row.get("CriterionName", "")): row.get("MaximumScore", 0) for row in categories}
+        photo_submitted = bool(next((row for row in s.operations.get("TeamPhotos", []) if str(row.get("team_id", "")) == selected.id), {}))
+        subtotal = sum(
+            championship_component_points(
+                component, scores.get(str(component.get("SourceReference", "")), 0),
+                criterion_maxima.get(str(component.get("SourceReference", "")), 0),
+                team_photo_submitted=photo_submitted,
+            )
+            for component in configuration.get("ChampionshipComponents", [])
+            if str(component.get("ComponentType", "")) in {"JUDGING_CRITERION", "TEAM_PHOTO"}
+        )
+        st.metric("Championship subtotal", f"{subtotal:g} points")
     actor=_facilitator_identity(control)
     reason=st.text_input("Submission or correction reason",key="race_judge_reason") if control else ""
     if st.button("Submit score",type="primary",width="stretch",disabled=bool(control and (not actor or not reason))):
         if control:
-            selected=next(t for t in s.teams if t.name==team)
             with st.spinner("Saving score…"):
                 control.save_race_judging(s.event_id,selected.id,scores,reason,actor)
             st.success("Judging score saved with audit history.");_refresh_after_race_control_write()
@@ -829,7 +866,7 @@ def event_setup(snapshot, runtime):
     }
     historical_submissions = runtime.get_canonical_submissions(event_id) or []
     stations_locked = bool(historical_submissions)
-    tabs = st.tabs(["Stations", "Team Routes", "Parts Depot", "Judging", "Teams & Access", "Reset Event"])
+    tabs = st.tabs(["Stations", "Team Routes", "Parts Depot", "Judging", "Championship", "Teams & Access", "Reset Event"])
     with tabs[0]:
         st.subheader("Station editor")
         st.caption("Add, edit, disable and preview stations here. Station content is event-scoped and does not require SQL or source changes.")
@@ -1070,6 +1107,50 @@ def event_setup(snapshot, runtime):
             except RuntimeError as error:
                 st.error(str(error))
     with tabs[4]:
+        st.subheader("Championship Components")
+        st.caption("Configure how official judging, Team Photo and final locked Drag Race results contribute Championship Points. Credits and Marketplace currency are not included.")
+        components_key = f"race_championship_components:{event_id}"
+        if components_key not in st.session_state:
+            st.session_state[components_key] = normalise_championship_components(config.get("ChampionshipComponents", []))
+        components = st.session_state[components_key]
+        criteria_options = [str(row.get("CriterionName", "")) for row in config.get("JudgingCriteria", []) if row.get("Enabled", True) and str(row.get("CriterionName", ""))]
+        if st.button("ADD CHAMPIONSHIP COMPONENT", key=f"race_add_championship_component:{event_id}"):
+            components.append(normalise_championship_component({"DisplayOrder": len(components) + 1, "DisplayName": "New Championship Component", "ComponentType": "JUDGING_CRITERION", "MaximumChampionshipPoints": 0, "SourceReference": criteria_options[0] if criteria_options else "", "Enabled": True}))
+        for index, component in enumerate(components):
+            component_id = str(component.get("ComponentID", ""))
+            with st.container(border=True):
+                st.caption(f"Component {index + 1}")
+                order_col, type_col = st.columns(2)
+                order = order_col.number_input("Display Order", min_value=1, value=int(component.get("DisplayOrder", index + 1)), key=f"race_championship_order:{component_id}")
+                component_type = type_col.selectbox("Component Type", COMPONENT_TYPES, index=COMPONENT_TYPES.index(str(component.get("ComponentType", "JUDGING_CRITERION"))) if str(component.get("ComponentType", "")) in COMPONENT_TYPES else 0, key=f"race_championship_type:{component_id}")
+                display_name = st.text_input("Component Display Name", value=str(component.get("DisplayName", "")), key=f"race_championship_name:{component_id}")
+                maximum = st.number_input("Maximum Championship Points", min_value=0.0, value=float(component.get("MaximumChampionshipPoints", 0) or 0), key=f"race_championship_max:{component_id}")
+                enabled = st.checkbox("Enabled", value=bool(component.get("Enabled", True)), key=f"race_championship_enabled:{component_id}")
+                source = "Race Final"
+                scoring = dict(component.get("ScoringConfiguration", {}) or {})
+                if component_type in {"JUDGING_CRITERION", "TEAM_PHOTO"}:
+                    source = st.selectbox("Source Criterion", criteria_options or ["Configure a Judging criterion first"], index=(criteria_options.index(str(component.get("SourceReference", ""))) if str(component.get("SourceReference", "")) in criteria_options else 0), key=f"race_championship_source:{component_id}")
+                else:
+                    st.caption("Race Championship Points are awarded only from official final-locked Drag Race ranks.")
+                    rank_points = dict(scoring.get("RankPoints", {}) or {})
+                    for offset in range(0, 10, 5):
+                        for rank, column in enumerate(st.columns(5), offset + 1):
+                            rank_points[str(rank)] = column.number_input(f"Rank {rank} points", min_value=0.0, value=float(rank_points.get(str(rank), 0) or 0), key=f"race_championship_rank:{component_id}:{rank}")
+                    scoring = {"RankPoints": rank_points}
+                components[index] = normalise_championship_component({**component, "DisplayOrder": order, "ComponentType": component_type, "DisplayName": display_name, "MaximumChampionshipPoints": maximum, "Enabled": enabled, "SourceReference": source, "ScoringConfiguration": scoring})
+        tie_break = st.selectbox("Overall Championship tie-break", TIE_BREAKS, index=TIE_BREAKS.index(str(config.get("ChampionshipTieBreak", "TEAM_ID"))) if str(config.get("ChampionshipTieBreak", "TEAM_ID")) in TIE_BREAKS else 1, help="RACE_RANK uses the final locked Drag Race position. TEAM_ID is the explicit deterministic fallback.")
+        if st.button("SAVE CHAMPIONSHIP COMPONENTS", type="primary", disabled=not actor):
+            errors = validate_championship_components(components, config.get("JudgingCriteria", []), len(_active_race_teams(runtime, event_id)))
+            if errors:
+                st.error(" ".join(errors))
+            else:
+                try:
+                    runtime.save_formula_race_configuration(event_id, {"ChampionshipComponents": components, "ChampionshipTieBreak": tie_break}, actor)
+                    st.session_state.pop(components_key, None)
+                    _refresh_after_race_control_write()
+                except RuntimeError as error:
+                    st.error(str(error))
+    with tabs[5]:
         teams = _active_race_teams(runtime, event_id)
         st.caption(f"Canonical active teams: {len(teams)}")
         if st.button("GENERATE / RESET CAPTAIN PINS", type="primary", disabled=not actor):
@@ -1084,7 +1165,7 @@ def event_setup(snapshot, runtime):
         if one_time_pins:
             st.download_button("Download one-time Captain PIN list", pd.DataFrame(one_time_pins).to_csv(index=False), "captain-pins-once.csv", "text/csv")
             st.caption("PINs are available only in this generation result. Save the export now; plaintext PINs are not retained.")
-    with tabs[5]:
+    with tabs[6]:
         st.warning("Reset preserves event, teams, configuration, Marketplace catalogue, judging configuration and PIN credentials.")
         if event_id == _PROTECTED_RACE_UAT_EVENT_ID:
             st.subheader("Prepare Event for Configuration")

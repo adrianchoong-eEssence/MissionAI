@@ -110,7 +110,7 @@ def test_event_setup_renders_all_configuration_sections_without_writes(monkeypat
     monkeypatch.setattr(formula_race, "st", stub)
     formula_race.event_setup(SimpleNamespace(event_id="EVT-DISPOSABLE"), runtime)
 
-    assert stub.tab_labels == ["Stations", "Team Routes", "Parts Depot", "Judging", "Teams & Access", "Reset Event"]
+    assert stub.tab_labels == ["Stations", "Team Routes", "Parts Depot", "Judging", "Championship", "Teams & Access", "Reset Event"]
     assert runtime.writes == 0
 
 
