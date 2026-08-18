@@ -16,6 +16,8 @@ SCORING_METHODS = (
     "FACILITATOR_SCORE", "LOWEST_TIME", "HIGHEST_COUNT", "SUCCESS_COUNT", "NON_SCORING",
 )
 EVIDENCE_REQUIREMENTS = ("PHOTO_REQUIRED", "PHOTO_OPTIONAL", "NO_PHOTO")
+RESULT_ENTRY_OWNERS = ("FACILITATOR", "CAPTAIN")
+CAPTAIN_RESULT_METHODS = ("LOWEST_TIME", "HIGHEST_COUNT", "SUCCESS_COUNT")
 MARKETPLACE_CATEGORIES = ("ESSENTIAL", "MATERIAL", "TOOL", "KNOWLEDGE", "CUSTOM")
 TIE_POLICIES = ("SHARED_RANK", "TEAM_ID")
 
@@ -36,6 +38,13 @@ def normalise_station(raw: dict[str, Any], fallback_order: int = 1) -> dict[str,
     raw = dict(raw or {})
     method = _text(raw.get("ScoringMethod", raw.get("scoring_method", "NON_SCORING"))).upper()
     evidence = _text(raw.get("EvidenceRequirement", raw.get("evidence_requirement", "PHOTO_OPTIONAL"))).upper()
+    result_owner = _text(raw.get("ResultEntryOwner", raw.get("result_entry_owner", "FACILITATOR"))).upper()
+    if result_owner not in RESULT_ENTRY_OWNERS:
+        result_owner = "FACILITATOR"
+    # A facilitator score is intrinsically official-only.  NON_SCORING has no
+    # numeric result control, so its owner is retained only as harmless config.
+    if method == "FACILITATOR_SCORE":
+        result_owner = "FACILITATOR"
     result = {
         "ActivityID": _text(raw.get("ActivityID", raw.get("activity_id"))),
         "DisplayOrder": int(_number(raw.get("DisplayOrder", raw.get("display_order", fallback_order)), fallback_order)),
@@ -44,6 +53,7 @@ def normalise_station(raw: dict[str, Any], fallback_order: int = 1) -> dict[str,
         "ParticipantInstruction": _text(raw.get("ParticipantInstruction", raw.get("participant_instruction", raw.get("Instructions", raw.get("instructions"))))),
         "FacilitatorInstruction": _text(raw.get("FacilitatorInstruction", raw.get("facilitator_instruction"))),
         "ScoringMethod": method if method in SCORING_METHODS else "NON_SCORING",
+        "ResultEntryOwner": result_owner,
         "ResultLabel": _text(raw.get("ResultLabel", raw.get("result_label", "Result"))),
         "ResultUnit": _text(raw.get("ResultUnit", raw.get("result_unit"))),
         "ResultMinimum": raw.get("ResultMinimum", raw.get("result_minimum")),
@@ -72,6 +82,8 @@ def validate_stations(stations: list[dict[str, Any]]) -> list[str]:
         if len(values) != len(set(values)): errors.append(f"{title} values must be unique within the event.")
     for row in rows:
         if row["BaseCredits"] < 0: errors.append(f"{row['ShortCode'] or row['ActivityID']}: Base Credits cannot be negative.")
+        if row["ScoringMethod"] == "FACILITATOR_SCORE" and row["ResultEntryOwner"] != "FACILITATOR":
+            errors.append(f"{row['ShortCode'] or row['ActivityID']}: facilitator scores must be entered by a facilitator.")
         performance = row.get("PerformanceCredits", {})
         if row["ScoringMethod"] == "FACILITATOR_SCORE" and isinstance(performance, dict) and _number(performance.get("PerScorePoint", 0)) < 0:
             errors.append(f"{row['ShortCode'] or row['ActivityID']}: Credits per score point cannot be negative.")
@@ -101,6 +113,14 @@ def validate_routes(routes: dict[str, list[str]], team_ids: list[str], station_i
     for team in set((routes or {})) - expected_teams:
         errors.append(f"{team}: route belongs to a team outside this event.")
     return errors
+
+
+def captain_result_entry_method(station: dict[str, Any]) -> str:
+    """Return the numeric control a Captain is explicitly allowed to use."""
+    row = normalise_station(station)
+    if row["ResultEntryOwner"] == "CAPTAIN" and row["ScoringMethod"] in CAPTAIN_RESULT_METHODS:
+        return row["ScoringMethod"]
+    return ""
 
 
 def current_station(route: list[str], submissions: list[dict[str, Any]]) -> tuple[str, str]:

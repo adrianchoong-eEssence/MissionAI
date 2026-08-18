@@ -111,7 +111,7 @@ def test_checkpoint_submission_uses_explicit_race_captain_contract_without_stand
             "submission-key",
     )
     assert result["SubmissionID"] == submission_id
-    assert runtime.calls[0][1] == "rpc/exos_v2_formula_race_submit_checkpoint"
+    assert runtime.calls[0][1] == "rpc/exos_v2_formula_race_submit_station"
 
 
 def test_recovery_sql_deactivates_old_session_and_records_the_takeover():

@@ -12,6 +12,7 @@ import streamlit as st
 
 from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
+from engines.formula_race_configuration import captain_result_entry_method
 
 ASSET_ROOT=Path(__file__).resolve().parents[1]/"Assets"/"race_teams"
 TEAM_ASSETS=json.loads((ASSET_ROOT/"manifest.json").read_text())
@@ -445,7 +446,9 @@ def show_formula_race_captain(runtime_override=None):
                 st.markdown("<div class='race-reference-label'>STATION REFERENCE</div>", unsafe_allow_html=True)
                 st.image(reference_url, use_container_width=True)
         st.markdown(f"<div class='race-panel race-current race-current-detail'><p class='race-subtle'>{html.escape(str(current.get('Instructions','Stand by for the next mission.')))}</p><div class='race-reward'>EARN {html.escape(_display_number(current.get('Credits',0),'0'))} CREDITS</div></div>",unsafe_allow_html=True)
-        if runtime_status!="LIVE": st.info(f"Race Control has checkpoints {runtime_status.lower()}. Your mission will unlock here when it goes live.")
+        if runtime_status!="LIVE":
+            st.info(f"Race Control has checkpoints {runtime_status.lower()}. Your mission will unlock here when it goes live.")
+            return
         current_disabled=runtime_status!="LIVE" or current_status in {"AWAITING REVIEW","APPROVED","SUBMITTED","LOCKED"}
         if current:
             st.markdown("<div class='race-proof'><div class='race-proof-title'>PROOF</div></div>", unsafe_allow_html=True)
@@ -455,11 +458,12 @@ def show_formula_race_captain(runtime_override=None):
             if evidence_requirement != "NO_PHOTO":
                 uploaded=st.file_uploader("Photo evidence" + (" (required)" if evidence_requirement == "PHOTO_REQUIRED" else " (optional)"),type=["jpg","jpeg","png","webp"],disabled=current_disabled,key=f"race_proof_{current.get('ActivityID')}")
             result_value=None
-            if method == "LOWEST_TIME":
+            result_entry_method=captain_result_entry_method(current)
+            if result_entry_method == "LOWEST_TIME":
                 a,b,c=st.columns(3); minutes=a.number_input("Minutes",min_value=0,step=1,disabled=current_disabled,key=f"race_minutes_{current.get('ActivityID')}"); seconds=b.number_input("Seconds",min_value=0,max_value=59,step=1,disabled=current_disabled,key=f"race_seconds_{current.get('ActivityID')}"); milliseconds=c.number_input("Milliseconds",min_value=0,max_value=999,step=1,disabled=current_disabled,key=f"race_milliseconds_{current.get('ActivityID')}"); result_value=int(minutes)*60000+int(seconds)*1000+int(milliseconds)
-            elif method in {"HIGHEST_COUNT", "SUCCESS_COUNT"}:
+            elif result_entry_method in {"HIGHEST_COUNT", "SUCCESS_COUNT"}:
                 result_value=st.number_input(str(current.get("ResultLabel", "Result")),min_value=0,step=1,disabled=current_disabled,key=f"race_result_{current.get('ActivityID')}")
-            elif method == "FACILITATOR_SCORE": st.caption("The station facilitator records the official score. Submit completion evidence only.")
+            elif method != "NON_SCORING": st.caption("The station facilitator records the official result. Submit completion evidence only.")
             answer=st.text_area("Notes for the facilitator",disabled=current_disabled,key=f"race_answer_{current.get('ActivityID')}",height=68)
             if st.button("SUBMIT PROOF",type="primary",disabled=current_disabled,key=f"race_submit_{current.get('ActivityID')}"):
                 storage_reference=""
@@ -473,7 +477,7 @@ def show_formula_race_captain(runtime_override=None):
                             runtime.upload_submission_image(storage_path,payload,content_type)
                             storage_reference="supabase://exos-submissions/"+storage_path
                         activity_id=str(current.get("ActivityID", ""))
-                        runtime.formula_race_submit_checkpoint(session.get("SessionToken",""),device,activity_id,answer,storage_reference,_submission_idempotency_key(event_id,team_id,activity_id),result_value=result_value,result_unit=str(current.get("ResultUnit", "") or "CONFIGURED"))
+                        runtime.formula_race_submit_checkpoint(session.get("SessionToken",""),device,activity_id,answer,storage_reference,_submission_idempotency_key(event_id,team_id,activity_id),result_value=result_value,result_unit=str(current.get("ResultUnit", "") or "CONFIGURED") if result_entry_method else "")
                     next_checkpoint=dict(workspace.get("NextCheckpoint",{})); next_name=str(next_checkpoint.get("DisplayName",next_checkpoint.get("Name","")))
                     st.success("STATION COMPLETE · " + (f"NEXT STOP: {next_name}" if next_name else "Awaiting the next configured stop."));st.rerun()
                 except (RuntimeDatabaseError, RuntimeError) as error: st.error(_captain_error(error))

@@ -788,6 +788,7 @@ class FormulaRaceCoreV2StagingAdapter:
                     "ProofType": str(station.get("EvidenceRequirement", "PHOTO_OPTIONAL")),
                     "Instructions": str(station.get("ParticipantInstruction", "")),
                     "ScoringMethod": station.get("ScoringMethod", "NON_SCORING"),
+                    "ResultEntryOwner": station.get("ResultEntryOwner", "FACILITATOR"),
                     "ResultLabel": station.get("ResultLabel", "Result"),
                     "ResultUnit": station.get("ResultUnit", ""),
                     "ImageReference": station.get("ImageReference", ""),
@@ -1128,6 +1129,7 @@ class FormulaRaceCoreV2StagingAdapter:
             "FacilitatorInstruction": station["FacilitatorInstruction"],
             "ProofType": station["EvidenceRequirement"], "EvidenceRequirement": station["EvidenceRequirement"],
             "ScoringMethod": station["ScoringMethod"], "ResultLabel": station["ResultLabel"],
+            "ResultEntryOwner": station["ResultEntryOwner"],
             "ResultUnit": station["ResultUnit"], "PerformanceCredits": station["PerformanceCredits"],
             "ImageReference": station["ImageReference"],
             "Status": status,
@@ -1196,6 +1198,7 @@ class FormulaRaceCoreV2StagingAdapter:
                 "ProofType": station["EvidenceRequirement"],
                 "EvidenceRequirement": station["EvidenceRequirement"],
                 "ScoringMethod": station["ScoringMethod"],
+                "ResultEntryOwner": station["ResultEntryOwner"],
                 "ResultLabel": station["ResultLabel"],
                 "ResultUnit": station["ResultUnit"],
                 "PerformanceCredits": station["PerformanceCredits"],
@@ -1505,7 +1508,10 @@ class FormulaRaceCoreV2StagingAdapter:
         token = _require_uuid(session_token, "session_token")
         if not str(activity_id).strip():
             raise RuntimeError("Invalid activity id.")
-        rpc_name = "exos_v2_formula_race_submit_station" if result_value is not None or str(result_unit).strip() else "exos_v2_formula_race_submit_checkpoint"
+        # Migration 030 owns all configurable station submissions, including
+        # proof-only ones.  The pre-030 checkpoint RPC has no route or result
+        # ownership contract and must not be selected as a fallback.
+        rpc_name = "exos_v2_formula_race_submit_station"
         payload = {
             "p_session_token": token,
             "p_device_id": str(device_id).strip(),
@@ -1514,8 +1520,7 @@ class FormulaRaceCoreV2StagingAdapter:
             "p_storage_reference": str(storage_reference),
             "p_idempotency_key": str(idempotency_key).strip(),
         }
-        if rpc_name == "exos_v2_formula_race_submit_station":
-            payload.update({"p_result_value": result_value, "p_result_unit": str(result_unit)})
+        payload.update({"p_result_value": result_value, "p_result_unit": str(result_unit)})
         return self._rpc(
             rpc_name,
             payload,

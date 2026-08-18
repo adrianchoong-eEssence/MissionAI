@@ -14,7 +14,7 @@ def test_configurable_architecture_is_generic_and_keeps_standard_out_of_scope():
     assert "exos_v2_formula_race_reconcile_station_ranking" in sql
     assert "exos_v2_formula_race_reset_event" in sql
     assert "CORE-V2-RACE-UAT-EVT-4CF0CEAF5F" in setup
-    assert "NextCheckpoint" in captain and "FACILITATOR_SCORE" in captain
+    assert "NextCheckpoint" in captain and "captain_result_entry_method" in captain
     assert "Event Setup" in setup
     assert "Standard" in sql and "does not alter Standard" in sql
 

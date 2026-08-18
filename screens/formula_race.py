@@ -922,6 +922,14 @@ def event_setup(snapshot, runtime):
                 result_col, credits_col = st.columns(2)
                 result_label = result_col.text_input("Result Label", value=str(station.get("ResultLabel", "Result")), key=f"race_station_result_label:{activity_id}")
                 result_unit = result_col.text_input("Result Unit", value=str(station.get("ResultUnit", "")), key=f"race_station_result_unit:{activity_id}")
+                if scoring_method in {"LOWEST_TIME", "HIGHEST_COUNT", "SUCCESS_COUNT"}:
+                    owners = ["FACILITATOR", "CAPTAIN"]
+                    current_owner = str(station.get("ResultEntryOwner", "FACILITATOR")).upper()
+                    result_entry_owner = result_col.selectbox("Official result entered by", owners, index=owners.index(current_owner) if current_owner in owners else 0, key=f"race_station_result_owner:{activity_id}")
+                else:
+                    result_entry_owner = "FACILITATOR"
+                    if scoring_method == "FACILITATOR_SCORE":
+                        result_col.caption("Official score is entered by the facilitator.")
                 base_credits = credits_col.number_input("Base Credits", min_value=0, value=int(station.get("BaseCredits", 0) or 0), key=f"race_station_base_credits:{activity_id}")
                 enabled = credits_col.checkbox("Enabled", value=bool(station.get("Enabled", True)), key=f"race_station_enabled:{activity_id}")
                 performance = dict(station.get("PerformanceCredits", {}) or {})
@@ -981,6 +989,7 @@ def event_setup(snapshot, runtime):
                         "ParticipantInstruction": participant_instruction,
                         "FacilitatorInstruction": facilitator_instruction,
                         "ScoringMethod": scoring_method,
+                        "ResultEntryOwner": result_entry_owner,
                         "ResultLabel": result_label,
                         "ResultUnit": result_unit,
                         "EvidenceRequirement": evidence_requirement,
