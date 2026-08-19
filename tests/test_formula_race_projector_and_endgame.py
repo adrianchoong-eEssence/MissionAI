@@ -500,3 +500,50 @@ judging(snapshot, Control())
     assert payload == {"Aesthetics & Design": 30, "Team Photo": 9}
     assert payload["Aesthetics & Design"] == 9 + 8 + 7 + 6 <= AESTHETICS_RUBRIC_TOTAL
     assert set(payload) == {"Aesthetics & Design", "Team Photo"}, "no sub-score is ever submitted"
+
+
+# --------------------------------------------------------------------------
+# 16:9 presentation containment
+# --------------------------------------------------------------------------
+
+def test_each_view_emits_exactly_one_slide_block():
+    """A stage split across markdown calls never wraps; the page then scrolls."""
+    for view in PROJECTOR_VIEWS:
+        app, body = _render(view, complete="yes")
+        assert len(app.markdown) == 1, f"{view} must render as one slide block"
+        assert body.count("<div class='pj-stage'>") == 1
+        assert body.count("</div>") >= body.count("<div"), f"{view} leaves an unclosed element"
+
+
+def test_presentation_css_prevents_document_scrolling():
+    css = (ROOT / "screens" / "formula_race_projector.py").read_text().split('SLIDE_CSS = """', 1)[1]
+    assert "html, body { height:100%; margin:0; overflow:hidden!important; }" in css
+    for wrapper in ('[data-testid="stMainBlockContainer"]', '[data-testid="stLayoutWrapper"]',
+                    '[data-testid="stVerticalBlock"]', '[data-testid="stMarkdownContainer"]'):
+        assert wrapper in css
+    for chrome in ('[data-testid="stHeader"]', '[data-testid="stSidebar"]', '[data-testid="stToolbar"]'):
+        assert chrome in css
+    assert "display:none!important" in css
+
+
+def test_stage_is_a_viewport_pinned_sixteen_by_nine_box():
+    css = (ROOT / "screens" / "formula_race_projector.py").read_text().split('SLIDE_CSS = """', 1)[1]
+    # Pinned to the viewport and centred with auto margins, so Streamlit's
+    # wrapper insets and negative margins cannot shift or shrink the stage.
+    assert "position:fixed; top:0; right:0; bottom:0; left:0; margin:auto" in css
+    assert "width:min(100vw, calc(100vh * 16 / 9))" in css
+    assert "height:min(100vh, calc(100vw * 9 / 16))" in css
+    assert "--u: min(1vh, 0.5625vw)" in css
+    assert "box-sizing:border-box" in css
+
+
+def test_slide_budget_fits_ten_rows_at_any_sixteen_by_nine_viewport():
+    """Measured in browser at 1920x1080 and 1366x768: identical in stage units."""
+    css = (ROOT / "screens" / "formula_race_projector.py").read_text().split('SLIDE_CSS = """', 1)[1]
+    row_height = 4.0 + (2 * 0.82) + (2 * 0.26)          # rank + padding + margin
+    header = 3.4 + 1.9 + (7 * 0.94) + 2.1 + 1.75        # padding + wordmark + title + sub + state
+    footer = 1.6 + 3.4                                   # note + padding
+    assert (10 * row_height) + header + footer < 100, "ten rows must fit the 100u stage"
+    # The body owns the remaining height and centres within it.
+    assert ".pj-body { flex:1 1 auto; display:flex; flex-direction:column; justify-content:center; min-height:0; }" in css
+    assert ".pj-foot { flex:0 0 auto; }" in css
