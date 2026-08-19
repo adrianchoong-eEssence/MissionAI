@@ -157,6 +157,11 @@ def _resolve_event_from_join_code(runtime, join_code: str) -> str:
         return ""
 
 
+def build_formula_race_runtime():
+    """Public entry for surfaces outside Race Control (the projector views)."""
+    return _build_formula_race_runtime()
+
+
 def _build_formula_race_runtime():
     runtime = st.session_state.get("formula_race_runtime")
     if runtime is None:
@@ -430,6 +435,18 @@ def _pending_reviews(snapshot: RaceSnapshot) -> int:
     return sum(item.status.upper() in {"PENDING", "PENDING_REVIEW", "SUBMITTED"} for item in snapshot.submissions)
 
 
+def _projector_links(event_id: str) -> None:
+    """Read-only projector surfaces, opened without typing a URL."""
+    st.subheader("Projector")
+    st.caption("Read-only displays for the room. No editing controls are exposed on these views.")
+    for column, (label, view) in zip(st.columns(3), (
+        ("PERFORMANCE CREDITS", "credits"),
+        ("CHAMPIONSHIP SCORING", "criteria"),
+        ("CHAMPIONSHIP STANDINGS", "standings"),
+    )):
+        column.link_button(label, f"?view={view}&event_id={event_id}", width="stretch")
+
+
 def _facilitator_identity(control=None) -> str:
     """Persist the existing audit identity for this browser session only."""
     if not control:
@@ -526,6 +543,7 @@ def championship(s, final=False):
             rows.append({"Rank": team.rank, "Team": team.name, **values, "Total Championship Points": team.score})
         st.dataframe(rows, width="stretch", hide_index=True)
         st.caption(f"Tie-break: {s.operations.get('ChampionshipTieBreak', 'TEAM_ID')} · Credits and Wallet are excluded from Championship Points.")
+        _projector_links(s.event_id)
     if final: st.success("Final result locking is available from Race Control after canonical verification.")
 
 
@@ -685,6 +703,15 @@ def race_map(s):
     a,b,c=st.columns(3); a.metric("Track status","CLEAR"); b.metric("Marshal posts","4 / 4"); c.metric("Next heat","12:15")
 
 
+def _select_judging_team(names: list[str], index: int) -> None:
+    """Move the judging cursor and the keyed selectbox to the same team."""
+    if not names:
+        return
+    position = index % len(names)
+    st.session_state["race_judge_index"] = position
+    st.session_state["judge_team"] = names[position]
+
+
 def judging(s, control=None):
     _title("Efficient one-team scoring", "Judging", "Official criterion scores reconcile configured Championship Components without affecting Credits or Marketplace currency.")
     names=[t.name for t in s.teams]
@@ -693,8 +720,10 @@ def judging(s, control=None):
     team=st.selectbox("Select team",names,index=index,key="judge_team")
     selected_index=names.index(team)
     p,n=st.columns(2)
-    if p.button("← Previous team",width="stretch"): st.session_state.race_judge_index=(selected_index-1)%len(names); st.rerun()
-    if n.button("Next team →",width="stretch"): st.session_state.race_judge_index=(selected_index+1)%len(names); st.rerun()
+    # The selectbox is keyed, so its session value wins over `index`; move both
+    # together or the navigation buttons cannot change the judged team.
+    if p.button("← Previous team",width="stretch"): _select_judging_team(names,selected_index-1); st.rerun()
+    if n.button("Next team →",width="stretch"): _select_judging_team(names,selected_index+1); st.rerun()
     total=0.0
     configuration = s.operations.get("Configuration", {}) if control else {}
     configured_criteria = [row for row in configuration.get("JudgingCriteria", []) if row.get("Enabled", True) and row.get("CriterionName")]
@@ -733,6 +762,8 @@ def judging(s, control=None):
         if control:
             with st.spinner("Saving score…"):
                 control.save_race_judging(s.event_id,selected.id,scores,reason,actor)
+            # Advance so ten teams are judged without re-selecting each one.
+            _select_judging_team(names,selected_index+1)
             st.success("Judging score saved with audit history.");_refresh_after_race_control_write()
         else: st.session_state.judge_confirm=f"Demo score {total:.1f} prepared for {team}"
     if st.session_state.get("judge_confirm"): st.success(st.session_state.judge_confirm+". No canonical Judge Score was written.")
@@ -833,11 +864,8 @@ def control_centre(s, control=None):
         } for item in marketplace["items"]], width="stretch", hide_index=True)
     st.subheader("Broadcast")
     msg=st.text_input("Broadcast message",placeholder="Message all participant and projector views")
-    a,b=st.columns(2)
-    with a:
-        if st.button("PREVIEW BROADCAST",disabled=not msg,width="stretch"): st.toast("DEMO ONLY · broadcast previewed")
-    with b:
-        st.link_button("OPEN PROJECTOR", f"?view=projector&event_id={s.event_id}", width="stretch")
+    if st.button("PREVIEW BROADCAST",disabled=not msg,width="stretch"): st.toast("DEMO ONLY · broadcast previewed")
+    _projector_links(s.event_id)
     st.subheader("Recovery")
     recovery_team=st.selectbox("Captain recovery team",[t.name for t in s.teams],key="leader_team")
     st.info(f"{recovery_team} uses the existing Captain PIN recovery journey. Race Control does not create or alter Captain credentials.")

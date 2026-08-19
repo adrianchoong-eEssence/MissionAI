@@ -236,13 +236,27 @@ def _submission_idempotency_key(event_id: str, team_id: str, activity_id: str) -
     return key
 
 
-def _purchase_idempotency_key(event_id: str, team_id: str, item_id: str, quantity: int) -> str:
-    key_name=f"race_purchase_key:{event_id}:{team_id}:{item_id}:{int(quantity)}"
-    key=str(st.session_state.get(key_name,""))
-    if not key:
-        key=f"race-captain-purchase:{event_id}:{team_id}:{item_id}:{int(quantity)}:{uuid.uuid4()}"
-        st.session_state[key_name]=key
-    return key
+def _completed_purchase_count(purchases: list[dict[str, Any]], item_id: str) -> int:
+    """Count this team's canonical completed purchases of one part."""
+    wanted = str(item_id).strip()
+    return sum(
+        1 for row in purchases or []
+        if str(row.get("ItemID", "")).strip() == wanted
+        and str(row.get("Status", "COMPLETED")).strip().upper() in {"COMPLETED", ""}
+    )
+
+
+def _purchase_idempotency_key(event_id: str, team_id: str, item_id: str, quantity: int, completed: int = 0) -> str:
+    """Derive the purchase key from canonical history, never from session state.
+
+    The key has to absorb a double submit or a network retry of ONE click while
+    still letting a team legitimately buy the same part again.  An unchanged
+    workspace therefore yields an unchanged key -- the RPC answers a repeat with
+    Duplicate and deducts nothing -- and the next confirmed purchase advances it.
+    A session-scoped key could not do both, and lost its protection entirely on
+    reconnect.
+    """
+    return f"race-captain-purchase:{event_id}:{team_id}:{item_id}:{int(quantity)}:{int(completed) + 1}"
 
 
 def _optimise_race_photo(uploaded) -> tuple[bytes, str, dict[str, Any]]:
@@ -552,7 +566,8 @@ def show_formula_race_captain(runtime_override=None):
                 if st.button(f"BUY {str(item.get('ItemName','PART')).upper()}",key=f"race_buy_{position}_{item.get('ItemID')}",disabled=not can_buy,width="stretch"):
                     try:
                         item_id=str(item.get("ItemID", ""))
-                        with st.spinner("Purchasing…"): result=runtime.formula_race_purchase(session.get("SessionToken",""),device,item_id,1,_purchase_idempotency_key(event_id,team_id,item_id,1))
+                        purchase_key=_purchase_idempotency_key(event_id,team_id,item_id,1,_completed_purchase_count(purchases,item_id))
+                        with st.spinner("Purchasing…"): result=runtime.formula_race_purchase(session.get("SessionToken",""),device,item_id,1,purchase_key)
                         st.success(f"PURCHASE CONFIRMED · Wallet balance: {_display_number(result.get('Balance',0))}");st.rerun()
                     except (RuntimeDatabaseError,RuntimeError) as error:st.error(_captain_error(error,item,wallet.get("Balance")))
         if purchases:
