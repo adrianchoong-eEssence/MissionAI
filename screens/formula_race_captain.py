@@ -557,11 +557,12 @@ def show_formula_race_captain(runtime_override=None):
                 description = str(item.get("Description", "") or "")
                 if description:
                     st.caption(description)
-                image_reference = str(item.get("ImageReference", "") or "")
-                if image_reference:
-                    image_url = runtime.get_formula_race_station_reference_image_url(image_reference)
-                    if image_url:
-                        st.image(image_url, caption=str(item.get("ItemName", "Part")), use_container_width=True)
+                # Parts Depot leads with name, price and the buy control. Item
+                # imagery is deliberately not requested here; the configured
+                # ImageReference is untouched and still available to Race Control.
+                owned=_completed_purchase_count(purchases,str(item.get("ItemID", "")))
+                if owned:
+                    st.caption(f"Your team already owns {owned}")
                 can_buy=bool(item.get("Active",True)) and float(wallet.get("Balance",0) or 0)>=float(item.get("CreditCost",0) or 0)
                 if st.button(f"BUY {str(item.get('ItemName','PART')).upper()}",key=f"race_buy_{position}_{item.get('ItemID')}",disabled=not can_buy,width="stretch"):
                     try:

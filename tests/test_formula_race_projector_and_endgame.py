@@ -5,10 +5,14 @@ Leaderboard; none of these tests touch a live event.
 """
 from __future__ import annotations
 
-import os
+import html
+import re
 from pathlib import Path
 
-from engines.formula_race_championship import championship_component_points, normalise_championship_component
+from engines.formula_race_championship import (
+    AESTHETICS_RUBRIC, AESTHETICS_RUBRIC_TOTAL, SCORING_ANCHORS, aesthetics_total,
+    championship_component_points, normalise_championship_component, uses_aesthetics_rubric,
+)
 from screens.formula_race_captain import _completed_purchase_count, _purchase_idempotency_key
 from screens.formula_race_projector import PROJECTOR_VIEWS, _championship_is_complete
 
@@ -132,21 +136,33 @@ def test_championship_criteria_projector_renders_the_configured_model():
 
 
 def test_incomplete_championship_is_never_presented_as_a_final_ranking():
+    """No provisional order reaches the room while scores are being entered."""
     app, body = _render("standings", complete="no")
-    assert "Championship in progress" in body
+    assert "in progress" in body
+    assert "Final standings will be revealed after the Drag Race" in body
     assert "FINAL CHAMPIONSHIP STANDINGS" not in body.upper()
-    assert "not the final classification" in body
+    for _, name in TEAMS:
+        assert name not in body, "an unfinished championship must not leak team positions"
+    assert "class='pj-row" not in body
+    _no_admin_controls(app)
+
+
+def test_explicit_holding_view_never_shows_scores():
+    app, body = _render("holding", complete="yes")
+    assert "in progress" in body
+    for _, name in TEAMS:
+        assert name not in body
     _no_admin_controls(app)
 
 
 def test_completed_championship_shows_final_standings_with_component_columns():
     app, body = _render("standings", complete="yes")
     assert "Final Championship Standings" in body
-    assert "Championship in progress" not in body
+    assert "Judging in progress" not in body
     for label in ("Aesthetics &amp; Design", "Team Photo", "Drag Race Speed"):
         assert label in body
-    assert "Total / 100" in body
-    # Top three are visually distinct.
+    assert "Points / 100" in body
+    # Top three are visually prominent.
     for position in ("p1", "p2", "p3"):
         assert f"pj-row {position}" in body
     _no_admin_controls(app)
@@ -161,9 +177,10 @@ def test_standings_projector_uses_the_canonical_leaderboard_order():
 
 
 def test_projector_views_are_declared_for_navigation():
-    assert PROJECTOR_VIEWS == ("credits", "criteria", "standings")
+    assert PROJECTOR_VIEWS == ("credits", "criteria", "holding", "standings")
     race_control = (ROOT / "screens" / "formula_race.py").read_text()
-    for label, view in (("PERFORMANCE CREDITS", "credits"), ("CHAMPIONSHIP SCORING", "criteria"), ("CHAMPIONSHIP STANDINGS", "standings")):
+    for label, view in (("PERFORMANCE CREDITS", "credits"), ("CHAMPIONSHIP SCORING", "criteria"),
+                        ("CHAMPIONSHIP IN PROGRESS", "holding"), ("CHAMPIONSHIP STANDINGS", "standings")):
         assert f'("{label}", "{view}")' in race_control
     assert 'f"?view={view}&event_id={event_id}"' in race_control
     # The dead Standard-projector link is gone, and the links are reachable from
@@ -187,9 +204,126 @@ def test_championship_completeness_requires_every_component_for_every_team():
     assert _championship_is_complete(Partial(), EVENT, [], team_ids) is False
 
 
+def test_every_projector_view_is_a_sixteen_by_nine_presentation_stage():
+    for view in PROJECTOR_VIEWS:
+        app, body = _render(view, complete="yes")
+        assert "--u: min(1vh, 0.5625vw)" in body, f"{view} is not sized against a 16:9 stage"
+        assert "calc(100vh * 16 / 9)" in body and "calc(100vw * 9 / 16)" in body
+        assert "class='pj-stage'" in body
+        # No dashboard chrome and no page scrolling.
+        assert 'data-testid="stSidebar"], [data-testid="stToolbar"]' in body
+        assert "overflow:hidden!important" in body
+        # Typography scales with the stage; nothing is pinned to a pixel size.
+        assert not re.search(r"font(?:-size)?\s*:\s*[^;]*\b\d+px", body.split("</style>")[0]), f"{view} pins a pixel font size"
+        _no_admin_controls(app)
+
+
+def test_credits_and_standings_refresh_without_javascript():
+    from screens import formula_race_projector as projector
+    source = (ROOT / "screens" / "formula_race_projector.py").read_text()
+    assert "@st.fragment(run_every=REFRESH_SECONDS)" in source
+    assert 0 < projector.REFRESH_SECONDS <= 60
+    assert "<script" not in source and "components.html" not in source
+
+
+def test_projector_module_never_writes():
+    source = (ROOT / "screens" / "formula_race_projector.py").read_text()
+    for mutation in ("save_", "_rpc(", "formula_race_purchase", "review_race_checkpoint",
+                     "lock_race_results", "st.button", "st.form"):
+        assert mutation not in source, f"projector must not reach {mutation}"
+
+
+# --------------------------------------------------------------------------
+# Aesthetics rubric — operator assistance, one canonical score
+# --------------------------------------------------------------------------
+
+def test_four_aesthetics_dimensions_total_exactly_forty():
+    assert len(AESTHETICS_RUBRIC) == 4
+    assert [maximum for _, maximum, _ in AESTHETICS_RUBRIC] == [10, 10, 10, 10]
+    assert AESTHETICS_RUBRIC_TOTAL == 40
+    assert [name for name, _, _ in AESTHETICS_RUBRIC] == [
+        "Craftsmanship & Finish", "Creative Design", "Visual Impact & Branding", "Design Integration",
+    ]
+
+
+def test_aesthetics_total_is_the_sum_and_each_dimension_is_capped_at_ten():
+    perfect = {name: 10 for name, _, _ in AESTHETICS_RUBRIC}
+    assert aesthetics_total(perfect) == 40
+    assert aesthetics_total({name: 99 for name, _, _ in AESTHETICS_RUBRIC}) == 40, "a dimension cannot exceed 10"
+    assert aesthetics_total({name: -5 for name, _, _ in AESTHETICS_RUBRIC}) == 0
+    assert aesthetics_total({"Craftsmanship & Finish": 9, "Creative Design": 7,
+                             "Visual Impact & Branding": 6, "Design Integration": 8}) == 30
+    assert aesthetics_total({}) == 0
+
+
+def test_rubric_is_offered_only_for_the_configured_forty_point_criterion():
+    assert uses_aesthetics_rubric({"CriterionName": "Aesthetics & Design", "MaximumScore": 40}) is True
+    assert uses_aesthetics_rubric({"CriterionName": "Team Photo", "MaximumScore": 10}) is False
+    assert uses_aesthetics_rubric({"CriterionName": "Aesthetics & Design", "MaximumScore": 20}) is False
+
+
+def test_canonical_submission_receives_only_the_summed_forty():
+    """The four inputs are operator assistance; one canonical score is saved."""
+    source = (ROOT / "screens" / "formula_race.py").read_text()
+    block = source.split("def judging(", 1)[1].split("def drag_results", 1)[0]
+    assert "score = aesthetics_total(sub_scores)" in block
+    assert "scores[criterion_name]=score" in block
+    # One save per configured criterion, unchanged contract.
+    assert "control.save_race_judging(s.event_id,selected.id,scores,reason,actor)" in block
+    assert "ChampionshipComponents" not in block.split("st.button(\"Submit score\"", 1)[-1]
+    adapter = (ROOT / "data" / "formula_race_core_v2_adapter.py").read_text()
+    judging_save = adapter.split("def save_formula_race_judging", 1)[1].split("def formula_race_submit_team_photo", 1)[0]
+    assert "exos_v2_formula_race_save_judging_score" in judging_save
+    assert "p_score" in judging_save and "sub_score" not in judging_save
+
+
+def test_scoring_anchors_are_visible_to_the_judge():
+    assert [band for band, _ in SCORING_ANCHORS] == ["9–10", "7–8", "5–6", "3–4", "1–2"]
+    block = (ROOT / "screens" / "formula_race.py").read_text().split("def judging(", 1)[1]
+    assert "SCORING_ANCHORS" in block
+
+
+def test_component_maxima_remain_forty_ten_fifty_of_one_hundred():
+    maxima = {row["DisplayName"]: row["MaximumChampionshipPoints"] for row in COMPONENTS}
+    assert maxima == {"Aesthetics & Design": 40, "Team Photo": 10, "Drag Race Speed": 50}
+    assert sum(maxima.values()) == 100
+
+
+def test_criteria_projector_explains_forty_ten_and_fifty():
+    _, body = _render("criteria")
+    assert "100 points" in body
+    for points in ("40 points", "10 points", "50 points"):
+        assert points in body
+    for dimension, maximum, _ in AESTHETICS_RUBRIC:
+        assert html.escape(dimension) in body
+    for bullet in ("Clean construction", "Originality", "Colour coordination", "Cohesive overall design"):
+        assert bullet in body
+    for bullet in ("Team participation", "Energy", "Overall presentation"):
+        assert bullet in body
+    for points in RANK_POINTS.values():
+        assert f"<b>{points}</b>" in body
+
+
 # --------------------------------------------------------------------------
 # Marketplace purchase
 # --------------------------------------------------------------------------
+
+def test_captain_parts_depot_no_longer_requests_item_imagery():
+    captain = (ROOT / "screens" / "formula_race_captain.py").read_text()
+    depot = captain.split('if captain_section == "Wallet & Marketplace"', 1)[1].split('if captain_section == "Build"', 1)[0]
+    assert "st.image" not in depot
+    assert 'item.get("ImageReference"' not in depot
+    assert "get_formula_race_station_reference_image_url" not in depot
+    # Name, price, owned quantity and the buy control remain.
+    assert "ItemName" in depot and "CreditCost" in depot
+    assert "already owns" in depot
+    assert "formula_race_purchase" in depot
+
+
+def test_marketplace_configuration_and_prices_are_untouched_by_the_captain():
+    captain = (ROOT / "screens" / "formula_race_captain.py").read_text()
+    assert "save_formula_race_configuration" not in captain
+    assert "CreditCost=" not in captain
 
 def test_repeat_purchase_of_the_same_part_is_allowed():
     """CLICK 1 buys; after it lands, CLICK 2 is a distinct legitimate purchase."""
@@ -309,3 +443,60 @@ def test_championship_reconciliation_is_idempotent_and_excludes_credits():
     assert "update public.score_transactions_v2 set score_delta=0" in reconcile
     assert "on conflict(event_id,idempotency_key) do update" in reconcile
     assert "credit_transactions_v2" not in reconcile
+
+
+def test_judging_screen_renders_four_ten_point_inputs_and_submits_one_forty():
+    """Render the real judging screen and prove the canonical payload."""
+    from streamlit.testing.v1 import AppTest
+    script = f'''
+import streamlit as st
+from types import SimpleNamespace
+from screens.formula_race import judging
+
+TEAMS = {TEAMS!r}
+COMPONENTS = {COMPONENTS!r}
+saved = {{}}
+
+class Control:
+    runtime = SimpleNamespace(get_formula_race_team_photo_url=lambda ref: "")
+    def save_race_judging(self, event_id, team_id, scores, reason, actor):
+        saved.update({{"team_id": team_id, "scores": dict(scores), "actor": actor, "reason": reason}})
+        st.session_state["saved_payload"] = saved
+
+snapshot = SimpleNamespace(
+    event_id="{EVENT}",
+    teams=[SimpleNamespace(id=t, name=n) for t, n in TEAMS],
+    operations={{"Configuration": {{
+        "JudgingCriteria": [
+            {{"CriterionName": "Aesthetics & Design", "MaximumScore": 40, "Enabled": True}},
+            {{"CriterionName": "Team Photo", "MaximumScore": 10, "Enabled": True}},
+        ],
+        "ChampionshipComponents": COMPONENTS,
+    }}, "TeamPhotos": [], "BuildStatus": []}},
+)
+judging(snapshot, Control())
+'''
+    app = AppTest.from_string(script, default_timeout=90)
+    app.run()
+    assert not app.exception, [str(e.value) for e in app.exception]
+
+    labels = [widget.label for widget in app.number_input]
+    assert labels == [f"{dimension} /{maximum}" for dimension, maximum, _ in AESTHETICS_RUBRIC]
+    for widget in app.number_input:
+        assert widget.max == 10, "an Aesthetics dimension cannot exceed 10"
+    # Team Photo keeps its own /10 slider; Aesthetics no longer uses one.
+    assert [slider.label for slider in app.slider] == ["Team Photo"]
+    assert app.slider[0].max == 10
+
+    for widget, value in zip(app.number_input, (9, 8, 7, 6)):
+        widget.set_value(value)
+    app.slider[0].set_value(9)
+    app.text_input(key="race_control_operator").set_value("Disposable Judge")
+    app.text_input(key="race_judge_reason").set_value("Disposable UAT")
+    app.run()
+    app.button[2].click().run()  # Submit score, after the two navigation buttons
+
+    payload = app.session_state["saved_payload"]["scores"]
+    assert payload == {"Aesthetics & Design": 30, "Team Photo": 9}
+    assert payload["Aesthetics & Design"] == 9 + 8 + 7 + 6 <= AESTHETICS_RUBRIC_TOTAL
+    assert set(payload) == {"Aesthetics & Design", "Team Photo"}, "no sub-score is ever submitted"

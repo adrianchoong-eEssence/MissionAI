@@ -9,6 +9,35 @@ import uuid
 COMPONENT_TYPES = ("JUDGING_CRITERION", "TEAM_PHOTO", "RACE_RANK")
 TIE_BREAKS = ("RACE_RANK", "TEAM_ID")
 
+# Judging guidance only.  These dimensions reduce facilitator subjectivity and
+# are summed into the ONE canonical criterion score; they are never stored as
+# separate judging rows and never become separate Championship Components.
+AESTHETICS_RUBRIC = (
+    ("Craftsmanship & Finish", 10, ("Clean construction", "Neat joins", "Finishing quality", "Attention to detail")),
+    ("Creative Design", 10, ("Originality", "Imaginative use of materials", "Distinctive concept")),
+    ("Visual Impact & Branding", 10, ("Colour coordination", "Overall visual appearance", "Team/car identity", "Branding")),
+    ("Design Integration", 10, ("Cohesive overall design", "Parts work together visually", "Intentional rather than assembled randomly")),
+)
+AESTHETICS_RUBRIC_TOTAL = sum(maximum for _, maximum, _ in AESTHETICS_RUBRIC)
+SCORING_ANCHORS = (
+    ("9–10", "Outstanding"), ("7–8", "Strong"), ("5–6", "Competent"),
+    ("3–4", "Basic"), ("1–2", "Poor / incomplete"),
+)
+
+
+def uses_aesthetics_rubric(criterion: dict[str, Any]) -> bool:
+    """Offer the rubric only for the configured criterion it was written for."""
+    name = _text((criterion or {}).get("CriterionName")).casefold()
+    return "aesthetic" in name and _number((criterion or {}).get("MaximumScore", 0)) == AESTHETICS_RUBRIC_TOTAL
+
+
+def aesthetics_total(sub_scores: dict[str, Any]) -> float:
+    """Sum the rubric dimensions into the canonical criterion score."""
+    total = 0.0
+    for name, maximum, _ in AESTHETICS_RUBRIC:
+        total += min(max(_number((sub_scores or {}).get(name, 0)), 0.0), float(maximum))
+    return total
+
 
 def _text(value: Any) -> str:
     return str(value or "").strip()

@@ -24,8 +24,9 @@ from engines.formula_race_configuration import (
     validate_stations,
 )
 from engines.formula_race_championship import (
-    COMPONENT_TYPES, TIE_BREAKS, normalise_championship_component,
-    championship_component_points, normalise_championship_components, validate_championship_components,
+    AESTHETICS_RUBRIC, COMPONENT_TYPES, SCORING_ANCHORS, TIE_BREAKS, aesthetics_total,
+    normalise_championship_component, championship_component_points,
+    normalise_championship_components, uses_aesthetics_rubric, validate_championship_components,
 )
 
 
@@ -438,10 +439,11 @@ def _pending_reviews(snapshot: RaceSnapshot) -> int:
 def _projector_links(event_id: str) -> None:
     """Read-only projector surfaces, opened without typing a URL."""
     st.subheader("Projector")
-    st.caption("Read-only displays for the room. No editing controls are exposed on these views.")
-    for column, (label, view) in zip(st.columns(3), (
+    st.caption("Read-only 16:9 displays for the room. Open in a second window; Race Control stays private on this screen.")
+    for column, (label, view) in zip(st.columns(4), (
         ("PERFORMANCE CREDITS", "credits"),
         ("CHAMPIONSHIP SCORING", "criteria"),
+        ("CHAMPIONSHIP IN PROGRESS", "holding"),
         ("CHAMPIONSHIP STANDINGS", "standings"),
     )):
         column.link_button(label, f"?view={view}&event_id={event_id}", width="stretch")
@@ -741,7 +743,22 @@ def judging(s, control=None):
     for criterion in categories:
         criterion_name = str(criterion.get("CriterionName", ""))
         maximum = max(1, int(float(criterion.get("MaximumScore", 10) or 10)))
-        score=st.slider(criterion_name,0,maximum,min(7, maximum),key=f"score_{team}_{criterion_name}");scores[criterion_name]=score;total+=score
+        if uses_aesthetics_rubric(criterion):
+            # Operator assistance only. The four dimensions are summed into the
+            # ONE canonical criterion score; nothing new is stored or configured.
+            st.markdown(f"**{criterion_name}** — score each dimension out of 10")
+            st.caption(" · ".join(f"{band} {label}" for band, label in SCORING_ANCHORS))
+            sub_scores = {}
+            for column, (dimension, dimension_max, bullets) in zip(st.columns(len(AESTHETICS_RUBRIC)), AESTHETICS_RUBRIC):
+                sub_scores[dimension] = column.number_input(
+                    f"{dimension} /{dimension_max}", min_value=0, max_value=dimension_max, step=1, value=0,
+                    key=f"score_{team}_{criterion_name}_{dimension}", help=" · ".join(bullets),
+                )
+            score = aesthetics_total(sub_scores)
+            st.caption(f"{criterion_name}: **{score:g} / {maximum}**")
+        else:
+            score=st.slider(criterion_name,0,maximum,min(7, maximum),key=f"score_{team}_{criterion_name}")
+        scores[criterion_name]=score;total+=score
     st.metric("Total score",f"{total:.1f}"); st.progress((selected_index+1)/len(names),text=f"Judging progress · {selected_index+1} of {len(names)} teams")
     if control:
         criterion_maxima = {str(row.get("CriterionName", "")): row.get("MaximumScore", 0) for row in categories}
