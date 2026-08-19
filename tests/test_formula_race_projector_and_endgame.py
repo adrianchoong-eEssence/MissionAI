@@ -39,7 +39,11 @@ from screens.formula_race_projector import show_formula_race_projector
 
 TEAMS = {TEAMS!r}
 COMPONENTS = {COMPONENTS!r}
-COMPLETE = {complete!r} == "yes"
+STATE = {complete!r}
+COMPLETE = STATE == "yes"
+AESTHETICS = STATE in ("yes", "judged", "raced")   # raced judges Aesthetics only
+PHOTO = STATE in ("yes", "judged")
+RACED = STATE in ("yes", "raced")
 
 class Runtime:
     def get_runtime_teams(self, event_id):
@@ -59,28 +63,27 @@ class Runtime:
     def get_canonical_transaction_report(self, event_id):
         leaderboard, breakdown = [], []
         for index, (team_id, name) in enumerate(TEAMS):
-            drag = {list(RANK_POINTS.values())!r}[index]
-            aes = 40 - index
-            photo = 10 - (index % 3)
-            total = drag + aes + photo if COMPLETE else 0
-            leaderboard.append({{"TeamID": team_id, "ChampionshipScore": total,
+            drag = {list(RANK_POINTS.values())!r}[index] if RACED else 0
+            aes = (40 - index) if AESTHETICS else 0
+            photo = (10 - (index % 3)) if PHOTO else 0
+            leaderboard.append({{"TeamID": team_id, "ChampionshipScore": drag + aes + photo,
                                 "WalletBalance": 80 - index * 3, "Rank": index + 1}})
-            if COMPLETE:
-                breakdown += [
-                    {{"TeamID": team_id, "ComponentID": "C-AES", "Points": aes}},
-                    {{"TeamID": team_id, "ComponentID": "C-PHOTO", "Points": photo}},
-                    {{"TeamID": team_id, "ComponentID": "C-DRAG", "Points": drag}},
-                ]
+            # Reconciliation writes a row for every component and team, worth
+            # zero until the underlying result exists.
+            breakdown += [
+                {{"TeamID": team_id, "ComponentID": "C-AES", "Points": aes}},
+                {{"TeamID": team_id, "ComponentID": "C-PHOTO", "Points": photo}},
+                {{"TeamID": team_id, "ComponentID": "C-DRAG", "Points": drag}},
+            ]
         return {{"Leaderboard": leaderboard, "ChampionshipBreakdown": breakdown}}
 
     def get_race_judging(self, event_id):
-        if not COMPLETE:
-            return []
+        dimensions = ([] if not AESTHETICS else ["Aesthetics & Design"]) + ([] if not PHOTO else ["Team Photo"])
         return [{{"team_id": t, "score_dimension": d, "decision": "SUBMITTED"}}
-                for t, _ in TEAMS for d in ("Aesthetics & Design", "Team Photo")]
+                for t, _ in TEAMS for d in dimensions]
 
     def get_race_results(self, event_id):
-        if not COMPLETE:
+        if not RACED:
             return []
         return [{{"team_id": t, "locked": True, "checkpoint": "Race Final"}} for t, _ in TEAMS]
 
@@ -135,16 +138,40 @@ def test_championship_criteria_projector_renders_the_configured_model():
     _no_admin_controls(app)
 
 
-def test_incomplete_championship_is_never_presented_as_a_final_ranking():
-    """No provisional order reaches the room while scores are being entered."""
+def test_incomplete_championship_shows_all_ten_teams_as_a_live_leaderboard():
+    """The room watches positions move; the board says it is provisional."""
     app, body = _render("standings", complete="no")
-    assert "in progress" in body
-    assert "Final standings will be revealed after the Drag Race" in body
+    assert "Live Championship Standings" in body
+    assert "Provisional" in body
     assert "FINAL CHAMPIONSHIP STANDINGS" not in body.upper()
     for _, name in TEAMS:
-        assert name not in body, "an unfinished championship must not leak team positions"
-    assert "class='pj-row" not in body
+        assert name in body
+    assert body.count("class='pj-row") == 10
     _no_admin_controls(app)
+
+
+def test_unscored_components_show_a_dash_not_a_fabricated_zero():
+    """Reconciliation writes a 0 row per component; 0 must not read as scored."""
+    _, body = _render("standings", complete="no")
+    assert body.count("<div class='pj-part'>—</div>") == 30, "three components x ten teams are unscored"
+    assert "<div class='pj-part'>0</div>" not in body
+
+
+def test_partially_scored_championship_shows_earned_points_and_dashes_together():
+    _, body = _render("standings", complete="judged")
+    # Aesthetics and Team Photo are judged; the Drag Race is not run yet.
+    assert "Provisional — Drag Race points pending" in body
+    assert body.count("<div class='pj-part'>—</div>") == 10, "only the race column is unscored"
+    assert "<div class='pj-part'>40</div>" in body and "<div class='pj-part'>10</div>" in body
+    # Totals are the canonical earned points, never a projection of what is to come.
+    assert "<div class='pj-value total'>50</div>" in body
+    assert "<div class='pj-value total'>100</div>" not in body
+
+
+def test_provisional_label_is_truthful_once_the_race_is_locked():
+    _, body = _render("standings", complete="raced")
+    assert "Provisional — Championship in progress" in body
+    assert "Drag Race points pending" not in body
 
 
 def test_explicit_holding_view_never_shows_scores():
@@ -179,9 +206,11 @@ def test_standings_projector_uses_the_canonical_leaderboard_order():
 def test_projector_views_are_declared_for_navigation():
     assert PROJECTOR_VIEWS == ("credits", "criteria", "holding", "standings")
     race_control = (ROOT / "screens" / "formula_race.py").read_text()
+    # Three operational screens; the standings view evolves into the final.
     for label, view in (("PERFORMANCE CREDITS", "credits"), ("CHAMPIONSHIP SCORING", "criteria"),
-                        ("CHAMPIONSHIP IN PROGRESS", "holding"), ("CHAMPIONSHIP STANDINGS", "standings")):
+                        ("LIVE CHAMPIONSHIP STANDINGS", "standings")):
         assert f'("{label}", "{view}")' in race_control
+    assert '"holding"' not in race_control, "the holding screen is no longer a primary workflow"
     assert 'f"?view={view}&event_id={event_id}"' in race_control
     # The dead Standard-projector link is gone, and the links are reachable from
     # both Control and Championship.
@@ -547,3 +576,59 @@ def test_slide_budget_fits_ten_rows_at_any_sixteen_by_nine_viewport():
     # The body owns the remaining height and centres within it.
     assert ".pj-body { flex:1 1 auto; display:flex; flex-direction:column; justify-content:center; min-height:0; }" in css
     assert ".pj-foot { flex:0 0 auto; }" in css
+
+
+# --------------------------------------------------------------------------
+# Live provisional Championship leaderboard
+# --------------------------------------------------------------------------
+
+def test_live_leaderboard_uses_canonical_totals_and_never_re_ranks():
+    for state in ("no", "judged", "raced", "yes"):
+        _, body = _render("standings", complete=state)
+        order = [body.index(name) for _, name in TEAMS]
+        assert order == sorted(order), f"{state}: canonical leaderboard order must be preserved"
+        assert body.count("class='pj-row") == 10, f"{state}: all ten teams stay visible"
+
+
+def test_canonical_earned_points_render_exactly():
+    """Totals are the canonical ChampionshipScore, not a projector calculation."""
+    _, body = _render("standings", complete="yes")
+    for total in (100, 93, 86, 82, 75, 68, 64, 57, 50, 46):
+        assert f"<div class='pj-value total'>{total}</div>" in body
+    _, provisional = _render("standings", complete="judged")
+    # Aesthetics 40 + Team Photo 10 for the leader, with the race still to come.
+    assert "<div class='pj-value total'>50</div>" in provisional
+
+
+def test_updated_canonical_scores_appear_on_the_next_render():
+    """The same view reflects new canonical data without any projector state."""
+    _, before = _render("standings", complete="no")
+    _, after = _render("standings", complete="judged")
+    assert "<div class='pj-value total'>0</div>" in before
+    assert "<div class='pj-value total'>50</div>" in after
+    assert before != after
+
+
+def test_credits_never_contribute_to_the_championship_total():
+    projector = (ROOT / "screens" / "formula_race_projector.py").read_text()
+    standings = projector.split("def championship_standings_slide", 1)[1].split("def championship_holding_slide", 1)[0]
+    assert "WalletBalance" not in standings and "Credits" not in standings
+    # Wallet figures stay on their own screen.
+    credits = projector.split("def performance_credits_slide", 1)[1].split("def championship_criteria_slide", 1)[0]
+    assert "WalletBalance" in credits and "ChampionshipScore" not in credits
+
+
+def test_final_lock_switches_the_header_and_drops_the_provisional_warning():
+    _, body = _render("standings", complete="yes")
+    assert "Final Championship Standings" in body
+    assert "Provisional" not in body
+    assert body.count("class='pj-row") == 10
+    for position in ("p1", "p2", "p3"):
+        assert f"pj-row {position}" in body
+
+
+def test_standings_remain_read_only_in_every_championship_state():
+    for state in ("no", "judged", "raced", "yes"):
+        app, _ = _render("standings", complete=state)
+        _no_admin_controls(app)
+        assert len(app.markdown) == 1

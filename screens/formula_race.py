@@ -440,11 +440,12 @@ def _projector_links(event_id: str) -> None:
     """Read-only projector surfaces, opened without typing a URL."""
     st.subheader("Projector")
     st.caption("Read-only 16:9 displays for the room. Open in a second window; Race Control stays private on this screen.")
-    for column, (label, view) in zip(st.columns(4), (
+    # The standings view is one evolving leaderboard: it labels itself
+    # provisional until the championship completes, then becomes the final.
+    for column, (label, view) in zip(st.columns(3), (
         ("PERFORMANCE CREDITS", "credits"),
         ("CHAMPIONSHIP SCORING", "criteria"),
-        ("CHAMPIONSHIP IN PROGRESS", "holding"),
-        ("CHAMPIONSHIP STANDINGS", "standings"),
+        ("LIVE CHAMPIONSHIP STANDINGS", "standings"),
     )):
         column.link_button(label, f"?view={view}&event_id={event_id}", width="stretch")
 

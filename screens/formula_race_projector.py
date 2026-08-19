@@ -218,10 +218,15 @@ def championship_criteria_slide(runtime, event_id: str) -> str:
     )
 
 
-def _championship_is_complete(runtime, event_id: str, components: list[dict[str, Any]], team_ids: set[str]) -> bool:
-    """Every enabled component must have produced a real result for every team."""
-    if not components or not team_ids:
-        return False
+def _championship_progress(runtime, event_id: str, components: list[dict[str, Any]], team_ids: set[str]) -> dict[str, Any]:
+    """Establish which component scores genuinely exist yet.
+
+    Reconciliation writes a score row for every component and team, worth zero
+    until the underlying result exists, so a zero in the breakdown cannot be
+    read as "scored zero".  The judging rows and the locked Race Final rows are
+    the only honest evidence, and they are exactly what the reconciliation
+    itself consumes.
+    """
     judged = {
         (str(row.get("TeamID", row.get("team_id", ""))), str(row.get("Criterion", row.get("score_dimension", ""))))
         for row in runtime.get_race_judging(event_id)
@@ -233,20 +238,37 @@ def _championship_is_complete(runtime, event_id: str, components: list[dict[str,
         if bool(row.get("locked", row.get("Locked", False)))
         and str(row.get("checkpoint", row.get("Checkpoint", "Race Final"))) == "Race Final"
     }
+    scored: set[tuple[str, str]] = set()
+    has_race_component = False
     for component in components:
+        component_id = str(component.get("ComponentID", ""))
         component_type = str(component.get("ComponentType", ""))
         if component_type in _JUDGED_COMPONENTS:
             criterion = str(component.get("SourceReference", ""))
-            if any((team_id, criterion) not in judged for team_id in team_ids):
-                return False
+            scored |= {(team_id, component_id) for team_id in team_ids if (team_id, criterion) in judged}
         elif component_type == "RACE_RANK":
-            if any(team_id not in locked_teams for team_id in team_ids):
-                return False
-    return True
+            has_race_component = True
+            scored |= {(team_id, component_id) for team_id in team_ids if team_id in locked_teams}
+    expected = {(team_id, str(component.get("ComponentID", ""))) for component in components for team_id in team_ids}
+    return {
+        "Scored": scored,
+        "Complete": bool(components and team_ids and scored >= expected),
+        "RaceLocked": bool(locked_teams),
+        "HasRaceComponent": has_race_component,
+    }
+
+
+def _championship_is_complete(runtime, event_id: str, components: list[dict[str, Any]], team_ids: set[str]) -> bool:
+    """Every enabled component must have produced a real result for every team."""
+    return _championship_progress(runtime, event_id, components, team_ids)["Complete"]
 
 
 def championship_standings_slide(runtime, event_id: str) -> str:
-    """The canonical Championship Leaderboard, revealed only once it is real."""
+    """One evolving Championship leaderboard: live provisional, then final.
+
+    Rank, order and every total come straight from the canonical Leaderboard.
+    Nothing here re-ranks, estimates a missing score or awards a future point.
+    """
     configuration = runtime.get_formula_race_configuration(event_id)
     components = sorted(
         (row for row in configuration.get("ChampionshipComponents", []) if row.get("Enabled", True)),
@@ -255,11 +277,10 @@ def championship_standings_slide(runtime, event_id: str) -> str:
     names = _team_names(runtime, event_id)
     report = runtime.get_canonical_transaction_report(event_id)
     leaderboard = [row for row in report.get("Leaderboard", []) if str(row.get("TeamID", "")) in names]
+    if not leaderboard:
+        return _message_slide("Championship Standings", "No teams are configured for this event.")
 
-    # A provisional order is never shown: an unfinished championship holds.
-    if not leaderboard or not _championship_is_complete(runtime, event_id, components, set(names)):
-        return _holding_slide()
-
+    progress = _championship_progress(runtime, event_id, components, set(names))
     points = {
         (str(row.get("TeamID", "")), str(row.get("ComponentID", ""))): row.get("Points", 0)
         for row in report.get("ChampionshipBreakdown", [])
@@ -275,19 +296,31 @@ def championship_standings_slide(runtime, event_id: str) -> str:
     for row in leaderboard:
         team_id = str(row.get("TeamID", ""))
         rank = int(float(row.get("Rank", 0) or 0))
-        parts = "".join(
-            f"<div class='pj-part'>{html.escape(_number(points.get((team_id, str(component.get('ComponentID', ''))), 0)))}</div>"
-            for component in components
-        )
+        parts = ""
+        for component in components:
+            component_id = str(component.get("ComponentID", ""))
+            # An unscored component shows a dash; a fabricated 0 would read as
+            # a real result and would be a lie on a public screen.
+            earned = (
+                _number(points.get((team_id, component_id), 0))
+                if (team_id, component_id) in progress["Scored"] else "—"
+            )
+            parts += f"<div class='pj-part'>{html.escape(earned)}</div>"
         body += (
             f"<div class='pj-row {'p' + str(rank) if rank in (1, 2, 3) else ''}' style='{style}'>"
             f"<div class='pj-rank'>{rank}</div><div class='pj-team'>{html.escape(names.get(team_id, team_id))}</div>"
             f"{parts}<div class='pj-value total'>{html.escape(_number(row.get('ChampionshipScore', 0)))}</div></div>"
         )
-    return (
-        _top("Final Championship Standings", state="Final Championship Standings")
-        + f"<div class='pj-body'>{body}</div>"
-    )
+
+    if progress["Complete"]:
+        head = _top("Final Championship Standings", state="Final Championship Standings")
+    else:
+        pending_race = progress["HasRaceComponent"] and not progress["RaceLocked"]
+        head = _top(
+            "Live Championship Standings",
+            "Provisional — Drag Race points pending" if pending_race else "Provisional — Championship in progress",
+        )
+    return head + f"<div class='pj-body'>{body}</div>"
 
 
 def championship_holding_slide(runtime, event_id: str) -> str:
