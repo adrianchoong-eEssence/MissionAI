@@ -15,6 +15,7 @@ from data.control_runtime import ControlRuntime
 from engines.formula_race import BUILD_STATUSES,JUDGING_CATEGORIES,final_standings
 from engines.formula_race_configuration import (
     CAPTAIN_RESULT_METHODS,
+    assign_marketplace_item_ids,
     generate_balanced_routes,
     normalise_marketplace_item,
     normalise_station,
@@ -1147,7 +1148,9 @@ def event_setup(snapshot, runtime):
             }))
         items = st.session_state[parts_draft_key]
         editor = st.data_editor(pd.DataFrame(items), num_rows="dynamic", width="stretch", key="race_marketplace_editor")
-        values = [{**row, "ItemID": str(row.get("ItemID", "")).strip() or f"{event_id}-ITEM-{index:02d}"} for index, row in enumerate(editor.to_dict("records"), 1)]
+        # A positional fallback ID can collide with an ID an existing row already
+        # holds; only blank or repeated values are minted here.
+        values = assign_marketplace_item_ids(editor.to_dict("records"), event_id)
         st.download_button("Download marketplace template", pd.DataFrame(values).to_csv(index=False), "race-marketplace.csv", "text/csv")
         if st.button("SAVE MARKETPLACE", type="primary", disabled=not actor):
             errors = validate_marketplace_items(values)

@@ -10,6 +10,7 @@ from collections import Counter
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
+from uuid import uuid4
 
 
 SCORING_METHODS = (
@@ -192,15 +193,45 @@ def normalise_marketplace_item(raw: dict[str, Any], fallback_order: int = 1) -> 
     }
 
 
+def assign_marketplace_item_ids(items: list[dict[str, Any]], event_id: str) -> list[dict[str, Any]]:
+    """Return the catalogue with a unique, stable ItemID on every part.
+
+    Wallets, stock and purchases are keyed on ItemID, so an existing unique
+    value is never rewritten.  Only a blank or repeated value is minted, which
+    stops a duplicated editor row from sharing the ItemID of the row it was
+    copied from and collapsing onto it downstream.
+    """
+    prefix = _text(event_id) or "RACE"
+    assigned: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in items or []:
+        item = dict(raw or {})
+        raw_identifier = item.get("ItemID", item.get("item_id"))
+        # A data editor round-trip renders an empty cell as NaN, which would
+        # otherwise persist as the literal identifier "nan".
+        if isinstance(raw_identifier, float) and raw_identifier != raw_identifier:
+            raw_identifier = ""
+        item_id = _text(raw_identifier)
+        if item_id.casefold() in {"nan", "none"}:
+            item_id = ""
+        while not item_id or item_id in seen:
+            item_id = f"{prefix}-ITEM-{uuid4().hex[:8].upper()}"
+        seen.add(item_id)
+        item["ItemID"] = item_id
+        assigned.append(item)
+    return assigned
+
+
 def validate_marketplace_items(items: list[dict[str, Any]]) -> list[str]:
-    errors, names = [], []
+    errors, names, identifiers = [], [], []
     for position, raw in enumerate(items or [], 1):
-        item = normalise_marketplace_item(raw, position); names.append(item["ItemName"].casefold())
+        item = normalise_marketplace_item(raw, position); names.append(item["ItemName"].casefold()); identifiers.append(item["ItemID"])
         if not item["ItemName"]: errors.append("Every marketplace item requires a name.")
         if item["CreditCost"] < 0: errors.append(f"{item['ItemName']}: Credit Cost cannot be negative.")
         if item["StockLimit"] not in (None, "") and _number(item["StockLimit"]) < 0: errors.append(f"{item['ItemName']}: Stock Limit cannot be negative.")
         if item["Category"] == "KNOWLEDGE" and not item["KnowledgeContent"]: errors.append(f"{item['ItemName']}: knowledge items require configured content or a resource reference.")
     if len([name for name in names if name]) != len(set(name for name in names if name)): errors.append("Marketplace item names must be unique within the event.")
+    if len([item_id for item_id in identifiers if item_id]) != len(set(item_id for item_id in identifiers if item_id)): errors.append("Marketplace item IDs must be unique within the event.")
     return errors
 
 

@@ -535,7 +535,9 @@ def show_formula_race_captain(runtime_override=None):
             f"<div class='race-metric accent'><small>Wallet balance</small><strong>{html.escape(_display_number(wallet.get('Balance',0)))}</strong></div><div class='race-metric'><small>Credits earned</small><strong>{html.escape(_display_number(wallet.get('CreditsEarned',workspace.get('CreditsEarned'))))}</strong></div><div class='race-metric'><small>Credits spent</small><strong>{html.escape(_display_number(wallet.get('CreditsSpent',workspace.get('CreditsSpent',spent)),'0'))}</strong></div></div></div>",unsafe_allow_html=True)
         if not items: st.info("The Marketplace is not open yet.")
         else:
-            for item in items:
+            # The catalogue position keeps every control unique even if an event
+            # configuration still carries a repeated or blank ItemID.
+            for position, item in enumerate(items, start=1):
                 item_name=html.escape(str(item.get("ItemName","Part"))); cost=_display_number(item.get("CreditCost",0),'0'); stock=item.get("StockQuantity")
                 st.markdown(f"<div class='race-store-item'><h3>{item_name}</h3><div class='race-cost'>{html.escape(cost)} CREDITS</div><p class='race-subtle'>{'Stock: '+html.escape(_display_number(stock)) if stock is not None else 'Available while supplies last'}</p></div>",unsafe_allow_html=True)
                 description = str(item.get("Description", "") or "")
@@ -547,7 +549,7 @@ def show_formula_race_captain(runtime_override=None):
                     if image_url:
                         st.image(image_url, caption=str(item.get("ItemName", "Part")), use_container_width=True)
                 can_buy=bool(item.get("Active",True)) and float(wallet.get("Balance",0) or 0)>=float(item.get("CreditCost",0) or 0)
-                if st.button(f"BUY {str(item.get('ItemName','PART')).upper()}",key=f"race_buy_{item.get('ItemID')}",disabled=not can_buy,width="stretch"):
+                if st.button(f"BUY {str(item.get('ItemName','PART')).upper()}",key=f"race_buy_{position}_{item.get('ItemID')}",disabled=not can_buy,width="stretch"):
                     try:
                         item_id=str(item.get("ItemID", ""))
                         with st.spinner("Purchasing…"): result=runtime.formula_race_purchase(session.get("SessionToken",""),device,item_id,1,_purchase_idempotency_key(event_id,team_id,item_id,1))
