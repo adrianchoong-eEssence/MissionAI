@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from pathlib import Path
 
 from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
 from engines.formula_race_configuration import generate_balanced_routes
@@ -134,6 +135,53 @@ def test_captain_workspace_reads_the_same_canonical_station_fields_as_race_contr
     # Each saved route remains isolated to its canonical TeamID.
     assert len(routes) == 10
     assert all(set(route) == {"CURRENT-R", "CURRENT-A", "CURRENT-C", "CURRENT-E"} for route in routes.values())
+
+
+def test_rotated_cp2_first_route_renders_and_advances_in_team_route_order():
+    """A Captain route is ordered by TeamRoutes, never global CP numbering."""
+    adapter = _adapter()
+    stations = _stations()
+    replacement_ids = ["CP3", "CP1", "CP2", "CP4"]
+    for station, activity_id in zip(stations, replacement_ids):
+        station["ActivityID"] = activity_id
+    activities = _activities(stations)
+    team_id = "ROTATED-TEAM"
+    configuration = {
+        "Stations": stations,
+        "TeamRoutes": {team_id: ["CP2", "CP1", "CP3", "CP4"]},
+    }
+    adapter._get_checkpoint_activities = lambda _event_id: activities
+    adapter.get_formula_race_configuration = lambda _event_id: configuration
+    adapter.get_runtime_teams = lambda _event_id: [{"TeamID": team_id, "TeamName": "Disposable", "IsActive": True}]
+    adapter.get_canonical_transaction_report = lambda *_args, **_kwargs: {"Leaderboard": []}
+    adapter._marketplace_payload = lambda *_args, **_kwargs: {"items": [], "purchases": []}
+    adapter._build_status_payload = lambda *_args, **_kwargs: {}
+
+    def workspace_get(submissions):
+        def fake_get(table, _query=None, _admin=True):
+            if table == "team_access_sessions_v2":
+                return [{"team_access_session_id": "SESSION", "event_id": "DISPOSABLE-EVENT", "team_id": team_id, "is_active": True}]
+            if table == "submissions_v2":
+                return submissions
+            return []
+        return fake_get
+
+    adapter._get = workspace_get([])
+    before = adapter.formula_race_captain_workspace("00000000-0000-0000-0000-000000000001", "disposable-device")
+    assert before["CurrentCheckpoint"]["ActivityID"] == "CP2"
+    assert [row["ActivityID"] for row in before["Checkpoints"]] == ["CP2"]
+
+    # The only persisted submission is CP2.  It immediately advances to the
+    # configured second route entry; CP1 is not synthesised by the workspace.
+    adapter._get = workspace_get([{"activity_id": "CP2", "submission_status": "SUBMITTED"}])
+    after = adapter.formula_race_captain_workspace("00000000-0000-0000-0000-000000000001", "disposable-device")
+    assert after["CurrentCheckpoint"]["ActivityID"] == "CP1"
+    assert [row["ActivityID"] for row in after["Checkpoints"]] == ["CP2", "CP1"]
+    assert after["NextCheckpoint"]["ActivityID"] == "CP3"
+
+    captain_source = (Path(__file__).resolve().parents[1] / "screens" / "formula_race_captain.py").read_text()
+    assert captain_source.count('st.session_state.pop("race_captain_selected_checkpoint", None)') >= 3
+    assert 'storage_path=f"{event_id}/{team_id}/{current.get(\'ActivityID\')}' in captain_source
 
 
 def test_station_projection_excludes_retired_cp_rows_and_route_preview_is_read_only():

@@ -178,6 +178,7 @@ def _clear_captain_query_param() -> None:
 
 def _clear_captain_state() -> None:
     st.session_state.pop("race_captain", None)
+    st.session_state.pop("race_captain_selected_checkpoint", None)
     _clear_captain_query_param()
 
 
@@ -246,6 +247,10 @@ def _set_session(payload):
         raise RuntimeError("Invalid captain login payload.")
     st.session_state["race_captain"] = normalised_session
     st.session_state.pop("race_captain_recovery", None)
+    # A checkpoint selection belongs to one Captain route at one point in
+    # time.  It must never survive a login/recovery and override the canonical
+    # current station recalculated after a proof submission.
+    st.session_state.pop("race_captain_selected_checkpoint", None)
     st.query_params["race"] = "1"
     token = normalised_session.get("SessionToken", "")
     if _staging_mode():
@@ -479,6 +484,11 @@ def show_formula_race_captain(runtime_override=None):
                         activity_id=str(current.get("ActivityID", ""))
                         runtime.formula_race_submit_checkpoint(session.get("SessionToken",""),device,activity_id,answer,storage_reference,_submission_idempotency_key(event_id,team_id,activity_id),result_value=result_value,result_unit=str(current.get("ResultUnit", "") or "CONFIGURED") if result_entry_method else "")
                     next_checkpoint=dict(workspace.get("NextCheckpoint",{})); next_name=str(next_checkpoint.get("DisplayName",next_checkpoint.get("Name","")))
+                    # The workspace recomputes progress from TeamRoutes and
+                    # persisted submissions on rerun.  Discarding the old
+                    # visual selection prevents a submitted station from
+                    # continuing to render as the current mission.
+                    st.session_state.pop("race_captain_selected_checkpoint", None)
                     st.success("STATION COMPLETE · " + (f"NEXT STOP: {next_name}" if next_name else "Awaiting the next configured stop."));st.rerun()
                 except (RuntimeDatabaseError, RuntimeError) as error: st.error(_captain_error(error))
         for index, checkpoint in enumerate(checkpoints, start=1):

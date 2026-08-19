@@ -1245,6 +1245,21 @@ class FormulaRaceCoreV2StagingAdapter:
             submission_status = submission_status_by_activity.get(str(checkpoint.get("ActivityID", "")))
             if submission_status:
                 checkpoint["Status"] = {"APPROVED": "APPROVED", "REJECTED": "REJECTED / RESUBMIT"}.get(submission_status.upper(), "UNDER REVIEW" if submission_status.upper() in {"PENDING", "SUBMITTED"} else submission_status.upper())
+        # The Event Setup display order describes the station catalogue.  A
+        # Captain's journey is instead the explicit per-team TeamRoutes order.
+        # Preserve that order before filtering it to completed/current entries;
+        # otherwise a rotated CP2-first route is rendered in global CP order
+        # even though progression itself has selected the right activity.
+        if route and not stale_route_ids:
+            checkpoint_by_activity = {
+                str(checkpoint.get("ActivityID", "")): checkpoint
+                for checkpoint in checkpoint_state
+            }
+            checkpoint_state = [
+                checkpoint_by_activity[activity_id]
+                for activity_id in route
+                if activity_id in checkpoint_by_activity
+            ]
         current_activity_id, next_activity_id = current_station(route, submitted_rows) if route and not stale_route_ids else ("", "")
         if route and current_activity_id in route:
             visible_ids = set(route[:route.index(current_activity_id) + 1])
