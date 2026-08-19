@@ -412,6 +412,12 @@ def _top(snapshot: RaceSnapshot):
     return selected
 
 
+def _navigate_race(view: str) -> None:
+    """Streamlit callback: runs before the keyed navigation widget exists."""
+    st.session_state["race_nav"] = view
+    st.session_state["race_subscreen"] = ""
+
+
 def _title(kicker, title, copy=""):
     st.markdown(f"<div class='race-kicker'>{kicker}</div>", unsafe_allow_html=True)
     st.title(title)
@@ -497,7 +503,7 @@ def live_programme(s):
     for no,name,p in stages:
         live=name=="RACE Checkpoints" and str(checkpoint_state.get("Status","")).upper()=="LIVE"
         c1,c2,c3=st.columns([.7,4,1.2]); c1.markdown(f"<span class='rank'>{no}</span>",unsafe_allow_html=True); c2.markdown(f"### {name}"); c2.progress(min(float(p)/100,1.0)); c3.markdown("<span class='status'>ACTIVE</span>" if live else ("✓ COMPLETE" if p==100 else "READY"),unsafe_allow_html=True)
-    if st.button("Open programme controls",type="primary",width="stretch"): st.session_state.race_nav="Control"; st.rerun()
+    st.button("Open programme controls", type="primary", width="stretch", on_click=_navigate_race, args=("Control",))
 
 
 def championship(s, final=False):
@@ -558,7 +564,7 @@ def checkpoints(s):
     leader=max(rows,key=lambda row:row["Credits"])["Team"] if rows else "—"
     a,b,c=st.columns(3);a.metric("Teams",len(s.teams));b.metric("Pending reviews",pending);c.metric("Wallet leader",leader)
     st.dataframe(rows,width="stretch",hide_index=True)
-    if st.button("Open programme controls",type="primary",width="stretch"): st.session_state.race_nav="Control"; st.rerun()
+    st.button("Open programme controls", type="primary", width="stretch", on_click=_navigate_race, args=("Control",))
 
 
 def reviews(s, control=None, runtime=None):

@@ -239,7 +239,7 @@ def test_race_marketplace_control_uses_existing_item_activation_flag():
     assert "OPEN MARKETPLACE" in source
     assert "set_race_marketplace_runtime" in source
     assert "set_formula_race_marketplace_runtime" in adapter
-    assert '"is_active": active' in adapter
+    assert '"is_active": bool(active and item["Enabled"])' in adapter
 
 
 def test_race_marketplace_open_verifies_persisted_active_rows():

@@ -796,7 +796,19 @@ class FormulaRaceCoreV2StagingAdapter:
                 }
             )
 
-        return {"Checkpoints": checkpoints, "Status": "READY", "ModuleID": module_id}
+        runtime_rows = self._get(
+            "activity_runtime_v2",
+            {
+                "event_id": f"eq.{str(event_id).strip()}",
+                "activity_id": _in_filter([str(station.get("ActivityID", "")) for station in stations]),
+                "select": "activity_id,state_payload,updated_at",
+                "order": "updated_at.desc",
+                "limit": "1",
+            },
+        ) if stations else []
+        runtime_status = str(_as_dict(runtime_rows[0].get("state_payload") if runtime_rows else {}).get("status", "READY")).upper()
+        status = {"LAUNCH": "LIVE", "OPEN": "LIVE", "PAUSE": "PAUSED", "CLOSE": "CLOSED"}.get(runtime_status, runtime_status or "READY")
+        return {"Checkpoints": checkpoints, "Status": status, "ModuleID": module_id}
 
     def upload_formula_race_station_reference_image(self, event_id: str, activity_id: str, uploaded_file) -> str:
         """Store a private facilitator reference, scoped to its event and station."""
@@ -1315,6 +1327,16 @@ class FormulaRaceCoreV2StagingAdapter:
         now_iso = now
         team_rows = self.get_runtime_teams(event_id)
         activity_rows = self._get("activities_v2", {"module_id": f"eq.{str(module_id).strip()}", "select": "activity_id", "limit": "100"})
+        configuration = self.get_formula_race_configuration(event_id)
+        configured_activity_ids = {
+            str(row.get("ActivityID", ""))
+            for row in configuration.get("Stations", []) or []
+            if isinstance(row, dict) and str(row.get("ActivityID", "")).strip()
+        }
+        if configured_activity_ids:
+            activity_rows = [row for row in activity_rows if str(row.get("activity_id", "")) in configured_activity_ids]
+        if not activity_rows:
+            raise RuntimeError("No current configured R.A.C.E. stations are available to control.")
 
         for team in team_rows:
             team_id = str(team.get("TeamID", ""))
@@ -1364,24 +1386,41 @@ class FormulaRaceCoreV2StagingAdapter:
             raise RuntimeError("Marketplace action must be OPEN, PAUSE, or CLOSE.")
         if not str(actor).strip():
             raise RuntimeError("Facilitator identity is required to change the marketplace state.")
-        items = self._get(
-            "marketplace_items_v2",
-            {"event_id": f"eq.{str(event_id).strip()}", "select": "item_id"},
-        )
-        if not items:
+        configuration = self.get_formula_race_configuration(event_id)
+        if "Marketplace" in configuration:
+            configured_items = [
+                normalise_marketplace_item(row, position)
+                for position, row in enumerate(configuration.get("Marketplace") or [], 1)
+                if isinstance(row, dict) and str(row.get("ItemID", "")).strip()
+            ]
+        else:
+            configured_items = [
+                normalise_marketplace_item({
+                    **_as_dict(row.get("item_payload")), "ItemID": row.get("item_id", ""),
+                    "ItemName": row.get("item_name", ""), "Category": row.get("item_type", "CUSTOM"),
+                    "CreditCost": row.get("unit_cost_credits", 0), "StockLimit": row.get("stock_limit"), "Enabled": True,
+                }, position)
+                for position, row in enumerate(self._get(
+                    "marketplace_items_v2",
+                    {"event_id": f"eq.{str(event_id).strip()}", "select": "item_id,item_name,item_type,unit_cost_credits,stock_limit,is_active,item_payload"},
+                ), 1)
+            ]
+        if not configured_items:
             raise RuntimeError("Marketplace catalogue is not configured for this event.")
         active = action == "OPEN"
-        self._patch(
-            "marketplace_items_v2",
-            {"event_id": f"eq.{str(event_id).strip()}"},
-            {"is_active": active},
-        )
+        for item in configured_items:
+            self._patch(
+                "marketplace_items_v2",
+                {"event_id": f"eq.{str(event_id).strip()}", "item_id": f"eq.{str(item['ItemID'])}"},
+                {"is_active": bool(active and item["Enabled"])},
+            )
         persisted = self._get(
             "marketplace_items_v2",
-            {"event_id": f"eq.{str(event_id).strip()}", "select": "item_id,is_active"},
+            {"event_id": f"eq.{str(event_id).strip()}", "item_id": _in_filter([str(item["ItemID"]) for item in configured_items]), "select": "item_id,is_active"},
         )
         active_count = sum(bool(item.get("is_active", False)) for item in persisted)
-        if len(persisted) != len(items) or (active and active_count != len(items)) or (not active and active_count):
+        expected_active_count = sum(bool(item["Enabled"]) for item in configured_items) if active else 0
+        if len(persisted) != len(configured_items) or active_count != expected_active_count:
             raise RuntimeError("Marketplace activation state did not persist. Refresh Race Control and retry.")
         return {"state": action, "active": active, "item_count": len(persisted), "active_item_count": active_count, "actor": str(actor).strip()}
 
@@ -1681,13 +1720,15 @@ class FormulaRaceCoreV2StagingAdapter:
         return {"CreditsEarned": earned, "CreditsSpent": spent, "Balance": earned - spent}
 
     def _marketplace_payload(self, event_id: str, team_id: str, active_only: bool = True) -> dict[str, Any]:
-        item_query = {"event_id": f"eq.{str(event_id)}", "select": "item_id,item_name,item_type,unit_cost_credits,stock_limit,is_active,item_payload"}
-        if active_only:
-            item_query["is_active"] = "eq.true"
-        item_rows = self._get("marketplace_items_v2", item_query)
-        purchase_query = {
-            "marketplace_transactions_v2",
-        }
+        # Once an event has a migration-030 Marketplace key, that event-scoped
+        # configuration is authoritative.  The table can retain historical UAT
+        # rows, which must never reappear merely because they remain active.
+        event_configuration = self.get_formula_race_configuration(event_id)
+        configured_marketplace = event_configuration.get("Marketplace") if "Marketplace" in event_configuration else None
+        item_rows = self._get(
+            "marketplace_items_v2",
+            {"event_id": f"eq.{str(event_id)}", "select": "item_id,item_name,item_type,unit_cost_credits,stock_limit,is_active,item_payload"},
+        )
         purchase_rows = self._get(
             "marketplace_transactions_v2",
             {
@@ -1716,38 +1757,59 @@ class FormulaRaceCoreV2StagingAdapter:
             reserved[item_id] = reserved.get(item_id, 0) + _safe_int(row.get("quantity", 0))
         stock_lookup = {str(row.get("item_id")): row for row in item_rows}
         items = []
-        for item_id, row in stock_lookup.items():
-            configuration = normalise_marketplace_item({
-                **_as_dict(row.get("item_payload")), "ItemID": item_id, "ItemName": row.get("item_name", ""),
-                "Category": row.get("item_type", "CUSTOM"), "CreditCost": row.get("unit_cost_credits", 0),
-                "StockLimit": row.get("stock_limit"), "Enabled": row.get("is_active", True),
-            })
-            item = {
-                "ItemID": item_id,
-                "ItemName": str(row.get("item_name", "")),
-                "CreditCost": row.get("unit_cost_credits", 0),
-                "StockQuantity": (
-                    None if row.get("stock_limit") is None
-                    else max(_safe_int(row.get("stock_limit")) - reserved.get(item_id, 0), 0)
-                ),
-                "Active": bool(row.get("is_active", True)),
-            }
-            # Keep legacy projection shape stable until a configured item carries
-            # metadata; Core-v2 data always supplies these fields after 030.
-            if row.get("item_payload") or row.get("item_type"):
-                item.update({"Category": configuration["Category"], "Description": configuration["Description"],
-                             "ImageReference": configuration["ImageReference"], "KnowledgeContent": configuration["KnowledgeContent"],
-                             "DisplayOrder": configuration["DisplayOrder"]})
-            items.append(item)
+        if configured_marketplace is not None:
+            source_rows = [
+                normalise_marketplace_item(row, position)
+                for position, row in enumerate(configured_marketplace or [], 1)
+                if isinstance(row, dict)
+            ]
+            for configuration in source_rows:
+                item_id = str(configuration["ItemID"])
+                persisted = stock_lookup.get(item_id, {})
+                active = bool(configuration["Enabled"] and persisted.get("is_active", False))
+                if not item_id or (active_only and not active):
+                    continue
+                stock_limit = configuration["StockLimit"]
+                items.append({
+                    "ItemID": item_id,
+                    "ItemName": configuration["ItemName"],
+                    "CreditCost": configuration["CreditCost"],
+                    "StockQuantity": None if stock_limit in (None, "") else max(_safe_int(stock_limit) - reserved.get(item_id, 0), 0),
+                    "Active": active,
+                    "Category": configuration["Category"],
+                    "Description": configuration["Description"],
+                    "ImageReference": configuration["ImageReference"],
+                    "KnowledgeContent": configuration["KnowledgeContent"],
+                    "DisplayOrder": configuration["DisplayOrder"],
+                })
+        else:
+            for item_id, row in stock_lookup.items():
+                configuration = normalise_marketplace_item({
+                    **_as_dict(row.get("item_payload")), "ItemID": item_id, "ItemName": row.get("item_name", ""),
+                    "Category": row.get("item_type", "CUSTOM"), "CreditCost": row.get("unit_cost_credits", 0),
+                    "StockLimit": row.get("stock_limit"), "Enabled": row.get("is_active", True),
+                })
+                if active_only and not configuration["Enabled"]:
+                    continue
+                item = {
+                    "ItemID": item_id, "ItemName": configuration["ItemName"], "CreditCost": configuration["CreditCost"],
+                    "StockQuantity": None if configuration["StockLimit"] in (None, "") else max(_safe_int(configuration["StockLimit"]) - reserved.get(item_id, 0), 0),
+                    "Active": configuration["Enabled"],
+                }
+                if row.get("item_payload") or row.get("item_type"):
+                    item.update({"Category": configuration["Category"], "Description": configuration["Description"],
+                                 "ImageReference": configuration["ImageReference"], "KnowledgeContent": configuration["KnowledgeContent"],
+                                 "DisplayOrder": configuration["DisplayOrder"]})
+                items.append(item)
         items.sort(key=lambda row: (row.get("DisplayOrder", 0), row["ItemName"]))
+        item_names = {str(row.get("ItemID", "")): str(row.get("ItemName", "")) for row in items}
         purchases = []
         for row in purchase_rows:
-            row_item = stock_lookup.get(str(row.get("item_id", "")), {})
             purchases.append(
                 {
                     "PurchaseID": row.get("marketplace_transaction_id"),
                     "ItemID": str(row.get("item_id", "")),
-                    "ItemName": str(row_item.get("item_name", "")),
+                    "ItemName": item_names.get(str(row.get("item_id", "")), "Retired item"),
                     "Quantity": row.get("quantity", 0),
                     "Amount": row.get("amount_paid", 0),
                     "Status": row.get("status", ""),

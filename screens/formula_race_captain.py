@@ -497,6 +497,14 @@ def show_formula_race_captain(runtime_override=None):
             for item in items:
                 item_name=html.escape(str(item.get("ItemName","Part"))); cost=_display_number(item.get("CreditCost",0),'0'); stock=item.get("StockQuantity")
                 st.markdown(f"<div class='race-store-item'><h3>{item_name}</h3><div class='race-cost'>{html.escape(cost)} CREDITS</div><p class='race-subtle'>{'Stock: '+html.escape(_display_number(stock)) if stock is not None else 'Available while supplies last'}</p></div>",unsafe_allow_html=True)
+                description = str(item.get("Description", "") or "")
+                if description:
+                    st.caption(description)
+                image_reference = str(item.get("ImageReference", "") or "")
+                if image_reference:
+                    image_url = runtime.get_formula_race_station_reference_image_url(image_reference)
+                    if image_url:
+                        st.image(image_url, caption=str(item.get("ItemName", "Part")), use_container_width=True)
                 can_buy=bool(item.get("Active",True)) and float(wallet.get("Balance",0) or 0)>=float(item.get("CreditCost",0) or 0)
                 if st.button(f"BUY {str(item.get('ItemName','PART')).upper()}",key=f"race_buy_{item.get('ItemID')}",disabled=not can_buy,width="stretch"):
                     try:
