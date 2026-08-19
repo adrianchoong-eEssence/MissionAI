@@ -768,6 +768,8 @@ def control_centre(s, control=None):
     active_items = [item for item in marketplace.get("items", []) if item.get("Active")]
     depot_state = "OPEN" if active_items else "CLOSED"
     st.markdown(f"<div class='race-card'><span class='ops-label'>Parts depot state</span><br><span class='ops-value'>{depot_state}</span> · {len(active_items)} active of {len(marketplace.get('items', []))} configured items</div>", unsafe_allow_html=True)
+    if marketplace.get("CatalogueSource"):
+        st.caption(f"Catalogue authority: {marketplace['CatalogueSource']}")
     def marketplace_action(label, action_name, key, kind="secondary"):
         if st.button(label, key=key, type=kind, width="stretch", disabled=bool(control and not actor)):
             if control:
@@ -1313,6 +1315,7 @@ def show_formula_race(db=None, event_id=""):
             marketplace_state = runtime._marketplace_payload(snapshot.event_id, "", active_only=False)
             active = [row for row in marketplace_state.get("items", []) if row.get("Active")]
             st.metric("PARTS DEPOT", "OPEN" if active else "CLOSED")
+            st.caption(f"Catalogue authority: {marketplace_state.get('CatalogueSource', 'unknown')}")
             st.dataframe([{"Item": row.get("ItemName", ""), "Credit Cost": row.get("CreditCost", 0), "Remaining": row.get("StockQuantity", "—"), "State": "OPEN" if row.get("Active") else "CLOSED"} for row in marketplace_state.get("items", [])], width="stretch", hide_index=True)
             st.subheader("Recent Purchases")
             st.dataframe([{"Team": next((team.name for team in snapshot.teams if team.id == row.get("TeamID")), "Team"), "Item": row.get("ItemName", ""), "Quantity": row.get("Quantity", 0), "Credits Spent": row.get("Amount", 0), "Status": row.get("Status", "")} for row in marketplace_state.get("purchases", [])], width="stretch", hide_index=True)

@@ -1817,7 +1817,19 @@ class FormulaRaceCoreV2StagingAdapter:
                     "IdempotencyKey": row.get("idempotency_key", ""),
                 }
             )
-        return {"items": items, "purchases": purchases, "state": "OPEN" if items else "CLOSED"}
+        return {
+            "items": items,
+            "purchases": purchases,
+            "state": "OPEN" if items else "CLOSED",
+            # This is intentionally surfaced to Race Control.  It makes a
+            # mismatched/stale deployment immediately diagnosable instead of
+            # silently presenting retained UAT table rows as a catalogue.
+            "CatalogueSource": (
+                "events_v2.event_payload.RaceConfiguration.Marketplace"
+                if configured_marketplace is not None
+                else "marketplace_items_v2 (legacy fallback)"
+            ),
+        }
 
     @staticmethod
     def staging_runtime_guard() -> bool:

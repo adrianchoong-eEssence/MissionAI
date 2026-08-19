@@ -84,6 +84,15 @@ def test_captain_and_race_control_project_only_the_canonical_configured_catalogu
     assert [item["CreditCost"] for item in projection["items"]] == [50, 10, 15, 10, 5]
     assert projection["items"][0]["StockQuantity"] == 8
     assert all("OLD" not in item["ItemID"] for item in projection["items"])
+    assert projection["CatalogueSource"] == "events_v2.event_payload.RaceConfiguration.Marketplace"
+
+
+def test_race_control_exposes_the_catalogue_authority_alongside_its_canonical_projection():
+    source = (ROOT / "screens/formula_race.py").read_text()
+
+    assert 'control.runtime._marketplace_payload(s.event_id, "", active_only=False)' in source
+    assert "Catalogue authority: {marketplace['CatalogueSource']}" in source
+    assert "Catalogue authority: {marketplace_state.get('CatalogueSource', 'unknown')}" in source
 
 
 def test_marketplace_runtime_and_purchase_boundary_use_only_configured_item_ids():
