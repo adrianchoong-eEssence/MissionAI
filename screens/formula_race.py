@@ -10,10 +10,11 @@ import streamlit as st
 
 from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRaceProvider, RaceSnapshot, Team, Transaction, Submission
 from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
-from data.runtime_database import get_runtime_database
+from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 from data.control_runtime import ControlRuntime
 from engines.formula_race import BUILD_STATUSES,JUDGING_CATEGORIES,final_standings
 from engines.formula_race_configuration import (
+    CAPTAIN_RESULT_METHODS,
     generate_balanced_routes,
     normalise_marketplace_item,
     normalise_station,
@@ -567,12 +568,50 @@ def checkpoints(s):
     st.button("Open programme controls", type="primary", width="stretch", on_click=_navigate_race, args=("Control",))
 
 
+def _official_result_control(station, submission_id):
+    """Collect the facilitator-owned official result a measured station requires.
+
+    Migration 033 made the official result facilitator-owned, so the Captain no
+    longer submits one.  `exos_v2_formula_race_verify_station_result` still
+    refuses to approve a measured station without a result, so the queue that
+    approves it has to supply the value Station Results already collects.
+    """
+    method = str(station.get("ScoringMethod", "")).upper()
+    if method not in CAPTAIN_RESULT_METHODS:
+        return None, False
+    if method == "LOWEST_TIME":
+        a, b, c = st.columns(3)
+        minutes = a.number_input("Minutes", min_value=0, step=1, value=None, key=f"review_minutes_{submission_id}")
+        seconds = b.number_input("Seconds", min_value=0, max_value=59, step=1, value=None, key=f"review_seconds_{submission_id}")
+        milliseconds = c.number_input("Milliseconds", min_value=0, max_value=999, step=1, value=None, key=f"review_ms_{submission_id}")
+        if minutes is None and seconds is None and milliseconds is None:
+            st.caption("Enter the official time before approving this station.")
+            return None, True
+        return int(minutes or 0) * 60_000 + int(seconds or 0) * 1_000 + int(milliseconds or 0), False
+    unit = str(station.get("ResultUnit", "") or "")
+    label = str(station.get("ResultLabel", "") or "Official result")
+    value = st.number_input(f"{label} ({unit})" if unit else label, min_value=0, step=1, value=None, key=f"review_result_{submission_id}")
+    if value is None:
+        st.caption("Enter the official result before approving this station.")
+        return None, True
+    return int(value), False
+
+
 def reviews(s, control=None, runtime=None):
     _title("Facilitator action queue", "RACE Review Queue", "Private evidence is resolved lazily only for submissions shown here; decisions use the certified review contract.")
     team_identity={team.id:team.name for team in s.teams}
     pending_items = [item for item in s.submissions if item.status.upper() in {"PENDING", "PENDING_REVIEW", "SUBMITTED"}]
     st.metric("PENDING REVIEWS", len(pending_items))
     actor = _facilitator_identity(control)
+    # Resolve each pending submission to its canonical station so a measured
+    # station is approved with the official result the verification RPC needs.
+    station_by_submission = {}
+    if pending_items and runtime is not None and hasattr(runtime, "get_canonical_submissions"):
+        stations = {str(row.get("ActivityID", "")): row for row in runtime.get_formula_race_stations(s.event_id)}
+        station_by_submission = {
+            str(row.get("SubmissionID", "")): stations.get(str(row.get("MissionID", "")), {})
+            for row in runtime.get_canonical_submissions(s.event_id)
+        }
     for x in pending_items:
         with st.container(border=True):
             c1,c2=st.columns([4,1]); c1.markdown(f"### {team_identity.get(x.team_id, 'Team')} · {x.checkpoint}\n<span class='muted'>Submitted {x.submitted_at or 'time unavailable'}</span>", unsafe_allow_html=True); c2.markdown(f"<span class='status attention'>{x.status}</span>", unsafe_allow_html=True)
@@ -582,13 +621,18 @@ def reviews(s, control=None, runtime=None):
             elif str(x.evidence).startswith(_RACE_EVIDENCE_PREFIX):
                 st.warning("Private photo evidence is unavailable.")
             notes=st.text_input("Notes / rejection reason",key=f"review_notes_{x.id}") if control else ""
+            official_result, awaiting_result = _official_result_control(station_by_submission.get(str(x.id), {}), x.id) if control else (None, False)
             pending=x.status.upper() in {"PENDING","PENDING_REVIEW","SUBMITTED"}
-            def decide(decision):
-                with st.spinner("Approving…" if decision == "APPROVE" else "Saving review…"):
-                    control.review_race_checkpoint(x.id,decision,actor,notes,notes,f"{x.id}:{decision}")
+            def decide(decision, official_result=official_result):
+                try:
+                    with st.spinner("Approving…" if decision == "APPROVE" else "Saving review…"):
+                        control.review_race_checkpoint(x.id,decision,actor,notes,notes,f"{x.id}:{decision}",official_result if decision == "APPROVE" else None)
+                except (RuntimeDatabaseError, RuntimeError) as error:
+                    st.error(f"Review could not be saved: {error}")
+                    return
                 st.success("Review saved and projections updated.");_refresh_after_race_control_write()
             a,b,c=st.columns(3)
-            if a.button("APPROVE",key=f"award_{x.id}",disabled=not pending or bool(control and not actor)):
+            if a.button("APPROVE",key=f"award_{x.id}",disabled=not pending or bool(control and not actor) or awaiting_result):
                 decide("APPROVE") if control else st.toast(f"Demo approval for {x.id}")
             if b.button("REQUEST RESUBMISSION",key=f"revise_{x.id}",disabled=not pending or bool(control and not actor)):
                 decide("REQUEST_RESUBMISSION") if control else st.toast(f"Demo revision for {x.id}")
