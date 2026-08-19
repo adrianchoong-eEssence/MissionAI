@@ -25,7 +25,8 @@ from engines.formula_race_championship import (
     validate_championship_components,
 )
 from engines.formula_race_configuration import (
-    current_station, generate_balanced_routes, normalise_judging_criteria, normalise_marketplace_item,
+    assign_marketplace_item_ids, current_station, generate_balanced_routes, marketplace_item_identifier,
+    normalise_judging_criteria, normalise_marketplace_item,
     normalise_station, validate_marketplace_items, validate_routes, validate_stations,
 )
 
@@ -702,9 +703,44 @@ class FormulaRaceCoreV2StagingAdapter:
             "NeedsReconciliation": any(row["NeedsReconciliation"] for row in rows),
         }
 
+    def _reconcile_marketplace_item_ids(self, event_id: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Bind each configured part to the catalogue row that already owns it.
+
+        marketplace_items_v2 is unique on (event_id, item_name) as well as on
+        item_id, but the migration-030 upsert only declares
+        `on conflict(item_id)`.  Minting a fresh ItemID for a part the event
+        already stocks therefore attempts an insert that violates the name
+        constraint.  Reuse the persisted item_id instead -- purchases reference
+        it with `on delete restrict` -- and let only genuinely new parts be
+        minted.
+        """
+        rows = self._get(
+            "marketplace_items_v2",
+            {"event_id": f"eq.{str(event_id).strip()}", "select": "item_id,item_name"},
+        )
+        persisted_ids = {str(row.get("item_id", "")).strip() for row in rows if str(row.get("item_id", "")).strip()}
+        persisted_by_name: dict[str, str] = {}
+        for row in rows:
+            name = str(row.get("item_name", "")).strip().casefold()
+            item_id = str(row.get("item_id", "")).strip()
+            if name and item_id:
+                persisted_by_name.setdefault(name, item_id)
+        resolved = []
+        for raw in items or []:
+            item = dict(raw or {})
+            item_id = marketplace_item_identifier(item)
+            if item_id not in persisted_ids:
+                # A blank or not-yet-persisted identity adopts the row already
+                # holding this name, so a rename by ItemID still updates in place.
+                item["ItemID"] = persisted_by_name.get(str(item.get("ItemName", "")).strip().casefold(), item_id)
+            resolved.append(item)
+        return assign_marketplace_item_ids(resolved, event_id)
+
     def save_formula_race_configuration(self, event_id: str, config: dict[str, Any], actor: str) -> dict[str, Any]:
         """Persist generic RACE setup through the migration's guarded RPC."""
         changes = dict(config or {})
+        if "Marketplace" in changes:
+            changes["Marketplace"] = self._reconcile_marketplace_item_ids(event_id, changes["Marketplace"])
         config = {**self.get_formula_race_configuration(event_id), **changes}
         stations = [normalise_station(row, index) for index, row in enumerate(config.get("Stations", []), 1)]
         station_errors = validate_stations(stations) if stations else []

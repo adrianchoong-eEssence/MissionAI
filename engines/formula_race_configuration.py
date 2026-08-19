@@ -193,6 +193,19 @@ def normalise_marketplace_item(raw: dict[str, Any], fallback_order: int = 1) -> 
     }
 
 
+def marketplace_item_identifier(row: dict[str, Any]) -> str:
+    """Return the usable ItemID on a configured part, or "" when it has none.
+
+    A data editor round-trip renders an empty cell as NaN, and a CSV round-trip
+    as the literal "nan"/"None"; neither is a usable catalogue identity.
+    """
+    raw = (row or {}).get("ItemID", (row or {}).get("item_id"))
+    if isinstance(raw, float) and raw != raw:
+        return ""
+    value = _text(raw)
+    return "" if value.casefold() in {"nan", "none"} else value
+
+
 def assign_marketplace_item_ids(items: list[dict[str, Any]], event_id: str) -> list[dict[str, Any]]:
     """Return the catalogue with a unique, stable ItemID on every part.
 
@@ -206,14 +219,7 @@ def assign_marketplace_item_ids(items: list[dict[str, Any]], event_id: str) -> l
     seen: set[str] = set()
     for raw in items or []:
         item = dict(raw or {})
-        raw_identifier = item.get("ItemID", item.get("item_id"))
-        # A data editor round-trip renders an empty cell as NaN, which would
-        # otherwise persist as the literal identifier "nan".
-        if isinstance(raw_identifier, float) and raw_identifier != raw_identifier:
-            raw_identifier = ""
-        item_id = _text(raw_identifier)
-        if item_id.casefold() in {"nan", "none"}:
-            item_id = ""
+        item_id = marketplace_item_identifier(item)
         while not item_id or item_id in seen:
             item_id = f"{prefix}-ITEM-{uuid4().hex[:8].upper()}"
         seen.add(item_id)
