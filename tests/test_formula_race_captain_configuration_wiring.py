@@ -7,6 +7,7 @@ from pathlib import Path
 
 from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
 from engines.formula_race_configuration import generate_balanced_routes
+from screens.formula_race_captain import _authoritative_checkpoint_selection
 
 
 @contextmanager
@@ -182,6 +183,35 @@ def test_rotated_cp2_first_route_renders_and_advances_in_team_route_order():
     captain_source = (Path(__file__).resolve().parents[1] / "screens" / "formula_race_captain.py").read_text()
     assert captain_source.count('st.session_state.pop("race_captain_selected_checkpoint", None)') >= 3
     assert 'storage_path=f"{event_id}/{team_id}/{current.get(\'ActivityID\')}' in captain_source
+
+
+def test_live_scuderia_shape_clears_completed_selection_and_keeps_canonical_cp04():
+    """Regression for the live CP-02 -> CP-03 -> CP-04 -> CP-01 state."""
+    prefix = "CORE-V2-RACE-UAT-CP-"
+    suffix = "-4CF0CEAF5F"
+    route = [f"{prefix}{number}{suffix}" for number in ("02", "03", "04", "01")]
+    checkpoints = [{"ActivityID": activity_id} for activity_id in route[:3]]
+
+    # CP-02 and CP-03 are canonical SUBMITTED rows.  Review is not involved:
+    # the next route entry is CP-04 immediately.
+    from engines.formula_race_configuration import current_station
+    current, following = current_station(route, [
+        {"ActivityID": route[0], "Status": "SUBMITTED"},
+        {"ActivityID": route[1], "Status": "SUBMITTED"},
+    ])
+    assert (current, following) == (route[2], route[3])
+
+    # Both retained completed selections must be invalidated on render; a
+    # legitimate canonical-current selection remains valid across refresh and
+    # reconnect calculations.
+    assert _authoritative_checkpoint_selection(checkpoints, current, route[0]) == (route[2], True)
+    assert _authoritative_checkpoint_selection(checkpoints, current, route[1]) == (route[2], True)
+    assert _authoritative_checkpoint_selection(checkpoints, current, route[2]) == (route[2], False)
+    assert _authoritative_checkpoint_selection(checkpoints, current, "") == (route[2], False)
+
+    migration = (Path(__file__).resolve().parents[1] / "supabase" / "033_formula_race_facilitator_owned_results.sql").read_text()
+    assert "if v_current<>v_activity.activity_id then raise exception 'Only the configured current station can be submitted'; end if;" in migration
+    assert "'Duplicate',true" in migration
 
 
 def test_station_projection_excludes_retired_cp_rows_and_route_preview_is_read_only():

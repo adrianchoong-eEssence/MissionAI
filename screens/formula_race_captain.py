@@ -90,6 +90,32 @@ def _status_class(value: str) -> str:
     return "locked"
 
 
+def _authoritative_checkpoint_selection(
+    checkpoints: list[dict[str, Any]],
+    canonical_current_activity_id: str,
+    retained_selection: str = "",
+) -> tuple[str, bool]:
+    """Return the only Captain selection permitted while a route is active.
+
+    A Journey can retain a visual selection in Streamlit session state, but
+    only TeamRoutes plus canonical submissions determine progression.  A
+    previously submitted/pending station must therefore never remain selected
+    after the workspace has advanced to the next configured ActivityID.
+    """
+    checkpoint_ids = {
+        str(row.get("ActivityID", "")).strip()
+        for row in checkpoints
+        if str(row.get("ActivityID", "")).strip()
+    }
+    canonical = str(canonical_current_activity_id or "").strip()
+    retained = str(retained_selection or "").strip()
+    if canonical and canonical in checkpoint_ids:
+        return canonical, bool(retained) and retained != canonical
+    # A completed/invalid route has no canonical current station.  Do not let
+    # a stale selection masquerade as one.
+    return "", bool(retained)
+
+
 def _rank_treatment(rank: Any) -> tuple[str, str]:
     try:
         position = int(float(rank))
@@ -408,9 +434,14 @@ def show_formula_race_captain(runtime_override=None):
         st.warning("Race Control is reconciling your configured route. Submissions are temporarily unavailable until the route uses the current stations.")
         return
     checkpoint_ids={str(row.get("ActivityID", "")) for row in checkpoints}
-    selected_id=str(st.session_state.get("race_captain_selected_checkpoint", ""))
-    if selected_id not in checkpoint_ids:
-        selected_id=str(workspace.get("CurrentCheckpoint", {}).get("ActivityID", ""))
+    retained_selection = str(st.session_state.get("race_captain_selected_checkpoint", ""))
+    selected_id, clear_retained_selection = _authoritative_checkpoint_selection(
+        checkpoints,
+        str(workspace.get("CurrentCheckpoint", {}).get("ActivityID", "")),
+        retained_selection,
+    )
+    if clear_retained_selection:
+        st.session_state.pop("race_captain_selected_checkpoint", None)
     if selected_id not in checkpoint_ids:
         selected_id=str(next((row.get("ActivityID", "") for row in checkpoints if _status_copy(row.get("Status")) in {"ACTIVE","AVAILABLE","REJECTED / RESUBMIT"}), checkpoints[0].get("ActivityID", "") if checkpoints else ""))
     current=next((row for row in checkpoints if str(row.get("ActivityID", "")) == selected_id), checkpoints[0] if checkpoints else {})
