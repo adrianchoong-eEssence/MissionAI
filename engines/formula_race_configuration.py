@@ -12,12 +12,21 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 from uuid import uuid4
 
+from engines.exos_result_contract import (
+    DEFAULT_RESULT_ENTRY_OWNER,
+    RESULT_ENTRY_OWNERS as EXOS_RESULT_ENTRY_OWNERS,
+    normalise_result_entry_owner,
+)
+
 
 SCORING_METHODS = (
     "FACILITATOR_SCORE", "LOWEST_TIME", "HIGHEST_COUNT", "SUCCESS_COUNT", "NON_SCORING",
 )
 EVIDENCE_REQUIREMENTS = ("PHOTO_REQUIRED", "PHOTO_OPTIONAL", "NO_PHOTO")
-RESULT_ENTRY_OWNERS = ("FACILITATOR", "CAPTAIN")
+# One vocabulary for who owns an official result, shared with Race Control, the
+# Captain surface and the contract tests.  Migration 033 moved ownership without
+# telling the verification path; a single source is what prevents a repeat.
+RESULT_ENTRY_OWNERS = EXOS_RESULT_ENTRY_OWNERS
 CAPTAIN_RESULT_METHODS = ("LOWEST_TIME", "HIGHEST_COUNT", "SUCCESS_COUNT")
 MARKETPLACE_CATEGORIES = ("ESSENTIAL", "MATERIAL", "TOOL", "KNOWLEDGE", "CUSTOM")
 TIE_POLICIES = ("SHARED_RANK", "TEAM_ID")
@@ -39,9 +48,7 @@ def normalise_station(raw: dict[str, Any], fallback_order: int = 1) -> dict[str,
     raw = dict(raw or {})
     method = _text(raw.get("ScoringMethod", raw.get("scoring_method", "NON_SCORING"))).upper()
     evidence = _text(raw.get("EvidenceRequirement", raw.get("evidence_requirement", "PHOTO_OPTIONAL"))).upper()
-    result_owner = _text(raw.get("ResultEntryOwner", raw.get("result_entry_owner", "FACILITATOR"))).upper()
-    if result_owner not in RESULT_ENTRY_OWNERS:
-        result_owner = "FACILITATOR"
+    result_owner = normalise_result_entry_owner(raw.get("ResultEntryOwner", raw.get("result_entry_owner", DEFAULT_RESULT_ENTRY_OWNER)))
     # A facilitator score is intrinsically official-only.  NON_SCORING has no
     # numeric result control, so its owner is retained only as harmless config.
     if method == "FACILITATOR_SCORE":

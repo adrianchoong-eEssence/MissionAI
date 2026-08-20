@@ -178,10 +178,13 @@ def test_race_result_save_uses_the_audited_pre_lock_correction_rpc():
         result = adapter.save_formula_race_result("EVENT-1", "TEAM-1", 10000, 1000, 0, True, "UAT correction", "Adrian")
 
     assert result["Corrected"] is True
+    # The payload now carries the explicit result contract; a measured result
+    # states FINISHED and never claims a manual placement.
     assert runtime.calls == [("POST", "rpc/exos_v2_formula_race_save_result", {
         "p_event_id": "EVENT-1", "p_team_id": "TEAM-1", "p_activity_id": "CHECKPOINT-1",
         "p_time_ms": 10000, "p_penalty_ms": 1000, "p_bonus": 0.0,
         "p_verified": True, "p_reason": "UAT correction", "p_actor": "Adrian",
+        "p_result_status": "FINISHED", "p_manual_placement": None,
     }, True)]
 
 

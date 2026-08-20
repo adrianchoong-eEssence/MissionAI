@@ -24,6 +24,7 @@ from engines.formula_race_championship import (
     normalise_championship_components,
     validate_championship_components,
 )
+from engines.exos_result_contract import is_measured, normalise_result_status, validate_race_result
 from engines.formula_race_configuration import (
     assign_marketplace_item_ids, current_station, generate_balanced_routes, marketplace_item_identifier,
     normalise_judging_criteria, normalise_marketplace_item,
@@ -1534,7 +1535,20 @@ class FormulaRaceCoreV2StagingAdapter:
             return ""
         return self.runtime.create_submission_image_url(value[len(prefix):])
 
-    def save_formula_race_result(self, event_id: str, team_id: str, time_ms: int, penalty_ms: int, bonus: float, verified: bool, reason: str, actor: str):
+    def save_formula_race_result(self, event_id: str, team_id: str, time_ms: int, penalty_ms: int, bonus: float, verified: bool, reason: str, actor: str, result_status: str = "FINISHED", manual_placement: Any = None):
+        """Persist one Race Final result under the EXOS result contract.
+
+        A non-finished status never carries a time: the RPC refuses one, so a
+        fabricated value can no longer be used to make a team rankable.
+        """
+        status = normalise_result_status(result_status)
+        errors = validate_race_result({
+            "team_id": team_id, "result_status": status, "time_ms": time_ms,
+            "penalty_ms": penalty_ms, "manual_placement": manual_placement,
+        })
+        if errors:
+            raise RuntimeError(" ".join(errors))
+        measured = is_measured(status)
         activities = self._get_checkpoint_activities(event_id)
         activity_id = str(activities[0].get("activity_id")) if activities else f"{event_id}-FINAL"
         return self._rpc(
@@ -1543,12 +1557,14 @@ class FormulaRaceCoreV2StagingAdapter:
                 "p_event_id": str(event_id),
                 "p_team_id": str(team_id),
                 "p_activity_id": activity_id,
-                "p_time_ms": int(time_ms),
-                "p_penalty_ms": int(penalty_ms),
-                "p_bonus": float(bonus),
+                "p_time_ms": int(time_ms or 0) if measured else 0,
+                "p_penalty_ms": int(penalty_ms or 0) if measured else 0,
+                "p_bonus": float(bonus or 0),
                 "p_verified": bool(verified),
                 "p_reason": str(reason).strip(),
                 "p_actor": str(actor).strip(),
+                "p_result_status": status,
+                "p_manual_placement": None if measured or manual_placement in (None, "") else int(manual_placement),
             },
         )
 
@@ -1579,6 +1595,10 @@ class FormulaRaceCoreV2StagingAdapter:
             payload = row.get("result_payload")
             if not isinstance(payload, dict):
                 payload = {}
+            # A row saved before the result contract has no result_status, and
+            # normalise_result_status reads that absence as FINISHED, so
+            # historical rows keep their exact meaning.
+            status = normalise_result_status(payload.get("result_status"))
             out.append(
                 {
                     "team_id": str(row.get("team_id", "")),
@@ -1588,6 +1608,9 @@ class FormulaRaceCoreV2StagingAdapter:
                     "position": row.get("ranking_position"),
                     "locked": bool(row.get("locked", False)),
                     "checkpoint": str(row.get("checkpoint", "")),
+                    "result_status": status,
+                    "manual_placement": payload.get("manual_placement"),
+                    "verified": bool(payload.get("verified", False)),
                 }
             )
         return out

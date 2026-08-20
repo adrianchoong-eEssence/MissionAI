@@ -128,8 +128,8 @@ class ControlRuntime:
     def save_race_judging(self,event_id,team_id,scores,reason,actor):
         return self._run(self.runtime.save_formula_race_judging,event_id,team_id,scores,reason,actor)
 
-    def save_race_result(self,event_id,team_id,time_ms,penalty_ms,bonus,verified,reason,actor):
-        return self._run(self.runtime.save_formula_race_result,event_id,team_id,time_ms,penalty_ms,bonus,verified,reason,actor)
+    def save_race_result(self,event_id,team_id,time_ms,penalty_ms,bonus,verified,reason,actor,result_status="FINISHED",manual_placement=None):
+        return self._run(self.runtime.save_formula_race_result,event_id,team_id,time_ms,penalty_ms,bonus,verified,reason,actor,result_status,manual_placement)
 
     def lock_race_results(self,event_id,actor,reason):
         return self._run(self.runtime.lock_formula_race_results,event_id,actor,reason)

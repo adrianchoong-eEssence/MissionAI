@@ -12,6 +12,10 @@ from data.formula_race_contracts import DemoFormulaRaceProvider, LiveFormulaRace
 from data.formula_race_core_v2_adapter import FormulaRaceCoreV2StagingAdapter
 from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 from data.control_runtime import ControlRuntime
+from engines.exos_result_contract import (
+    RESULT_STATUSES, describe_result, duration_ms, format_duration_ms, is_measured,
+    normalise_result_status, split_duration_ms,
+)
 from engines.formula_race import BUILD_STATUSES,JUDGING_CATEGORIES,final_standings
 from engines.formula_race_configuration import (
     CAPTAIN_RESULT_METHODS,
@@ -793,9 +797,14 @@ def drag_results(s, control=None):
     rows=[]
     for i,t in enumerate(s.teams):
         live=next((r for r in live_rows if str(r.get("team_id",""))==t.id),{})
-        time_ms = live.get("time_ms", live.get("finish_time_ms", "—"))
-        readable = f"{float(time_ms) / 1000:.3f}s" if isinstance(time_ms, (int, float)) else "—"
-        rows.append({"Final Rank":live.get("position",i+1),"Team":t.name,"Finish":readable,"Penalty ms":live.get("penalty_ms",0),"Adjusted ms":live.get("adjusted_time_ms",time_ms),"Bonus Value":live.get("bonus_credits",live.get("bonus",0)),"Verified":live.get("verified",False),"Locked":live.get("locked",False)})
+        status=normalise_result_status(live.get("result_status"))
+        measured=is_measured(status) and live.get("time_ms") not in (None,"")
+        rows.append({"Final Rank":live.get("position",i+1),"Team":t.name,"Status":status,
+            "Result":describe_result(live) if live else "—",
+            "Penalty":format_duration_ms(live.get("penalty_ms",0)) if measured else "—",
+            "Adjusted":format_duration_ms(int(live.get("time_ms") or 0)+int(live.get("penalty_ms") or 0)) if measured else "—",
+            "Placement":live.get("manual_placement") or "—",
+            "Bonus Value":live.get("bonus_credits",live.get("bonus",0)),"Verified":live.get("verified",False),"Locked":live.get("locked",False)})
     st.dataframe(rows,width="stretch",hide_index=True)
     if not control: st.markdown("<div class='race-card'><h3>Fastest Lap</h3><p>Velocity · 12.18 seconds</p><span class='accent'>INFORMATIONAL RESULT ANNOTATION</span></div>",unsafe_allow_html=True)
     if control:
@@ -803,17 +812,43 @@ def drag_results(s, control=None):
         locked=bool(current.get("locked",False))
         if current:
             st.caption("Correcting the current pre-lock result. The correction reason and prior result are preserved in the canonical audit log.")
-        time_ms=st.number_input("Finish time (ms)",0,3600000,int(current.get("time_ms",0) or 0),key=f"race_result_time_{selected.id}",disabled=locked)
-        penalty=st.number_input("Penalty (ms)",0,3600000,int(current.get("penalty_ms",0) or 0),key=f"race_result_penalty_{selected.id}",disabled=locked)
+        status=st.selectbox("Result status",RESULT_STATUSES,
+            index=RESULT_STATUSES.index(normalise_result_status(current.get("result_status"))),
+            key=f"race_result_status_{selected.id}",disabled=locked,
+            help="Only a finished result carries a time. A non-finisher is ranked by its verified manual placement.")
+        time_ms,penalty,placement=0,0,None
+        if is_measured(status):
+            # Human units in, milliseconds stored. A historical value outside the
+            # entry range is reported rather than forced into a bounded control.
+            stored_minutes,stored_seconds,stored_ms=split_duration_ms(current.get("time_ms") or 0)
+            if stored_minutes > 59:
+                st.warning(f"Stored finish time {format_duration_ms(current.get('time_ms'))} is outside the entry range and is shown here for reference only.")
+                stored_minutes,stored_seconds,stored_ms=0,0,0
+            a,b,c=st.columns(3)
+            minutes=a.number_input("Minutes",0,59,stored_minutes,key=f"race_result_min_{selected.id}",disabled=locked)
+            seconds=b.number_input("Seconds",0,59,stored_seconds,key=f"race_result_sec_{selected.id}",disabled=locked)
+            milliseconds=c.number_input("Milliseconds",0,999,stored_ms,key=f"race_result_ms_{selected.id}",disabled=locked)
+            time_ms=duration_ms(minutes,seconds,milliseconds)
+            penalty_seconds=st.number_input("Penalty (seconds)",0,3600,int((current.get("penalty_ms",0) or 0)//1000),key=f"race_result_penalty_{selected.id}",disabled=locked)
+            penalty=duration_ms(0,penalty_seconds,0)
+            st.caption(f"Adjusted time {format_duration_ms(time_ms + penalty)}")
+        else:
+            placement=st.number_input("Manual placement",1,max(len(s.teams),1),
+                int(current.get("manual_placement") or len(s.teams)),key=f"race_result_place_{selected.id}",disabled=locked,
+                help="The observed finishing order for a team that did not complete the race. Each placement is used once.")
         bonus=st.number_input("Result annotation (informational)",0,1000,int(current.get("bonus_credits",current.get("bonus",0)) or 0),key=f"race_result_bonus_{selected.id}",disabled=locked,help="This does not award Credits, change Wallet balance, Championship Score, or adjusted race time.")
         verified=st.checkbox("Verified",value=bool(current.get("verified",False)),key=f"race_result_verified_{selected.id}",disabled=locked)
         actor=_facilitator_identity(control);reason=st.text_input("Result or correction reason",key="race_result_reason")
         if locked: st.error("Final results are locked. This result cannot be corrected.")
         action_label="Save Result Correction" if current else "Save Race Result"
         if st.button(action_label,disabled=locked or not actor or not reason,width="stretch"):
-            with st.spinner("Saving race result…"):
-                control.save_race_result(s.event_id,selected.id,time_ms,penalty,bonus,verified,reason,actor)
-            st.success("Race result saved with audit history.");_refresh_after_race_control_write()
+            try:
+                with st.spinner("Saving race result…"):
+                    control.save_race_result(s.event_id,selected.id,time_ms,penalty,bonus,verified,reason,actor,status,placement)
+            except (RuntimeDatabaseError,RuntimeError) as error:
+                st.error(f"Race result could not be saved: {error}")
+            else:
+                st.success("Race result saved with audit history.");_refresh_after_race_control_write()
         verified=sum(bool(row.get("verified", False)) for row in live_rows); missing=max(len(s.teams)-len(live_rows), 0); unverified=max(len(live_rows)-verified, 0)
         st.markdown(f"<div class='race-card'><span class='ops-label'>Final results readiness</span><br><span class='ops-value'>{verified}/{len(s.teams)}</span> VERIFIED &nbsp; · &nbsp; {missing} MISSING &nbsp; · &nbsp; {unverified} UNVERIFIED</div>", unsafe_allow_html=True)
         confirm_lock=st.checkbox("I understand final ranking will be frozen and locked results cannot be edited.",key="race_lock_confirm",disabled=locked)
