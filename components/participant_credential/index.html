@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body>
+<script>
+  function post(type, extra) {
+    window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, extra || {}), "*");
+  }
+  function base64url(bytes) {
+    let binary = "";
+    bytes.forEach(function(value) { binary += String.fromCharCode(value); });
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function credentialFor(eventId) {
+    const storageKey = "exos.team-formation.v1.enrollment." + eventId;
+    let value = "";
+    try { value = window.localStorage.getItem(storageKey) || ""; } catch (_) {}
+    if (!/^[A-Za-z0-9_-]{43}$/.test(value)) {
+      const bytes = new Uint8Array(32);
+      window.crypto.getRandomValues(bytes);
+      value = base64url(bytes);
+      try { window.localStorage.setItem(storageKey, value); } catch (_) {}
+    }
+    return value;
+  }
+  window.addEventListener("message", function(event) {
+    const message = event.data || {};
+    if (message.type !== "streamlit:render") return;
+    const eventId = String((message.args || {}).event_id || "").trim();
+    if (eventId) post("streamlit:setComponentValue", {value: {Credential: credentialFor(eventId)}, dataType: "json"});
+    post("streamlit:setFrameHeight", {height: 0});
+  });
+  post("streamlit:componentReady", {apiVersion: 1});
+</script>
+</body>
+</html>

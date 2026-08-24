@@ -16,6 +16,7 @@ from branding import (
 )
 from services.platform_ai_service import get_platform_ai_service
 from components.team_geolocation import team_geolocation
+from components.participant_credential import participant_enrollment_credential
 from data.google_drive import (
     delete_evidence_file,
     get_photo_url,
@@ -39,6 +40,7 @@ from engines.canonical_performance import (
 )
 from components.experience_preview import render_experience_participant
 from screens.mission_setup import cropped_reference_image, mission_module_name
+from screens.theme_park_race import render_theme_park_race_participant
 
 
 def running_build_sha():
@@ -199,6 +201,13 @@ def is_formula_race_event(event):
     )
 
 
+def uses_team_formation_v1(event):
+    """Team Formation selection is configuration-only and never name based."""
+    metadata = (event or {}).get("_EventPayload", {}) or {}
+    formation = metadata.get("TeamFormation", {}) if isinstance(metadata, dict) else {}
+    return str((formation or {}).get("SchemaVersion", "")) == "1"
+
+
 def render_recovery_candidate(candidate):
     """Require an explicit human choice before resuming a found identity."""
     st.info("Existing expedition record found.")
@@ -331,8 +340,24 @@ def restore_session_from_query_params(runtime):
         event = None
     join_code = join_code or normalise_join_code((event or {}).get("JoinCode", ""))
     if join_code and participant_name:
+        enrollment_credential = (
+            participant_enrollment_credential(
+                (event or {}).get("EventID", ""),
+                key=f"team_formation_recovery_credential_{(event or {}).get('EventID', '')}",
+            ) if uses_team_formation_v1(event) else ""
+        )
+        if uses_team_formation_v1(event) and not enrollment_credential:
+            # The browser-local opaque credential component mounts first and
+            # reruns with its value; never fall back to display-name recovery.
+            return
         try:
-            player = runtime.restore_join(join_code, participant_name, device_id)
+            player = (
+                runtime.recover_team_formation_participant(
+                    join_code, enrollment_credential, device_id,
+                ) if uses_team_formation_v1(event) else runtime.restore_join(
+                    join_code, participant_name, device_id,
+                )
+            )
         except RuntimeDatabaseError:
             player = None
         if player:
@@ -2605,6 +2630,13 @@ def show_participant():
             participant_event_by_code(join_code) if join_code else None
         )
         is_formula_race_join = is_formula_race_event(join_event)
+        is_team_formation_join = uses_team_formation_v1(join_event)
+        enrollment_credential = (
+            participant_enrollment_credential(
+                (join_event or {}).get("EventID", ""),
+                key=f"team_formation_join_credential_{(join_event or {}).get('EventID', '')}",
+            ) if is_team_formation_join else ""
+        )
         is_bayu_join = bool(
             join_event
             and str(join_event.get("EventID", "")) == "EVT-0004"
@@ -2632,6 +2664,8 @@ def show_participant():
                 "device_id": device_id,
                 "is_bayu": is_bayu_join,
                 "is_formula_race": is_formula_race_join,
+                "is_team_formation": is_team_formation_join,
+                "enrollment_credential": enrollment_credential,
                 "first_name": " ".join(first_name.split()),
                 "last_name": " ".join(last_name.split()),
             }
@@ -2648,6 +2682,15 @@ def show_participant():
                         pending["first_name"],
                         pending["last_name"],
                         pending["device_id"],
+                    )
+                elif pending.get("is_team_formation"):
+                    if not pending.get("enrollment_credential"):
+                        st.session_state.pop("participant_join_request", None)
+                        st.info("Securing your registration. Please tap Join Event again.")
+                        st.stop()
+                    player = runtime.register_team_formation_participant(
+                        pending["join_code"], pending["participant_name"],
+                        pending["device_id"], pending["enrollment_credential"],
                     )
                 elif pending.get("is_bayu"):
                     player = runtime.join_player(
@@ -2676,13 +2719,14 @@ def show_participant():
                 st.error(str(error))
                 st.stop()
 
-            player = hydrate_recovery_candidate(
-                runtime,
-                player,
-                pending["join_code"],
-                pending["participant_name"],
-                pending["device_id"],
-            )
+            if not pending.get("is_team_formation"):
+                player = hydrate_recovery_candidate(
+                    runtime,
+                    player,
+                    pending["join_code"],
+                    pending["participant_name"],
+                    pending["device_id"],
+                )
 
             if player.get("PreassignedIdentityRequired") and not player.get("Found"):
                 st.session_state.pop("participant_join_request", None)
@@ -2715,9 +2759,17 @@ def show_participant():
                 st.stop()
             participant_name = normalise_join_name(first_name, last_name)
             try:
-                player = runtime.restore_join(
-                    join_code, participant_name, device_id,
-                )
+                if is_team_formation_join:
+                    if not enrollment_credential:
+                        st.info("Secure recovery is loading. Please try again in a moment.")
+                        st.stop()
+                    player = runtime.recover_team_formation_participant(
+                        join_code, enrollment_credential, device_id,
+                    )
+                else:
+                    player = runtime.restore_join(
+                        join_code, participant_name, device_id,
+                    )
             except RuntimeDatabaseError:
                 player = None
             if not player:
@@ -2752,6 +2804,21 @@ def show_participant():
     st.success(f"Welcome {st.session_state['participant_name']}")
     st.caption(st.session_state["participant_event_name"])
     render_team_assignment_card(db)
+    event_id = st.session_state.get("participant_event_id", "")
+    event = db.get_event(event_id) or {}
+    if db.is_theme_park_race_event(event):
+        # The component retains the opaque credential in browser local storage;
+        # it is never copied into query parameters or used as a display name.
+        enrollment_credential = participant_enrollment_credential(
+            event_id, key=f"theme_park_race_credential_{event_id}",
+        )
+        render_theme_park_race_participant(
+            db,
+            enrollment_credential=enrollment_credential,
+            device_id=participant_device_id(),
+        )
+        footer()
+        return
     participant_install_experience()
     st.divider()
     render_participant_performance(

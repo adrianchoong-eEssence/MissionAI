@@ -21,6 +21,13 @@ from data.runtime_database import RuntimeDatabaseError, get_runtime_database
 from engines.programme_duplication import clone_programme_stages
 from engines.programme_hierarchy import activity_details, build_programme_hierarchy
 from engines.stage_timer import new_timer, transition_timer
+from engines.theme_park_race import (
+    facilitator_projection as theme_park_race_facilitator_projection,
+    is_theme_park_race,
+    normalise_configuration as normalise_theme_park_race_configuration,
+    participant_projection as theme_park_race_participant_projection,
+    project_stations as project_theme_park_race_stations,
+)
 
 
 _V2_TABLES = {
@@ -29,6 +36,7 @@ _V2_TABLES = {
     "submissions_v2", "submission_evidence_v2", "reviews_v2",
     "score_transactions_v2", "credit_transactions_v2", "audit_log_v2",
     "projector_state_v2", "marketplace_items_v2", "marketplace_transactions_v2",
+    "team_access_sessions_v2",
 }
 _KNOWN_PRODUCTION_HOSTS = {"bqsbkdfzqyiodivhyxnq.supabase.co"}
 
@@ -172,6 +180,32 @@ class StandardCoreV2Adapter:
             "limit": "1",
         })
         return self._event(row) if row else None
+
+    @staticmethod
+    def is_theme_park_race_event(event):
+        """Select the generic engine only from RaceConfiguration.EngineKind."""
+        return is_theme_park_race(event)
+
+    def get_theme_park_race_configuration(self, event_id):
+        event = self.get_event(event_id)
+        if not event or not self.is_theme_park_race_event(event):
+            return {}
+        return normalise_theme_park_race_configuration(event)
+
+    def save_theme_park_race_configuration(self, event_id, configuration, actor):
+        """Persist the generic engine contract through its guarded Core RPC."""
+        return self._rpc("exos_v2_theme_park_race_save_configuration", {
+            "p_event_id": str(event_id),
+            "p_configuration": dict(configuration or {}),
+            "p_actor": str(actor),
+        })
+
+    def set_theme_park_race_runtime_phase(self, event_id, runtime_phase, actor):
+        return self._rpc("exos_v2_set_theme_park_race_runtime_phase", {
+            "p_event_id": str(event_id),
+            "p_runtime_phase": str(runtime_phase),
+            "p_actor": str(actor),
+        })
 
     def create_new_join_code(self):
         alphabet = string.ascii_uppercase + string.digits
@@ -408,9 +442,238 @@ class StandardCoreV2Adapter:
             "JoinedAt": r.get("created_at", ""), "LastSeenAt": r.get("last_seen_at", ""),
         } for r in rows]
 
+    def get_theme_park_race_players(self, event_id):
+        """Read the additive Captain bit only for a configured Team Formation event."""
+        rows = self._rows("participants_v2", {
+            "event_id": f"eq.{event_id}", "is_archived": "eq.false",
+            "select": "participant_id,event_id,team_id,display_name,is_team_formation_captain,is_leader,created_at,last_seen_at",
+            "order": "created_at.asc",
+        })
+        return [{
+            "ParticipantID": str(row.get("participant_id", "")),
+            "EventID": str(row.get("event_id", "")),
+            "TeamID": str(row.get("team_id", "")),
+            "Name": str(row.get("display_name", "")),
+            "IsTeamFormationCaptain": bool(row.get("is_team_formation_captain")),
+            "IsLeader": bool(row.get("is_leader")),
+            "JoinedAt": row.get("created_at", ""),
+            "LastSeenAt": row.get("last_seen_at", ""),
+        } for row in rows]
+
     def get_team_roster(self, event_id, team_name):
         team = next((t for t in self.get_teams(event_id) if t["TeamName"] == team_name or t["TeamID"] == team_name), {})
         return [p for p in self.get_players(event_id) if p["TeamID"] == team.get("TeamID")]
+
+    # Team Formation V1 / Theme Park Race --------------------------------
+    def team_formation_configuration(self, event_id):
+        event = self.get_event(event_id) or {}
+        return _dict(self.event_metadata(event).get("TeamFormation"))
+
+    def team_formation_enabled(self, event_id):
+        return str(self.team_formation_configuration(event_id).get("SchemaVersion", "")) == "1"
+
+    def register_team_formation_participant(self, join_code, display_name, device_id,
+                                            enrollment_credential):
+        event = self.get_event_by_join_code(join_code) or {}
+        formation = _dict(self.event_metadata(event).get("TeamFormation"))
+        mode = str(formation.get("Mode", "")).upper()
+        if mode == "RANDOM_ASSIGN":
+            rpc = "exos_v2_team_formation_register_random"
+            payload = {
+                "p_join_code": join_code, "p_display_name": display_name,
+                "p_device_id": device_id, "p_enrollment_credential": enrollment_credential,
+            }
+        elif mode == "PREASSIGNED":
+            rpc = "exos_v2_team_formation_claim_preassigned"
+            payload = {
+                "p_join_code": join_code, "p_enrollment_credential": enrollment_credential,
+                "p_device_id": device_id,
+            }
+        else:
+            raise RuntimeDatabaseError("Team Formation is not open for this event.")
+        return self._identity(self._rpc(rpc, payload, admin=False))
+
+    def recover_team_formation_participant(self, join_code, enrollment_credential, device_id):
+        return self._identity(self._rpc("exos_v2_recover_team_formation_participant", {
+            "p_join_code": join_code, "p_enrollment_credential": enrollment_credential,
+            "p_device_id": device_id,
+        }, admin=False))
+
+    def claim_team_formation_captain(self, participant_session_token, device_id):
+        return self._rpc("exos_v2_claim_team_formation_captain", {
+            "p_participant_session_token": participant_session_token,
+            "p_device_id": device_id,
+        }, admin=False)
+
+    def recover_team_formation_captain(self, join_code, enrollment_credential, device_id):
+        return self._identity(self._rpc("exos_v2_recover_team_formation_captain", {
+            "p_join_code": join_code, "p_enrollment_credential": enrollment_credential,
+            "p_device_id": device_id,
+        }, admin=False))
+
+    def open_team_formation(self, event_id, actor):
+        return self._rpc("exos_v2_open_team_formation", {
+            "p_event_id": event_id, "p_actor": actor,
+        })
+
+    def lock_team_formation(self, event_id, actor):
+        return self._rpc("exos_v2_lock_team_formation", {
+            "p_event_id": event_id, "p_actor": actor,
+        })
+
+    def open_team_captain_selection(self, event_id, actor):
+        return self._rpc("exos_v2_open_team_captain_selection", {
+            "p_event_id": event_id, "p_actor": actor,
+        })
+
+    def activate_team_formation(self, event_id, actor):
+        return self._rpc("exos_v2_activate_team_formation", {
+            "p_event_id": event_id, "p_actor": actor,
+        })
+
+    def transfer_team_formation_captain(self, event_id, team_id, participant_id, actor, reason):
+        return self._rpc("exos_v2_transfer_team_formation_captain", {
+            "p_event_id": event_id, "p_team_id": team_id,
+            "p_target_participant_id": participant_id,
+            "p_actor": actor, "p_reason": reason,
+        })
+
+    def get_theme_park_race_stations(self, event_id):
+        return project_theme_park_race_stations(self.get_programme_stages(event_id))
+
+    def get_theme_park_race_mission_runtime(self, event_id, team_id=""):
+        """Return existing activity runtime rows used as canonical board selection state."""
+        query = {
+            "event_id": f"eq.{event_id}",
+            "select": "runtime_id,event_id,team_id,participant_id,activity_id,state_payload,is_completed,updated_at",
+            "order": "updated_at.desc",
+        }
+        if team_id:
+            query["team_id"] = f"eq.{team_id}"
+        return [{
+            "RuntimeID": str(row.get("runtime_id", "")),
+            "EventID": str(row.get("event_id", "")),
+            "TeamID": str(row.get("team_id", "")),
+            "ParticipantID": str(row.get("participant_id", "")),
+            "ActivityID": str(row.get("activity_id", "")),
+            "StatePayload": _dict(row.get("state_payload")),
+            "IsCompleted": bool(row.get("is_completed")),
+            "UpdatedAt": row.get("updated_at", ""),
+        } for row in self._rows("activity_runtime_v2", query)]
+
+    def theme_park_race_participant_workspace(self, session_token):
+        participant = self.get_player_by_token(session_token)
+        if not participant:
+            raise RuntimeDatabaseError("Participant session is required.")
+        event_id = str(participant.get("EventID", ""))
+        event = self.get_event(event_id)
+        if not event or not self.is_theme_park_race_event(event):
+            raise RuntimeDatabaseError("Event is not configured for Theme Park Race.")
+        captain_rows = self.get_theme_park_race_players(event_id)
+        canonical = next((row for row in captain_rows if row["ParticipantID"] == str(participant.get("ParticipantID", ""))), {})
+        participant = {**participant, **canonical}
+        participant_session = self._one("participant_sessions_v2", {
+            "session_token": f"eq.{session_token}", "is_active": "eq.true",
+            "select": "device_id", "limit": "1",
+        })
+        participant["DeviceID"] = str(participant_session.get("device_id", ""))
+        captain_session = self._one("team_access_sessions_v2", {
+            "event_id": f"eq.{event_id}",
+            "team_id": f"eq.{participant.get('TeamID', '')}",
+            "team_formation_captain_participant_id": f"eq.{participant.get('ParticipantID', '')}",
+            "device_id": f"eq.{str(participant.get('DeviceID', ''))}",
+            "is_active": "eq.true",
+            "select": "team_access_session_id",
+            "limit": "1",
+        }) if participant.get("IsTeamFormationCaptain") else {}
+        participant["CaptainSessionActive"] = bool(captain_session)
+        submissions = [row for row in self.get_submissions(event_id)
+                       if str(row.get("TeamID", "")) == str(participant.get("TeamID", ""))]
+        team_members = [row for row in captain_rows if str(row.get("TeamID", "")) == str(participant.get("TeamID", ""))]
+        return theme_park_race_participant_projection(
+            event=event, participant=participant,
+            stations=self.get_theme_park_race_stations(event_id), submissions=submissions,
+            mission_runtime=self.get_theme_park_race_mission_runtime(event_id, participant.get("TeamID", "")),
+            team_members=team_members,
+        )
+
+    def select_theme_park_race_mission(self, session_token, activity_id):
+        """Atomically select an available OPEN_MISSION_BOARD activity server-side."""
+        return self._rpc("exos_v2_theme_park_race_board_select", {
+            "p_session_token": session_token,
+            "p_activity_id": activity_id,
+        }, admin=False)
+
+    def save_theme_park_race_submission(self, session_token, activity_id, submission_payload):
+        """Submit through the selected strategy's Captain-guarded engine RPC."""
+        participant = self.get_player_by_token(session_token)
+        event = self.get_event(str((participant or {}).get("EventID", ""))) if participant else {}
+        configuration = normalise_theme_park_race_configuration(event)
+        rpc = "exos_v2_theme_park_race_board_submit" if configuration.get("StrategyMode") == "OPEN_MISSION_BOARD" else "exos_v2_theme_park_race_submit"
+        return self._rpc(rpc, {
+            "p_session_token": session_token,
+            "p_activity_id": activity_id,
+            "p_submission_payload": dict(submission_payload or {}),
+        }, admin=False)
+
+    def record_theme_park_race_ride_outcome(self, session_token, activity_id, attempt_status, payload=None):
+        return self._rpc("exos_v2_theme_park_race_board_record_ride_outcome", {
+            "p_session_token": session_token,
+            "p_activity_id": activity_id,
+            "p_ride_attempt_status": attempt_status,
+            "p_payload": dict(payload or {}),
+        }, admin=False)
+
+    def review_theme_park_race_board_submission(self, submission_id, expected_submitted_at, decision,
+                                                score=0, actor="", reason="", idempotency_key=""):
+        """Review an OPEN_MISSION_BOARD submission through the installed 039 contract.
+
+        The engine re-validates EngineKind, StrategyMode and the reviewed
+        revision server-side and derives the score ledger identity itself, so
+        the caller key travels only as audit metadata.
+        """
+        submission = str(submission_id or "").strip()
+        revision = str(expected_submitted_at or "").strip()
+        reviewer = str(actor or "").strip()
+        if not submission or not revision or not reviewer:
+            raise RuntimeDatabaseError(
+                "Theme Park Race board review requires a submission, its submitted-at revision, and a facilitator identity."
+            )
+        approved = str(decision).upper() in {"APPROVE", "APPROVED"}
+        mapped = "APPROVE" if approved else "REJECT"
+        return self._rpc("exos_v2_theme_park_race_board_review", {
+            "p_submission_id": submission,
+            "p_expected_submitted_at": revision,
+            "p_decision": mapped,
+            "p_score": float(score or 0) if approved else 0.0,
+            "p_actor": reviewer,
+            "p_reason": str(reason or ""),
+            "p_idempotency_key": str(idempotency_key or "").strip()
+            or f"theme-park-race-board-review|{submission}|{revision}|{mapped}",
+        })
+
+    def set_theme_park_race_mission_operation(self, event_id, activity_id, operational_status, secret_state, actor):
+        return self._rpc("exos_v2_theme_park_race_board_set_mission_operation", {
+            "p_event_id": event_id,
+            "p_activity_id": activity_id,
+            "p_operational_status": operational_status,
+            "p_secret_state": secret_state,
+            "p_actor": actor,
+        })
+
+    def theme_park_race_facilitator_workspace(self, event_id):
+        event = self.get_event(event_id)
+        if not event or not self.is_theme_park_race_event(event):
+            raise RuntimeDatabaseError("Event is not configured for Theme Park Race.")
+        return theme_park_race_facilitator_projection(
+            event=event,
+            teams=self.get_teams(event_id),
+            participants=self.get_theme_park_race_players(event_id),
+            stations=self.get_theme_park_race_stations(event_id),
+            submissions=self.get_submissions(event_id),
+            leaderboard=self.get_canonical_leaderboard(event_id),
+            mission_runtime=self.get_theme_park_race_mission_runtime(event_id),
+        )
 
     def can_participant_submit(self, session_token):
         return {"Allowed": bool(self.get_player_by_token(session_token)), "Reason": "REGISTERED_PARTICIPANT"}
@@ -616,6 +879,15 @@ class StandardCoreV2Adapter:
             "DriveFileID": payload.get("DriveFileID", ""), "Status": row.get("submission_status", "SUBMITTED"),
             "Score": row.get("score", ""), "Judged": "Yes" if row.get("reviewed_at") else "No",
             "SubmittedAt": row.get("submitted_at", ""),
+            "RideEvidencePathway": payload.get("RideEvidencePathway", ""),
+            "RideAttemptStatus": payload.get("RideAttemptStatus", ""),
+            "RiderParticipantIDs": list(payload.get("RiderParticipantIDs", [])) if isinstance(payload.get("RiderParticipantIDs"), list) else [],
+            "GroundControlParticipantIDs": list(payload.get("GroundControlParticipantIDs", [])) if isinstance(payload.get("GroundControlParticipantIDs"), list) else [],
+            "QueueEntryEvidence": payload.get("QueueEntryEvidence", ""),
+            "PostRideEvidence": payload.get("PostRideEvidence", ""),
+            "FacilitatorVerificationRequest": payload.get("FacilitatorVerificationRequest", ""),
+            "CanonicalTeamMemberCount": payload.get("CanonicalTeamMemberCount", ""),
+            "RequiredRideParticipants": payload.get("RequiredRideParticipants", ""),
         }
 
     def get_submissions(self, event_id):

@@ -112,6 +112,47 @@ class ControlRuntime:
             )
         }
 
+    # Theme Park Race uses Team Formation V1 and existing Core v2 records.
+    # These are facilitator-only lifecycle controls; participants never set
+    # formation or hunt state from a browser cache.
+    def open_team_formation(self, event_id, actor):
+        return self._run(self.runtime.open_team_formation, event_id, actor)
+
+    def lock_team_formation(self, event_id, actor):
+        return self._run(self.runtime.lock_team_formation, event_id, actor)
+
+    def open_team_captain_selection(self, event_id, actor):
+        return self._run(self.runtime.open_team_captain_selection, event_id, actor)
+
+    def activate_team_formation(self, event_id, actor):
+        return self._run(self.runtime.activate_team_formation, event_id, actor)
+
+    def transfer_team_formation_captain(self, event_id, team_id, participant_id, actor, reason):
+        return self._run(
+            self.runtime.transfer_team_formation_captain,
+            event_id, team_id, participant_id, actor, reason,
+        )
+
+    def set_theme_park_race_runtime_phase(self, event_id, runtime_phase, actor):
+        return self._run(
+            self.runtime.set_theme_park_race_runtime_phase,
+            event_id, runtime_phase, actor,
+        )
+
+    def review_theme_park_race_board_submission(self, submission_id, expected_submitted_at, decision,
+                                                score=0, actor="", reason="", idempotency_key=""):
+        """Facilitator review for OPEN_MISSION_BOARD only; other modes keep their contract."""
+        return self._run(
+            self.runtime.review_theme_park_race_board_submission,
+            submission_id, expected_submitted_at, decision, score, actor, reason, idempotency_key,
+        )
+
+    def set_theme_park_race_mission_operation(self, event_id, activity_id, operational_status, secret_state, actor):
+        return self._run(
+            self.runtime.set_theme_park_race_mission_operation,
+            event_id, activity_id, operational_status, secret_state, actor,
+        )
+
     def pause_event(self, event_id):
         return self.control_state(event_id, "CurrentStageStatus", "PAUSED")
 

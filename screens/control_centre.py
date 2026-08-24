@@ -9,6 +9,7 @@ from data.standard_core_v2_adapter import get_standard_database
 from data.control_runtime import ControlRuntime
 from engines.stage_timer import remaining_seconds
 from engines.canonical_performance import load_performance_snapshot
+from screens.theme_park_race import render_theme_park_race_facilitator
 from engines.programme_hierarchy import (
     activity_content_config,
     activity_details,
@@ -713,6 +714,9 @@ def show_control_centre(db=None):
         return
     event = select_active_event(events, label="Current event", key="control_event")
     event_id = str(event.get("EventID", ""))
+    if db.is_theme_park_race_event(event):
+        render_theme_park_race_facilitator(db, control, event_id)
+        return
     stages = db.get_programme_stages(event_id)
     if not stages:
         st.warning("Build and save the programme before launch.")

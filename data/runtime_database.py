@@ -550,6 +550,13 @@ class SupabaseRuntimeDB:
                 "gps_required": bool(details.get("GPSRequired", False)),
                 "ai_behaviour": str(details.get("AIBehaviour", details.get("AISupport", ""))),
                 "projector_behaviour": str(activity.get("ProjectorBehaviour", "")),
+                # Kept inside the existing activity payload so a Theme Park
+                # Race is content/configuration, not a parallel mission model.
+                "race_station": (
+                    dict(activity.get("RaceStation", {}))
+                    if isinstance(activity.get("RaceStation", {}), dict)
+                    else {}
+                ),
             },
         }
         return payload
@@ -702,6 +709,11 @@ class SupabaseRuntimeDB:
                 "ParticipantScope": str(payload.get("participant_scope", "TEAM")),
                 "StartTime": str(payload.get("start_time", module.get("StartTime", ""))),
                 "FacilitatorInstruction": encode_activity_details(details),
+                "RaceStation": (
+                    dict(payload.get("race_station", {}))
+                    if isinstance(payload.get("race_station", {}), dict)
+                    else {}
+                ),
                 "IsActive": "No" if not activity.get("is_active", True) else "Yes",
             }
             module["Activities"].append(row)
