@@ -609,32 +609,22 @@ def render_team_assignment_card(db):
 
     if image:
         st.image(image, width="stretch")
-    optional_country = (
-        f'<div style="font-size:18px;margin-top:6px;">{html.escape(country)}</div>'
-        if theme_type == "COUNTRY" and country else ""
-    )
-    visual = f'<div style="font-size:64px;line-height:1.2;">{html.escape(emoji)}</div>' if emoji else ""
-    st.markdown(
-        f"""
-        <div style="
-            padding:24px;
-            border-radius:22px;
-            background:#082D58;
-            color:white;
-            text-align:center;
-            margin-bottom:18px;
-        ">
-            <div style="font-size:18px;font-weight:800;letter-spacing:.14em;">YOUR TEAM</div>
-            <div style="font-size:15px;opacity:.75;margin-top:8px;">{html.escape(theme_name)}</div>
-            {visual}
-            <div style="font-size:16px;opacity:.75;margin-top:8px;">TEAM IDENTITY</div>
-            <div style="font-size:46px;font-weight:900;margin-top:4px;">{html.escape(team_identity)}</div>
-            {optional_country}
-            <div style="font-size:18px;margin-top:12px;opacity:.9;">{html.escape(instruction)}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Native Streamlit elements only.  Team identity, theme and instruction are
+    # facilitator-configured free text, and interpolating them into a raw HTML
+    # block made the whole card render as literal markup whenever a value
+    # carried a newline.  Streamlit escapes these values for us.
+    with st.container(border=True):
+        st.caption("YOUR TEAM")
+        if theme_name:
+            st.caption(theme_name)
+        if emoji:
+            st.title(emoji)
+        st.caption("TEAM IDENTITY")
+        st.header(team_identity)
+        if theme_type == "COUNTRY" and country:
+            st.caption(country)
+        if instruction:
+            st.info(instruction)
     if roster:
         st.markdown("#### Team Members")
         for member in roster:

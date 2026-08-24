@@ -3,6 +3,8 @@ import os
 import streamlit as st
 
 from branding import apply_branding, configure_page
+from data.standard_core_v2_adapter import get_standard_database
+from engines.theme_park_race import is_theme_park_race
 from screens.participant import show_participant
 
 configure_page(layout="centered")
@@ -19,7 +21,48 @@ def _deployment_environment() -> str:
         return ""
 
 
+def _requested_event_identity():
+    """Return the (event_id, join_code) this browser is currently acting on."""
+    event_id = str(
+        st.session_state.get("participant_event_id", "")
+        or st.query_params.get("event_id", "")
+    ).strip()
+    join_code = str(
+        st.session_state.get("participant_join_code", "")
+        or st.query_params.get("join_code", "")
+    ).strip().upper()
+    return event_id, join_code
+
+
+def _is_theme_park_race_request() -> bool:
+    """Select the engine only from canonical ``RaceConfiguration.EngineKind``.
+
+    A Theme Park Race participant or Captain stays inside this Core v2
+    application for the whole registration → team → Captain lifecycle.  The
+    legacy Formula R.A.C.E. captain shell is never their destination, whatever
+    ``?race=1`` or a restored PWA session URL asks for.  A lookup failure
+    returns False so Formula R.A.C.E. routing is left exactly as it was.
+    """
+    event_id, join_code = _requested_event_identity()
+    if not event_id and not join_code:
+        return False
+    try:
+        runtime = get_standard_database()
+        event = runtime.get_event(event_id) if event_id else None
+        if not event and join_code:
+            event = runtime.get_event_by_join_code(join_code)
+    except Exception:
+        return False
+    return is_theme_park_race(event)
+
+
 _race_captain_requested = str(st.query_params.get("race", "")).strip() == "1"
+
+# Engine selection precedes every legacy captain route: a Theme Park Race is
+# resolved from configuration, never from a query parameter or a programme name.
+if _is_theme_park_race_request():
+    show_participant()
+    st.stop()
 
 if _deployment_environment() == "staging" and not _race_captain_requested:
     show_participant()
@@ -102,6 +145,9 @@ def _is_core_v2_race_request() -> bool:
         return False
 
     event = runtime.get_event_by_join_code(join_code)
+    if is_theme_park_race(event):
+        # A configured engine always outranks the legacy name/prefix heuristic.
+        return False
     event_name = str((event or {}).get("EventName", "")).upper()
     return "FORMULA RACE" in event_name or event_name == "RACE" or join_code.startswith("RACE")
 
