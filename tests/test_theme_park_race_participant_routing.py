@@ -249,13 +249,18 @@ def test_session_identity_outranks_query_parameters_for_engine_selection():
 
 # 5. Captain / non-Captain routing follows canonical Team Formation state.
 
-def _workspace(lifecycle, is_captain, session_active=True):
+def _workspace(lifecycle, is_captain, session_active=True, has_captain=False):
     return {
         "EventID": GENTING_EVENT_ID,
         "Lifecycle": lifecycle,
         "StrategyMode": OPEN_MISSION_BOARD,
         "IsCaptain": is_captain,
         "CaptainSessionActive": session_active,
+        "TeamHasCaptain": has_captain or is_captain,
+        "CaptainName": "Ruth" if has_captain else "",
+        # Canonical eligibility, as projected by participant_projection.
+        "CanClaimCaptain": lifecycle == "CAPTAIN_SELECTION"
+        and not is_captain and not has_captain,
         "Progress": {"Completed": 0, "Total": 3, "SubmissionsByActivity": {}},
         "MissionBoard": [{
             "ActivityID": "A1", "DisplayName": "Ride", "MissionClass": "RIDE",
@@ -322,7 +327,9 @@ def test_captain_selection_is_offered_only_in_the_captain_selection_state():
             types.SimpleNamespace(runtime=db.runtime),
             _workspace("CAPTAIN_SELECTION", False), "", "DEVICE",
         ) is False
-        fake.button.assert_called_once()
+        assert [call.args[0] for call in fake.button.call_args_list] == [
+            "Become Team Captain",
+        ]
 
     with patch.object(theme_park_race, "st") as fake:
         assert theme_park_race._render_captain_authority(
@@ -331,6 +338,15 @@ def test_captain_selection_is_offered_only_in_the_captain_selection_state():
         ) is False
         fake.button.assert_not_called()
         fake.info.assert_called_once()
+
+    # A team that already has a Captain is never offered the claim again.
+    with patch.object(theme_park_race, "st") as fake:
+        fake.button.return_value = False
+        assert theme_park_race._render_captain_authority(
+            types.SimpleNamespace(runtime=db.runtime),
+            _workspace("CAPTAIN_SELECTION", False, has_captain=True), "", "DEVICE",
+        ) is False
+        fake.button.assert_not_called()
 
 
 # 6. The team card no longer emits raw HTML as literal text.

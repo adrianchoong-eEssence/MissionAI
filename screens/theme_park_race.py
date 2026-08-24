@@ -115,18 +115,61 @@ def _restore_captain_recovery(identity):
             st.session_state[target] = identity[source]
 
 
+def _render_captain_claim(db, workspace, device_id):
+    """Offer the canonical Team Formation Captain claim to an eligible member.
+
+    The seat, not the browser, decides what is shown: eligibility comes from the
+    canonical workspace, and the claim itself is settled server-side by
+    ``exos_v2_claim_team_formation_captain`` under the participant's own
+    session.  No PIN, no Formula R.A.C.E. captain shell, no service role.
+    """
+    event_id = workspace.get("EventID", "")
+    if not workspace.get("CanClaimCaptain"):
+        captain_name = str(workspace.get("CaptainName", "") or "").strip()
+        # Safe, public team fact only — never the Captain's session or device.
+        st.info(
+            f"Captain already selected: {captain_name}." if captain_name
+            else "Captain already selected for this team."
+        )
+        return
+
+    st.write("Your team does not have a Team Captain yet.")
+    if not st.button(
+        "Become Team Captain", type="primary", width="stretch",
+        key=f"theme_race_claim_{event_id}",
+    ):
+        return
+
+    session_token = st.session_state.get("participant_session_token", "")
+    if not session_token:
+        st.error("Your participant session is reconnecting. Try again in a moment.")
+        return
+    try:
+        result = db.runtime.claim_team_formation_captain(session_token, device_id)
+    except RuntimeDatabaseError as error:
+        st.error(str(error))
+        return
+
+    if result.get("Claimed"):
+        st.success("You are now this team’s Team Captain.")
+        st.rerun()
+    elif result.get("RecoveryRequired"):
+        st.warning(
+            "Captain access is already active on a different device. "
+            "Recover it on that device, or ask your facilitator to transfer it."
+        )
+    elif result.get("CaptainAlreadyClaimed"):
+        st.info("Captain already selected for this team.")
+        st.rerun()
+    else:
+        st.info("Captain selection is not open for this team right now.")
+
+
 def _render_captain_authority(db, workspace, enrollment_credential, device_id):
     event_id = workspace.get("EventID", "")
     if not workspace.get("IsCaptain"):
         if workspace.get("Lifecycle") == "CAPTAIN_SELECTION":
-            if st.button("Claim Captain authority", type="primary", width="stretch", key=f"theme_race_claim_{event_id}"):
-                result = db.runtime.claim_team_formation_captain(
-                    st.session_state.get("participant_session_token", ""), device_id,
-                )
-                if result.get("Claimed"):
-                    st.success("Captain authority is now active for this team.")
-                    st.rerun()
-                st.info("Another team member has already claimed Captain authority.")
+            _render_captain_claim(db, workspace, device_id)
         else:
             st.info("Only the selected Captain can submit evidence for this team.")
         return False
@@ -371,12 +414,19 @@ def render_theme_park_race_participant(db, enrollment_credential="", device_id="
     try:
         workspace = _workspace(db, session_token)
     except RuntimeDatabaseError as error:
+        # A failed workspace read otherwise removes the whole surface, including
+        # Captain selection, with no way back short of a full page reload.
         st.warning("Theme Park Race state is reconnecting.")
         st.caption(str(error))
+        if st.button("Retry", width="stretch", key="theme_race_workspace_retry"):
+            st.rerun()
         return
     lifecycle = workspace.get("Lifecycle", "REGISTRATION")
     title, message = _LIFECYCLE_COPY.get(lifecycle, ("Theme Park Race", "Waiting for canonical event state."))
     st.subheader(title)
+    team_identity = str(workspace.get("TeamIdentity", "") or "").strip()
+    if team_identity:
+        st.caption(f"Team {team_identity}")
     st.info(message)
     strategy_mode = str(workspace.get("StrategyMode", "CONFIGURED_TEAM_ROUTE")).upper()
     progress_label = "Team mission progress" if strategy_mode == "OPEN_MISSION_BOARD" else "Team route progress"

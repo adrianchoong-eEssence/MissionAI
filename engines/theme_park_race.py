@@ -581,27 +581,49 @@ def participant_projection(
     current = station_map.get(progress["CurrentActivityID"])
     following = station_map.get(progress["NextActivityID"])
     lifecycle = participant_lifecycle(formation, config, registered=bool(participant))
+    participant_id = _text(participant.get("ParticipantID", participant.get("participant_id")))
+    members = [
+        {"ParticipantID": _text(row.get("ParticipantID", row.get("participant_id"))),
+         "Name": _text(row.get("Name", row.get("display_name"))),
+         "IsCaptain": _bool(row.get("IsTeamFormationCaptain", row.get("is_team_formation_captain")))}
+        for row in team_members or []
+    ]
+    # The team's effective Captain is a canonical team fact, so every member can
+    # see whether the seat is still open.  Without it a participant cannot tell
+    # "no Captain yet" from "a team mate already claimed it".
+    team_captain = next((row for row in members if row["IsCaptain"]), {})
+    is_captain = _bool(
+        participant.get("IsTeamFormationCaptain", participant.get("is_team_formation_captain"))
+    ) or team_captain.get("ParticipantID", "") == participant_id != ""
+    captain_participant_id = (
+        _text(participant.get("CaptainParticipantID"))
+        or _text(team_captain.get("ParticipantID"))
+    )
     return {
         "EngineKind": ENGINE_KIND,
         "EventID": _text(event.get("EventID", event.get("event_id"))),
-        "ParticipantID": _text(participant.get("ParticipantID", participant.get("participant_id"))),
+        "ParticipantID": participant_id,
         "TeamID": team_id,
+        "TeamIdentity": _text(
+            participant.get("TeamIdentity", participant.get("Team", participant.get("team_name")))
+        ) or team_id,
         "Lifecycle": lifecycle,
         "TeamFormationPhase": _text(formation.get("Phase")),
         "RuntimePhase": config["RuntimePhase"],
         "StrategyMode": config["StrategyMode"],
-        "IsCaptain": _bool(participant.get("IsTeamFormationCaptain", participant.get("is_team_formation_captain"))),
+        "IsCaptain": is_captain,
         "CaptainSessionActive": _bool(participant.get("CaptainSessionActive")),
-        "CaptainParticipantID": _text(participant.get("CaptainParticipantID")),
+        "CaptainParticipantID": captain_participant_id,
+        "CaptainName": _text(team_captain.get("Name")),
+        "TeamHasCaptain": bool(captain_participant_id),
+        # Canonical eligibility: the seat is open and Team Formation is asking
+        # this team to fill it.  Never derived from a query parameter.
+        "CanClaimCaptain": lifecycle == "CAPTAIN_SELECTION" and not captain_participant_id,
         "Route": route,
         "CurrentMission": deepcopy(current) if current else None,
         "NextMission": deepcopy(following) if following else None,
         "MissionBoard": board,
-        "TeamMembers": [
-            {"ParticipantID": _text(row.get("ParticipantID", row.get("participant_id"))),
-             "Name": _text(row.get("Name", row.get("display_name")))}
-            for row in team_members or []
-        ],
+        "TeamMembers": members,
         "Progress": progress,
     }
 
