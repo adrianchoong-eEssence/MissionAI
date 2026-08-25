@@ -562,10 +562,28 @@ def render_theme_park_race_facilitator(db, control, event_id):
     queue = workspace.get("ReviewQueue", [])
     if not queue:
         st.caption("No submissions are awaiting review.")
+    # Canonical display names, so a pending review identifies its team and
+    # mission instead of raw team/activity identifiers.
+    team_names = {
+        str(row.get("TeamID", "")): str(row.get("TeamIdentity") or row.get("TeamID", ""))
+        for row in workspace.get("Teams", [])
+    }
+    mission_names = {
+        str(row.get("ActivityID", "")): str(row.get("DisplayName") or row.get("ActivityID", ""))
+        for row in workspace.get("MissionOperations", [])
+    }
     for submission in queue:
         submission_id = submission.get("SubmissionID", "")
-        with st.expander(f"{submission.get('TeamName', submission.get('TeamID', 'Team'))} · {submission.get('ActivityID', 'Mission')}"):
+        team_id = str(submission.get("TeamID", ""))
+        activity_id = str(submission.get("ActivityID", ""))
+        team_label = team_names.get(team_id) or str(submission.get("TeamName") or team_id or "Team")
+        mission_label = mission_names.get(activity_id) or activity_id or "Mission"
+        # A pending review is the facilitator's work: never hide it behind a
+        # collapsed panel they have to discover.
+        with st.expander(f"{team_label} · {mission_label} · SUBMITTED", expanded=True):
+            st.caption(f"Team {team_label} · Mission {mission_label}")
             if submission.get("Remarks"):
+                st.markdown("**Text evidence**")
                 st.write(submission["Remarks"])
             photo = get_photo_url(submission.get("ImageURL", ""), submission.get("DriveFileID", ""))
             if photo:
@@ -588,23 +606,46 @@ def render_theme_park_race_facilitator(db, control, event_id):
                     st.image(post_ride_photo, caption="Private post-ride verification", width="stretch")
                 if submission.get("FacilitatorVerificationRequest"):
                     st.write(submission["FacilitatorVerificationRequest"])
-            score = st.number_input("Score", value=float(submission.get("Score") or 0), key=f"theme_race_score_{submission_id}")
-            notes = st.text_input("Review notes", key=f"theme_race_notes_{submission_id}")
+            score = st.number_input(
+                "Score (applied on approve only)",
+                value=float(submission.get("Score") or 0),
+                key=f"theme_race_score_{submission_id}",
+            )
+            notes = st.text_input("Facilitator reason / notes", key=f"theme_race_notes_{submission_id}")
             if strategy_mode == OPEN_MISSION_BOARD:
                 st.caption(f"Reviewing revision submitted at {submission.get('SubmittedAt') or 'unknown'}.")
+            # Both decisions are dead without a facilitator identity, so say so
+            # here rather than leaving a silently greyed pair of buttons.
+            if not actor:
+                st.warning("Enter your facilitator identity above to approve or reject.")
+            st.divider()
+
             approve, reject = st.columns(2)
-            if approve.button("Approve", type="primary", disabled=not actor, key=f"theme_race_approve_{submission_id}"):
-                _queue_review_notice(event_id, submit_theme_park_race_review(
-                    control, strategy_mode, submission,
-                    decision="APPROVE", score=score, actor=actor, notes=notes,
-                ))
-                st.rerun()
-            if reject.button("Reject / request resubmission", disabled=not actor, key=f"theme_race_reject_{submission_id}"):
-                _queue_review_notice(event_id, submit_theme_park_race_review(
-                    control, strategy_mode, submission,
-                    decision="REJECT", score=0, actor=actor, notes=notes,
-                ))
-                st.rerun()
+            with approve:
+                st.caption("Approve and award the score above.")
+                if st.button(
+                    "✅ Approve", type="primary", width="stretch",
+                    disabled=not actor, key=f"theme_race_approve_{submission_id}",
+                ):
+                    _queue_review_notice(event_id, submit_theme_park_race_review(
+                        control, strategy_mode, submission,
+                        decision="APPROVE", score=score, actor=actor, notes=notes,
+                    ))
+                    st.rerun()
+            with reject:
+                st.caption("Reject and reopen the mission. Scores 0. A reason is required.")
+                # Requiring the reason keeps Reject deliberate and guarantees the
+                # 039 contract receives one; it can never approve or carry a score.
+                if st.button(
+                    "❌ Reject — request resubmission", width="stretch",
+                    disabled=not actor or not notes.strip(),
+                    key=f"theme_race_reject_{submission_id}",
+                ):
+                    _queue_review_notice(event_id, submit_theme_park_race_review(
+                        control, strategy_mode, submission,
+                        decision="REJECT", score=0, actor=actor, notes=notes,
+                    ))
+                    st.rerun()
 
 
 def render_theme_park_race_projector(db, event_id):
