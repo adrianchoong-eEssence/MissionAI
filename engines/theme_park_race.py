@@ -410,6 +410,28 @@ def _runtime_for_team(mission_runtime: list[dict[str, Any]] | None, team_id: str
     return rows
 
 
+def _latest_rejection_reasons(reviews: list[dict[str, Any]] | None) -> dict[str, str]:
+    """Reduce canonical review rows to the latest REJECT rationale per submission.
+
+    A resubmission reuses the same SubmissionID, and a submission can carry more
+    than one reviewer's row, so the most recently reviewed REJECT is the only
+    one that describes the current REJECTED board state.
+    """
+    latest: dict[str, tuple[str, str]] = {}
+    for row in reviews or []:
+        row = _dict(row)
+        if _upper(row.get("Decision")) != "REJECT":
+            continue
+        submission_id = _text(row.get("SubmissionID"))
+        if not submission_id:
+            continue
+        reviewed_at = _text(row.get("ReviewedAt"))
+        current = latest.get(submission_id)
+        if current is None or reviewed_at >= current[0]:
+            latest[submission_id] = (reviewed_at, _text(row.get("Reason")))
+    return {submission_id: reason for submission_id, (_, reason) in latest.items()}
+
+
 def mission_board(
     configuration: dict[str, Any] | None,
     stations: list[dict[str, Any]] | None,
@@ -418,6 +440,7 @@ def mission_board(
     submissions: list[dict[str, Any]] | None,
     mission_runtime: list[dict[str, Any]] | None = None,
     canonical_team_member_count: int | float | str | None = 0,
+    reviews: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Project a team's canonical OPEN_MISSION_BOARD without competitor data."""
     config = normalise_configuration(configuration)
@@ -427,6 +450,7 @@ def mission_board(
         for row in submissions or []
         if _text(_dict(row).get("TeamID", _dict(row).get("team_id"))) == _text(team_id)
     }
+    rejection_reasons = _latest_rejection_reasons(reviews)
     runtime = _runtime_for_team(mission_runtime, team_id)
     board: list[dict[str, Any]] = []
     for station in stations or []:
@@ -464,6 +488,7 @@ def mission_board(
             "CanSubmit": state in {"SELECTED", "REJECTED"},
             "RideRequiredParticipantCount": required,
             "RideAttemptStatus": _upper(runtime_payload.get("RideAttemptStatus")),
+            "RejectionReason": rejection_reasons.get(_text(submission.get("SubmissionID")), "") if state == "REJECTED" else "",
         })
     return [row for row in sorted(board, key=lambda item: (item["DisplayOrder"], item["ActivityID"])) if row["Visible"]]
 
@@ -550,6 +575,7 @@ def participant_projection(
     submissions: list[dict[str, Any]],
     mission_runtime: list[dict[str, Any]] | None = None,
     team_members: list[dict[str, Any]] | None = None,
+    reviews: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Canonical participant/Captain projection, rebuilt after every reconnect."""
     config = normalise_configuration(event)
@@ -560,6 +586,7 @@ def participant_projection(
     board = mission_board(
         config, stations, team_id=team_id, submissions=submissions,
         mission_runtime=mission_runtime, canonical_team_member_count=len(team_members or []),
+        reviews=reviews,
     ) if config["StrategyMode"] == OPEN_MISSION_BOARD else []
     progress = team_progress(team_id, route, submissions) if config["StrategyMode"] == ROUTE_STRATEGY else {
         "TeamID": team_id,

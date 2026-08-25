@@ -394,7 +394,20 @@ def _render_open_mission_board(db, workspace, captain_active):
             elif state in {"SELECTED", "REJECTED"}:
                 if not captain_active:
                     st.caption("Captain authority is required to submit this team mission.")
-                elif str(mission.get("MissionClass", "")).upper() == "RIDE":
+                    continue
+                if state == "REJECTED":
+                    # The same evidence form below is otherwise identical to a
+                    # never-submitted SELECTED mission; without this banner a
+                    # Captain cannot tell "returned for resubmission" from
+                    # "not yet attempted".
+                    st.warning("⚠️ Resubmission required")
+                    st.write("Your previous submission was reviewed and returned by the facilitator.")
+                    reason = str(mission.get("RejectionReason", "") or "").strip()
+                    if reason:
+                        st.markdown("**Facilitator feedback:**")
+                        st.info(reason)
+                    st.caption("Update your evidence below and submit again.")
+                if str(mission.get("MissionClass", "")).upper() == "RIDE":
                     _render_ride_evidence_form(db, workspace, mission)
                 else:
                     _render_evidence_form(db, workspace, mission)

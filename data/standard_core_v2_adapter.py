@@ -595,7 +595,35 @@ class StandardCoreV2Adapter:
             stations=self.get_theme_park_race_stations(event_id), submissions=submissions,
             mission_runtime=self.get_theme_park_race_mission_runtime(event_id, participant.get("TeamID", "")),
             team_members=team_members,
+            reviews=self._theme_park_race_rejection_reviews(event_id, submissions),
         )
+
+    def _theme_park_race_rejection_reviews(self, event_id, submissions):
+        """Canonical facilitator feedback for this team's REJECTED submissions.
+
+        Reviews carry no team_id, so this is scoped by submission id and to the
+        REJECT decision only — nothing is fetched for a team with no rejection,
+        and no other team's review ever reaches this query.
+        """
+        submission_ids = sorted({
+            str(row.get("SubmissionID", "")) for row in submissions
+            if str(row.get("Status", "")).upper() == "REJECTED" and row.get("SubmissionID")
+        })
+        if not submission_ids:
+            return []
+        rows = self._rows("reviews_v2", {
+            "event_id": f"eq.{event_id}",
+            "submission_id": f"in.({','.join(submission_ids)})",
+            "decision": "eq.REJECT",
+            "select": "submission_id,decision,rationale,reviewed_at",
+            "order": "reviewed_at.desc",
+        })
+        return [{
+            "SubmissionID": str(row.get("submission_id", "")),
+            "Decision": str(row.get("decision", "")).upper(),
+            "Reason": str(row.get("rationale", "") or ""),
+            "ReviewedAt": str(row.get("reviewed_at", "") or ""),
+        } for row in rows]
 
     def select_theme_park_race_mission(self, session_token, activity_id):
         """Atomically select an available OPEN_MISSION_BOARD activity server-side."""
