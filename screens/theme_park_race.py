@@ -197,6 +197,7 @@ def _render_evidence_form(db, workspace, mission):
     photo_config = evidence.get("Photo", {}) or {}
     numeric_config = evidence.get("NumericResult", {}) or {}
     activity_id = mission["ActivityID"]
+    submitting_key = f"theme_race_submitting_{activity_id}"
     st.subheader(mission.get("DisplayName") or "Current mission")
     if mission.get("ParticipantInstruction"):
         st.write(mission["ParticipantInstruction"])
@@ -226,7 +227,17 @@ def _render_evidence_form(db, workspace, mission):
             numeric_config.get("Label") or "Result", key=f"theme_race_numeric_{activity_id}",
         )
 
-    if st.button("Submit mission evidence", type="primary", width="stretch", key=f"theme_race_submit_{activity_id}"):
+    already_submitting = bool(st.session_state.get(submitting_key))
+    if already_submitting:
+        st.info("Submitting… please wait.")
+    if st.button(
+        "Submit mission evidence", type="primary", width="stretch",
+        key=f"theme_race_submit_{activity_id}", disabled=already_submitting,
+    ):
+        # The disabled state above should already prevent this, but a stale
+        # rerun must never be able to fire a second RPC while one is in flight.
+        if already_submitting:
+            return
         if text_config.get("Required") and not text.strip():
             st.warning("Enter the required text evidence.")
             return
@@ -247,35 +258,51 @@ def _render_evidence_form(db, workspace, mission):
                 st.warning("Result is above the configured maximum.")
                 return
 
-        uploaded = {}
-        if uploaded_photo is not None:
-            try:
-                uploaded = upload_photo(
-                    event_id=workspace["EventID"], mission_id=activity_id,
-                    team_name=st.session_state.get("participant_team", workspace["TeamID"]),
-                    participant_name=st.session_state.get("participant_name", ""),
-                    uploaded_file=uploaded_photo,
-                )
-            except (RuntimeDatabaseError, ValueError) as error:
-                st.error(upload_error_message("Photo upload", saved=False, retry=True, error=error))
-                return
-        payload = {
-            "TeamName": st.session_state.get("participant_team", workspace["TeamID"]),
-            "ParticipantName": st.session_state.get("participant_name", ""),
-            "SubmissionType": "THEME_PARK_RACE",
-            "Remarks": text.strip(),
-            "Metric1": numeric.strip(),
-            "ImageURL": uploaded.get("url", ""),
-            "DriveFileID": uploaded.get("file_id", ""),
-            "SubmittedAtClient": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-        }
+        # session_state[submitting_key] is cleared in `finally` on every path —
+        # success, a known RuntimeDatabaseError/ValueError, or anything
+        # unexpected — so it can never survive as a stuck "pending" flag.
+        st.session_state[submitting_key] = True
         try:
-            db.runtime.save_theme_park_race_submission(
-                st.session_state.get("participant_session_token", ""), activity_id, payload,
-            )
-        except RuntimeDatabaseError as error:
-            st.error(str(error))
-            return
+            with st.spinner("Submitting mission evidence…"):
+                uploaded = {}
+                if uploaded_photo is not None:
+                    try:
+                        uploaded = upload_photo(
+                            event_id=workspace["EventID"], mission_id=activity_id,
+                            team_name=st.session_state.get("participant_team", workspace["TeamID"]),
+                            participant_name=st.session_state.get("participant_name", ""),
+                            uploaded_file=uploaded_photo,
+                        )
+                    except (RuntimeDatabaseError, ValueError) as error:
+                        st.error(upload_error_message("Photo upload", saved=False, retry=True, error=error))
+                        return
+                    except Exception as error:
+                        # Never let an unexpected upload failure look like a hang.
+                        st.error(f"Photo upload failed unexpectedly. You can try again: {error}")
+                        return
+                payload = {
+                    "TeamName": st.session_state.get("participant_team", workspace["TeamID"]),
+                    "ParticipantName": st.session_state.get("participant_name", ""),
+                    "SubmissionType": "THEME_PARK_RACE",
+                    "Remarks": text.strip(),
+                    "Metric1": numeric.strip(),
+                    "ImageURL": uploaded.get("url", ""),
+                    "DriveFileID": uploaded.get("file_id", ""),
+                    "SubmittedAtClient": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+                }
+                try:
+                    db.runtime.save_theme_park_race_submission(
+                        st.session_state.get("participant_session_token", ""), activity_id, payload,
+                        strategy_mode=workspace.get("StrategyMode", ""),
+                    )
+                except RuntimeDatabaseError as error:
+                    st.error(str(error))
+                    return
+                except Exception as error:
+                    st.error(f"Submission failed unexpectedly. You can try again: {error}")
+                    return
+        finally:
+            st.session_state[submitting_key] = False
         if str(workspace.get("StrategyMode", "")).upper() == "OPEN_MISSION_BOARD":
             st.success("Mission evidence submitted for facilitator review. Your team's board remains canonical after refresh.")
         else:
@@ -296,6 +323,7 @@ def _upload_board_photo(workspace, mission_id, suffix, uploaded_photo):
 def _render_ride_evidence_form(db, workspace, mission):
     """Ride proof UI. Server-side board RPC repeats all Captain/team checks."""
     activity_id = mission["ActivityID"]
+    submitting_key = f"theme_race_ride_submitting_{activity_id}"
     evidence = mission.get("Evidence", {}) or {}
     required = mission.get("RideRequiredParticipantCount", 0)
     members = {row.get("ParticipantID", ""): row.get("Name", row.get("ParticipantID", "")) for row in workspace.get("TeamMembers", [])}
@@ -328,7 +356,16 @@ def _render_ride_evidence_form(db, workspace, mission):
     elif attempt == "COMPLETED" and pathway == "FACILITATOR_VERIFIED":
         facilitator_request = st.text_input("Facilitator verification request", key=f"theme_race_ride_verify_{activity_id}")
 
-    if st.button("Record ride outcome" if attempt != "COMPLETED" else "Submit ride evidence", type="primary", width="stretch", key=f"theme_race_ride_submit_{activity_id}"):
+    already_submitting = bool(st.session_state.get(submitting_key))
+    if already_submitting:
+        st.info("Submitting… please wait.")
+    if st.button(
+        "Record ride outcome" if attempt != "COMPLETED" else "Submit ride evidence",
+        type="primary", width="stretch", key=f"theme_race_ride_submit_{activity_id}",
+        disabled=already_submitting,
+    ):
+        if already_submitting:
+            return
         if evidence.get("Text", {}).get("Required") and not remarks.strip():
             st.warning("Enter the required text evidence.")
             return
@@ -338,30 +375,47 @@ def _render_ride_evidence_form(db, workspace, mission):
         if attempt == "COMPLETED" and pathway in {"GROUND_CONTROL", "FULL_TEAM"} and (queue_photo is None or post_photo is None):
             st.warning("Queue-entry and post-ride evidence are both required for this evidence pathway.")
             return
+
+        st.session_state[submitting_key] = True
         try:
-            queue = _upload_board_photo(workspace, activity_id, "QUEUE", queue_photo)
-            post = _upload_board_photo(workspace, activity_id, "POST", post_photo)
-        except (RuntimeDatabaseError, ValueError) as error:
-            st.error(upload_error_message("Ride evidence upload", saved=False, retry=True, error=error))
-            return
-        payload = {
-            "TeamName": st.session_state.get("participant_team", workspace["TeamID"]),
-            "ParticipantName": st.session_state.get("participant_name", ""),
-            "SubmissionType": "THEME_PARK_RACE_RIDE",
-            "Remarks": remarks.strip(), "RideEvidencePathway": pathway,
-            "RideAttemptStatus": attempt, "RiderParticipantIDs": riders,
-            "GroundControlParticipantIDs": ground_control,
-            "QueueEntryEvidence": queue.get("url", ""), "PostRideEvidence": post.get("url", ""),
-            "FacilitatorVerificationRequest": facilitator_request.strip(),
-        }
-        try:
-            if attempt == "COMPLETED":
-                db.runtime.save_theme_park_race_submission(st.session_state.get("participant_session_token", ""), activity_id, payload)
-            else:
-                db.runtime.record_theme_park_race_ride_outcome(st.session_state.get("participant_session_token", ""), activity_id, attempt, payload)
-        except RuntimeDatabaseError as error:
-            st.error(str(error))
-            return
+            with st.spinner("Submitting ride evidence…"):
+                try:
+                    queue = _upload_board_photo(workspace, activity_id, "QUEUE", queue_photo)
+                    post = _upload_board_photo(workspace, activity_id, "POST", post_photo)
+                except (RuntimeDatabaseError, ValueError) as error:
+                    st.error(upload_error_message("Ride evidence upload", saved=False, retry=True, error=error))
+                    return
+                except Exception as error:
+                    st.error(f"Ride evidence upload failed unexpectedly. You can try again: {error}")
+                    return
+                payload = {
+                    "TeamName": st.session_state.get("participant_team", workspace["TeamID"]),
+                    "ParticipantName": st.session_state.get("participant_name", ""),
+                    "SubmissionType": "THEME_PARK_RACE_RIDE",
+                    "Remarks": remarks.strip(), "RideEvidencePathway": pathway,
+                    "RideAttemptStatus": attempt, "RiderParticipantIDs": riders,
+                    "GroundControlParticipantIDs": ground_control,
+                    "QueueEntryEvidence": queue.get("url", ""), "PostRideEvidence": post.get("url", ""),
+                    "FacilitatorVerificationRequest": facilitator_request.strip(),
+                }
+                try:
+                    if attempt == "COMPLETED":
+                        db.runtime.save_theme_park_race_submission(
+                            st.session_state.get("participant_session_token", ""), activity_id, payload,
+                            strategy_mode=workspace.get("StrategyMode", ""),
+                        )
+                    else:
+                        db.runtime.record_theme_park_race_ride_outcome(
+                            st.session_state.get("participant_session_token", ""), activity_id, attempt, payload,
+                        )
+                except RuntimeDatabaseError as error:
+                    st.error(str(error))
+                    return
+                except Exception as error:
+                    st.error(f"Submission failed unexpectedly. You can try again: {error}")
+                    return
+        finally:
+            st.session_state[submitting_key] = False
         st.success("Ride outcome recorded from canonical board state.")
         st.rerun()
 

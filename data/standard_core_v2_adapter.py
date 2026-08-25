@@ -632,12 +632,24 @@ class StandardCoreV2Adapter:
             "p_activity_id": activity_id,
         }, admin=False)
 
-    def save_theme_park_race_submission(self, session_token, activity_id, submission_payload):
-        """Submit through the selected strategy's Captain-guarded engine RPC."""
-        participant = self.get_player_by_token(session_token)
-        event = self.get_event(str((participant or {}).get("EventID", ""))) if participant else {}
-        configuration = normalise_theme_park_race_configuration(event)
-        rpc = "exos_v2_theme_park_race_board_submit" if configuration.get("StrategyMode") == "OPEN_MISSION_BOARD" else "exos_v2_theme_park_race_submit"
+    def save_theme_park_race_submission(self, session_token, activity_id, submission_payload, strategy_mode=""):
+        """Submit through the Captain-guarded engine RPC for the caller's own known strategy.
+
+        The caller already knows StrategyMode from the same workspace read that
+        rendered the form; pass it here.  Only when it is omitted does this fall
+        back to a participant/event lookup to derive it — a second network
+        round-trip that ran unconditionally before every write in the previous
+        implementation, was a needless extra point of failure ahead of the
+        canonical RPC, and could silently misroute an OPEN_MISSION_BOARD
+        submission to the generic route contract if that lookup ever came back
+        empty (a transient participant-state read failure, for example).
+        """
+        mode = str(strategy_mode or "").upper()
+        if not mode:
+            participant = self.get_player_by_token(session_token)
+            event = self.get_event(str((participant or {}).get("EventID", ""))) if participant else {}
+            mode = normalise_theme_park_race_configuration(event).get("StrategyMode", "")
+        rpc = "exos_v2_theme_park_race_board_submit" if mode == "OPEN_MISSION_BOARD" else "exos_v2_theme_park_race_submit"
         return self._rpc(rpc, {
             "p_session_token": session_token,
             "p_activity_id": activity_id,
