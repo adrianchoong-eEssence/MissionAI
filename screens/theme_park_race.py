@@ -5,6 +5,7 @@ own a participant, team, event, submission, Captain or scoring store.
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 import streamlit as st
@@ -13,6 +14,23 @@ from data.google_drive import get_photo_url, upload_photo
 from data.runtime_database import RuntimeDatabaseError
 from engines.theme_park_race import projector_projection
 from data.upload_safety import upload_error_message
+
+
+def _submit_trace_enabled() -> bool:
+    return str(os.getenv("EXOS_ENV", "")).strip().lower() == "staging"
+
+
+def _submit_trace(activity_id: str, **fields) -> None:
+    """TEMPORARY diagnostic for the P0 board-submit investigation.
+
+    Staging only.  Never logs a session token, device id, credential, photo
+    URL, or participant name/PII — only booleans, enum-like states, and
+    exception class names.
+    """
+    if not _submit_trace_enabled():
+        return
+    rendered = " | ".join(f"{key}={value}" for key, value in fields.items())
+    print(f"TPR_SUBMIT_TRACE | activity_id={activity_id} | {rendered}")
 
 
 _LIFECYCLE_COPY = {
@@ -191,7 +209,22 @@ def _render_captain_authority(db, workspace, enrollment_credential, device_id):
     return True
 
 
-def _render_evidence_form(db, workspace, mission):
+def _render_evidence_form(db, workspace, mission, captain_active=True):
+    """Render this mission's evidence form and, on submit, call board_submit.
+
+    The Submit button is constructed on EVERY render where this mission is
+    SELECTED/REJECTED, regardless of ``captain_active``.  ``captain_active``
+    is re-derived on every independent script rerun from a live join across
+    ``participant_sessions_v2`` and ``team_access_sessions_v2`` by device id —
+    it is not guaranteed identical between the rerun that displays this button
+    and the very next rerun that processes its click.  If that gate is instead
+    used to decide whether ``st.button(...)`` is even *called*, a click can be
+    silently and permanently lost with no exception: Streamlit only honours a
+    widget's click for the run in which that exact widget (by key) is
+    constructed, and a conditional branch skipped ahead of it drops the click
+    with nothing to show for it.  Authorization is instead re-checked, fresh,
+    at the moment the already-fired click is handled below.
+    """
     evidence = mission.get("Evidence", {}) or {}
     text_config = evidence.get("Text", {}) or {}
     photo_config = evidence.get("Photo", {}) or {}
@@ -228,15 +261,24 @@ def _render_evidence_form(db, workspace, mission):
         )
 
     already_submitting = bool(st.session_state.get(submitting_key))
-    if already_submitting:
+    authorized = captain_active and not already_submitting
+    if not captain_active:
+        st.caption("Captain authority is required to submit this team mission.")
+    elif already_submitting:
         st.info("Submitting… please wait.")
     if st.button(
         "Submit mission evidence", type="primary", width="stretch",
-        key=f"theme_race_submit_{activity_id}", disabled=already_submitting,
+        key=f"theme_race_submit_{activity_id}", disabled=not authorized,
     ):
+        _submit_trace(
+            activity_id, CLICK_RECEIVED=True, MISSION_STATE=mission.get("MissionState", ""),
+            STRATEGY_MODE=workspace.get("StrategyMode", ""),
+            HAS_TEXT=bool(text.strip()), HAS_PHOTO=uploaded_photo is not None,
+        )
         # The disabled state above should already prevent this, but a stale
-        # rerun must never be able to fire a second RPC while one is in flight.
-        if already_submitting:
+        # rerun must never be able to fire a second RPC while one is in flight,
+        # nor act on a click captured before authorization was re-confirmed.
+        if not authorized:
             return
         if text_config.get("Required") and not text.strip():
             st.warning("Enter the required text evidence.")
@@ -266,6 +308,7 @@ def _render_evidence_form(db, workspace, mission):
             with st.spinner("Submitting mission evidence…"):
                 uploaded = {}
                 if uploaded_photo is not None:
+                    _submit_trace(activity_id, UPLOAD_STARTED=True)
                     try:
                         uploaded = upload_photo(
                             event_id=workspace["EventID"], mission_id=activity_id,
@@ -273,11 +316,14 @@ def _render_evidence_form(db, workspace, mission):
                             participant_name=st.session_state.get("participant_name", ""),
                             uploaded_file=uploaded_photo,
                         )
+                        _submit_trace(activity_id, UPLOAD_COMPLETED=True)
                     except (RuntimeDatabaseError, ValueError) as error:
+                        _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
                         st.error(upload_error_message("Photo upload", saved=False, retry=True, error=error))
                         return
                     except Exception as error:
                         # Never let an unexpected upload failure look like a hang.
+                        _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
                         st.error(f"Photo upload failed unexpectedly. You can try again: {error}")
                         return
                 payload = {
@@ -291,14 +337,18 @@ def _render_evidence_form(db, workspace, mission):
                     "SubmittedAtClient": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
                 }
                 try:
+                    _submit_trace(activity_id, RPC_STARTED=True)
                     db.runtime.save_theme_park_race_submission(
                         st.session_state.get("participant_session_token", ""), activity_id, payload,
                         strategy_mode=workspace.get("StrategyMode", ""),
                     )
+                    _submit_trace(activity_id, RPC_COMPLETED=True)
                 except RuntimeDatabaseError as error:
+                    _submit_trace(activity_id, RPC_COMPLETED=False, ERROR_CLASS=type(error).__name__)
                     st.error(str(error))
                     return
                 except Exception as error:
+                    _submit_trace(activity_id, RPC_COMPLETED=False, ERROR_CLASS=type(error).__name__)
                     st.error(f"Submission failed unexpectedly. You can try again: {error}")
                     return
         finally:
@@ -320,8 +370,12 @@ def _upload_board_photo(workspace, mission_id, suffix, uploaded_photo):
     )
 
 
-def _render_ride_evidence_form(db, workspace, mission):
-    """Ride proof UI. Server-side board RPC repeats all Captain/team checks."""
+def _render_ride_evidence_form(db, workspace, mission, captain_active=True):
+    """Ride proof UI. Server-side board RPC repeats all Captain/team checks.
+
+    See ``_render_evidence_form`` for why the submit button is always
+    constructed here regardless of ``captain_active``.
+    """
     activity_id = mission["ActivityID"]
     submitting_key = f"theme_race_ride_submitting_{activity_id}"
     evidence = mission.get("Evidence", {}) or {}
@@ -357,14 +411,23 @@ def _render_ride_evidence_form(db, workspace, mission):
         facilitator_request = st.text_input("Facilitator verification request", key=f"theme_race_ride_verify_{activity_id}")
 
     already_submitting = bool(st.session_state.get(submitting_key))
-    if already_submitting:
+    authorized = captain_active and not already_submitting
+    if not captain_active:
+        st.caption("Captain authority is required to submit this team mission.")
+    elif already_submitting:
         st.info("Submitting… please wait.")
     if st.button(
         "Record ride outcome" if attempt != "COMPLETED" else "Submit ride evidence",
         type="primary", width="stretch", key=f"theme_race_ride_submit_{activity_id}",
-        disabled=already_submitting,
+        disabled=not authorized,
     ):
-        if already_submitting:
+        _submit_trace(
+            activity_id, CLICK_RECEIVED=True, MISSION_STATE=mission.get("MissionState", ""),
+            STRATEGY_MODE=workspace.get("StrategyMode", ""),
+            HAS_TEXT=bool(remarks.strip()),
+            HAS_PHOTO=queue_photo is not None or post_photo is not None,
+        )
+        if not authorized:
             return
         if evidence.get("Text", {}).get("Required") and not remarks.strip():
             st.warning("Enter the required text evidence.")
@@ -380,12 +443,16 @@ def _render_ride_evidence_form(db, workspace, mission):
         try:
             with st.spinner("Submitting ride evidence…"):
                 try:
+                    _submit_trace(activity_id, UPLOAD_STARTED=queue_photo is not None or post_photo is not None)
                     queue = _upload_board_photo(workspace, activity_id, "QUEUE", queue_photo)
                     post = _upload_board_photo(workspace, activity_id, "POST", post_photo)
+                    _submit_trace(activity_id, UPLOAD_COMPLETED=True)
                 except (RuntimeDatabaseError, ValueError) as error:
+                    _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
                     st.error(upload_error_message("Ride evidence upload", saved=False, retry=True, error=error))
                     return
                 except Exception as error:
+                    _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
                     st.error(f"Ride evidence upload failed unexpectedly. You can try again: {error}")
                     return
                 payload = {
@@ -399,6 +466,7 @@ def _render_ride_evidence_form(db, workspace, mission):
                     "FacilitatorVerificationRequest": facilitator_request.strip(),
                 }
                 try:
+                    _submit_trace(activity_id, RPC_STARTED=True)
                     if attempt == "COMPLETED":
                         db.runtime.save_theme_park_race_submission(
                             st.session_state.get("participant_session_token", ""), activity_id, payload,
@@ -408,10 +476,13 @@ def _render_ride_evidence_form(db, workspace, mission):
                         db.runtime.record_theme_park_race_ride_outcome(
                             st.session_state.get("participant_session_token", ""), activity_id, attempt, payload,
                         )
+                    _submit_trace(activity_id, RPC_COMPLETED=True)
                 except RuntimeDatabaseError as error:
+                    _submit_trace(activity_id, RPC_COMPLETED=False, ERROR_CLASS=type(error).__name__)
                     st.error(str(error))
                     return
                 except Exception as error:
+                    _submit_trace(activity_id, RPC_COMPLETED=False, ERROR_CLASS=type(error).__name__)
                     st.error(f"Submission failed unexpectedly. You can try again: {error}")
                     return
         finally:
@@ -437,8 +508,20 @@ def _render_open_mission_board(db, workspace, captain_active):
             if mission.get("SafetyNote"):
                 st.info(f"Safety: {mission['SafetyNote']}")
             st.caption(f"Operational status: {mission.get('OperationalStatus', state)}")
-            if state == "AVAILABLE" and captain_active:
-                if st.button("Select this mission", type="primary", key=f"theme_race_board_select_{activity_id}"):
+            if state == "AVAILABLE":
+                # Always constructed regardless of captain_active: it is
+                # re-derived from a live session join on every independent
+                # rerun and is not guaranteed identical between the render
+                # that shows this button and the one that processes its
+                # click.  Gating construction on it can silently drop a click
+                # with no error — see _render_evidence_form for the full case.
+                if st.button(
+                    "Select this mission", type="primary",
+                    key=f"theme_race_board_select_{activity_id}", disabled=not captain_active,
+                ):
+                    if not captain_active:
+                        st.caption("Captain authority is required to select a mission.")
+                        return
                     try:
                         db.runtime.select_theme_park_race_mission(st.session_state.get("participant_session_token", ""), activity_id)
                     except RuntimeDatabaseError as error:
@@ -446,9 +529,6 @@ def _render_open_mission_board(db, workspace, captain_active):
                         return
                     st.rerun()
             elif state in {"SELECTED", "REJECTED"}:
-                if not captain_active:
-                    st.caption("Captain authority is required to submit this team mission.")
-                    continue
                 if state == "REJECTED":
                     # The same evidence form below is otherwise identical to a
                     # never-submitted SELECTED mission; without this banner a
@@ -462,9 +542,9 @@ def _render_open_mission_board(db, workspace, captain_active):
                         st.info(reason)
                     st.caption("Update your evidence below and submit again.")
                 if str(mission.get("MissionClass", "")).upper() == "RIDE":
-                    _render_ride_evidence_form(db, workspace, mission)
+                    _render_ride_evidence_form(db, workspace, mission, captain_active)
                 else:
-                    _render_evidence_form(db, workspace, mission)
+                    _render_evidence_form(db, workspace, mission, captain_active)
             elif state == "TEMPORARILY_UNAVAILABLE":
                 st.info("This mission is temporarily unavailable. Choose another available mission; no score penalty applies.")
             elif state == "CLOSED":
