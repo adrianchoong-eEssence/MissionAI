@@ -18,7 +18,7 @@ SCHEMA_VERSION = 1
 ROUTE_STRATEGY = "CONFIGURED_TEAM_ROUTE"
 OPEN_MISSION_BOARD = "OPEN_MISSION_BOARD"
 STRATEGY_MODES = (ROUTE_STRATEGY, OPEN_MISSION_BOARD)
-RUNTIME_PHASES = ("READY", "ACTIVE", "CLOSED")
+RUNTIME_PHASES = ("READY", "ACTIVE", "HELD", "CLOSED")
 PARTICIPANT_LIFECYCLE_STATES = (
     "REGISTRATION",
     "TEAM_FORMATION",
@@ -26,6 +26,8 @@ PARTICIPANT_LIFECYCLE_STATES = (
     "CAPTAIN_SELECTION",
     "READY",
     "ACTIVE",
+    "HELD",
+    "ENDED",
 )
 EVIDENCE_KINDS = ("TEXT", "PHOTO", "NUMERIC_RESULT")
 MISSION_CLASSES = ("STANDARD", "RIDE", "BONUS", "SECRET")
@@ -521,15 +523,22 @@ def participant_lifecycle(team_formation: dict[str, Any] | None, configuration: 
         return "REGISTRATION"
     formation = _dict(team_formation)
     phase = _text(formation.get("Phase")).upper()
+    config = normalise_configuration(configuration)
+    # CLOSED is the persisted Core-v2 terminal runtime value.  It must be
+    # projected before Team Formation so a refresh can never turn an ended
+    # mission back into a formation or ready screen.
+    if config["RuntimePhase"] == "CLOSED":
+        return "ENDED"
     if phase in {"DRAFT", "REGISTRATION_OPEN"}:
         return "TEAM_FORMATION"
     if phase == "FORMATION_LOCKED":
         return "FORMATION_LOCKED"
     if phase == "CAPTAIN_SELECTION":
         return "CAPTAIN_SELECTION"
-    config = normalise_configuration(configuration)
     if phase == "ACTIVE" and config["RuntimePhase"] == "ACTIVE":
         return "ACTIVE"
+    if phase == "ACTIVE" and config["RuntimePhase"] == "HELD":
+        return "HELD"
     return "READY"
 
 

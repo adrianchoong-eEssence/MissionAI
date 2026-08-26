@@ -319,5 +319,8 @@ def test_board_review_never_moves_service_role_work_into_participant_code():
     assert "exos_v2_theme_park_race_board_review" not in participant
 
 
-def test_no_migration_is_added_by_this_integration():
-    assert not list((ROOT / "supabase").glob("04*.sql"))
+def test_039_review_integration_does_not_modify_its_frozen_migration_contract():
+    # 040 is a separately scoped terminal-lifecycle migration.  This 039
+    # integration must neither depend on nor rewrite the review migration.
+    assert (ROOT / "supabase/039_theme_park_race_review_reopen_contract.sql").is_file()
+    assert not list((ROOT / "supabase").glob("041*.sql"))

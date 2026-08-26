@@ -37,9 +37,11 @@ _LIFECYCLE_COPY = {
     "REGISTRATION": ("Registration", "Register to receive your canonical team assignment."),
     "TEAM_FORMATION": ("Team Formation", "Registration is open. Your team assignment is held by EXOS."),
     "FORMATION_LOCKED": ("Teams Locked", "Team formation has closed. Your team is now final."),
-    "CAPTAIN_SELECTION": ("Captain Selection", "Your team must select one Captain before the hunt can start."),
-    "READY": ("Ready", "Teams and Captains are ready. Waiting for the facilitator to start the hunt."),
-    "ACTIVE": ("Hunt Active", "Follow your team’s configured mission route."),
+    "CAPTAIN_SELECTION": ("Captain Selection", "Your team must select one Captain before the mission can start."),
+    "READY": ("Ready", "Teams and Captains are ready. Waiting for the facilitator to start the mission."),
+    "ACTIVE": ("Mission Active", "Follow your team’s configured mission route."),
+    "HELD": ("Mission Held", "Mission activity is temporarily held. Your progress is preserved."),
+    "ENDED": ("MISSION ENDED", "Submissions are closed. Final results are preserved."),
 }
 
 
@@ -117,6 +119,18 @@ def _route_rows(workspace):
             status = "CURRENT" if activity_id == current else "LOCKED"
         rows.append({"#": position, "Mission ID": activity_id, "Status": status})
     return rows
+
+
+def _render_ended_participant_screen(workspace):
+    """Render the terminal state from canonical progress, without any writes."""
+    progress = workspace.get("Progress", {}) or {}
+    completed = int(progress.get("Completed", 0) or 0)
+    total = int(progress.get("Total", 0) or 0)
+    team = str(workspace.get("TeamIdentity") or workspace.get("TeamID") or "your team")
+    st.success("Mission Complete 🎉")
+    st.markdown(f"**Team {team}**")
+    st.metric("Completed missions", f"{completed}/{total}")
+    st.info("No new submissions can be made. Please wait for the facilitator’s final announcement.")
 
 
 def _restore_captain_recovery(identity):
@@ -583,6 +597,13 @@ def render_theme_park_race_participant(db, enrollment_credential="", device_id="
         if route_rows:
             st.dataframe(route_rows, hide_index=True, width="stretch")
 
+    # An ended Mission is terminal on every reconnect.  Do this before Captain
+    # authority rendering so an old browser cannot expose recovery, selection,
+    # or evidence controls after the canonical End control has completed.
+    if lifecycle == "ENDED":
+        _render_ended_participant_screen(workspace)
+        return
+
     captain_active = _render_captain_authority(db, workspace, enrollment_credential, device_id)
     if lifecycle != "ACTIVE":
         return
@@ -620,9 +641,12 @@ def render_theme_park_race_facilitator(db, control, event_id):
     actor = st.text_input("Facilitator identity", key=f"theme_race_actor_{event_id}")
     phase = str(workspace.get("TeamFormationPhase", "")).upper()
     runtime_phase = str(workspace.get("RuntimePhase", "READY")).upper()
-    lifecycle_col, hunt_col = st.columns(2)
+    lifecycle = str(workspace.get("Lifecycle", "")).upper()
+    lifecycle_col, mission_col = st.columns(2)
     with lifecycle_col:
-        if phase == "DRAFT":
+        if lifecycle == "ENDED":
+            st.caption(f"Team Formation status: {phase or '—'}")
+        elif phase == "DRAFT":
             if st.button("Open registration", type="primary", disabled=not actor, key=f"theme_race_open_{event_id}"):
                 control.open_team_formation(event_id, actor); st.rerun()
         elif phase == "REGISTRATION_OPEN":
@@ -636,20 +660,31 @@ def render_theme_park_race_facilitator(db, control, event_id):
                 control.activate_team_formation(event_id, actor); st.rerun()
         else:
             st.success("Team Formation is active.")
-    with hunt_col:
-        if phase != "ACTIVE":
-            st.caption("Hunt start unlocks after every team has an effective Captain.")
-        elif runtime_phase != "ACTIVE":
-            if st.button("Start Theme Park Race", type="primary", disabled=not actor, key=f"theme_race_start_{event_id}"):
+    with mission_col:
+        if lifecycle == "ENDED" or runtime_phase == "CLOSED":
+            st.error("MISSION ENDED")
+            st.info("Submissions are closed. Final results are preserved.")
+        elif phase != "ACTIVE":
+            st.caption("Mission start unlocks after every team has an effective Captain.")
+        elif runtime_phase == "READY":
+            if st.button("Start Mission", type="primary", disabled=not actor, key=f"theme_race_start_{event_id}"):
                 control.set_theme_park_race_runtime_phase(event_id, "ACTIVE", actor); st.rerun()
-        else:
-            pause, close = st.columns(2)
-            if pause.button("Hold Theme Park Race", disabled=not actor, key=f"theme_race_hold_{event_id}"):
-                control.set_theme_park_race_runtime_phase(event_id, "READY", actor); st.rerun()
-            if close.button("End Theme Park Race", disabled=not actor, key=f"theme_race_end_{event_id}"):
+        elif runtime_phase == "HELD":
+            resume, close = st.columns(2)
+            if resume.button("Resume Mission", type="primary", disabled=not actor, key=f"theme_race_resume_{event_id}"):
+                control.set_theme_park_race_runtime_phase(event_id, "ACTIVE", actor); st.rerun()
+            if close.button("End Mission", disabled=not actor, key=f"theme_race_end_{event_id}"):
                 control.set_theme_park_race_runtime_phase(event_id, "CLOSED", actor); st.rerun()
+        elif runtime_phase == "ACTIVE":
+            pause, close = st.columns(2)
+            if pause.button("Hold Mission", disabled=not actor, key=f"theme_race_hold_{event_id}"):
+                control.set_theme_park_race_runtime_phase(event_id, "HELD", actor); st.rerun()
+            if close.button("End Mission", disabled=not actor, key=f"theme_race_end_{event_id}"):
+                control.set_theme_park_race_runtime_phase(event_id, "CLOSED", actor); st.rerun()
+        else:
+            st.warning("Mission runtime state is unavailable.")
 
-    if str(workspace.get("StrategyMode", "")).upper() == "OPEN_MISSION_BOARD":
+    if lifecycle != "ENDED" and str(workspace.get("StrategyMode", "")).upper() == "OPEN_MISSION_BOARD":
         with st.expander("Mission Board control", expanded=True):
             operations = {row.get("ActivityID", ""): row for row in workspace.get("MissionOperations", [])}
             if operations:
@@ -688,7 +723,7 @@ def render_theme_park_race_facilitator(db, control, event_id):
     } for row in workspace.get("Teams", [])]
     st.dataframe(rows, hide_index=True, width="stretch")
 
-    if phase in {"CAPTAIN_SELECTION", "ACTIVE"}:
+    if lifecycle != "ENDED" and phase in {"CAPTAIN_SELECTION", "ACTIVE"}:
         with st.expander("Facilitator Captain transfer"):
             teams = {row.get("TeamID", ""): row for row in workspace.get("Teams", [])}
             if teams:
@@ -800,8 +835,15 @@ def render_theme_park_race_projector(db, event_id):
     workspace = db.runtime.theme_park_race_facilitator_workspace(event_id)
     event = db.get_event(event_id) or {}
     projection = projector_projection(workspace, db.runtime.get_theme_park_race_configuration(event_id))
-    st.markdown("<div class='projector-header'><div class='projector-kicker'>THEME PARK RACE</div><div class='projector-event-title'>LIVE HUNT</div></div>", unsafe_allow_html=True)
+    ended = str(projection.get("Lifecycle", "")).upper() == "ENDED"
+    projector_title = "MISSION ENDED" if ended else "LIVE MISSION"
+    st.markdown(
+        f"<div class='projector-header'><div class='projector-kicker'>THEME PARK RACE</div><div class='projector-event-title'>{projector_title}</div></div>",
+        unsafe_allow_html=True,
+    )
     st.caption(f"{event.get('EventName', '')} · {projection.get('Lifecycle', '')} · {projection.get('PendingReviewCount', 0)} pending review")
+    if ended:
+        st.info("Mission ended. Final team progress and scoring are preserved.")
     open_board = str(projection.get("StrategyMode", "")).upper() == "OPEN_MISSION_BOARD"
     st.dataframe([(
         {
