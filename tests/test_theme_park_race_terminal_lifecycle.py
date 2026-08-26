@@ -186,6 +186,7 @@ def test_040_verifier_is_read_only_and_checks_acl_path_and_terminal_definitions(
     assert "service_role_execute_present" in verifier
     assert "held_and_terminal_runtime_definition_installed" in verifier
     assert "ended_operation_guard_definition_installed" in verifier
+    assert "position('''Lifecycle'''" in verifier
     assert all(token not in verifier.upper() for token in ("INSERT ", "UPDATE ", "DELETE ", "CREATE ", "DROP "))
 
 

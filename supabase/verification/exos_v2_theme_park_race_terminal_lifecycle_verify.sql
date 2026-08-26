@@ -48,7 +48,7 @@ SELECT
     runtime_phase_oid IS NOT NULL
         AND position('''HELD''' IN pg_get_functiondef(runtime_phase_oid)) > 0
         AND position('Mission is ended and cannot be restarted' IN pg_get_functiondef(runtime_phase_oid)) > 0
-        AND position("'Lifecycle'" IN pg_get_functiondef(runtime_phase_oid)) > 0
+        AND position('''Lifecycle''' IN pg_get_functiondef(runtime_phase_oid)) > 0
         AS held_and_terminal_runtime_definition_installed,
     operation_oid IS NOT NULL
         AND position('operational mission controls are closed' IN pg_get_functiondef(operation_oid)) > 0
