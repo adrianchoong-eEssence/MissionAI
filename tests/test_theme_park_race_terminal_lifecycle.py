@@ -228,8 +228,8 @@ def test_app_ended_participant_screen_is_terminal_dynamic_and_has_no_write_contr
     at.run()
     assert not at.exception
     text = " ".join(item.value for item in at.markdown) + " " + " ".join(item.value for item in at.success)
-    assert "Mission Complete 🎉" in text and "Orion" in text
-    assert any(item.value == "1/3" for item in at.metric)
+    assert "MISSION COMPLETE" in text and "Orion" in text
+    assert "1/3" in text
     all_text = text + " " + " ".join(item.value for item in at.info)
     assert "Waiting for the facilitator to start" not in all_text
     assert "SESSION" not in all_text

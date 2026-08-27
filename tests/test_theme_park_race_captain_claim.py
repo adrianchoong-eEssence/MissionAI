@@ -106,7 +106,7 @@ def test_captain_selection_renders_claim_action_for_eligible_participant():
 
     fake, _ = _render(workspace, clicked=False)
     labels = [call.args[0] for call in fake.button.call_args_list if call.args]
-    assert "Become Team Captain" in labels
+    assert "Become Mission Captain" in labels
 
 
 def test_claim_action_shows_team_name_and_formation_state():
@@ -114,7 +114,7 @@ def test_claim_action_shows_team_name_and_formation_state():
     shown = _texts(fake, "caption", "info", "subheader", "write")
     assert any("Velocity" in text for text in shown)
     assert "Captain Selection" in shown
-    assert any("does not have a Team Captain" in text for text in shown)
+    assert any("doesn't have a Mission Captain" in text for text in shown)
 
 
 @pytest.mark.parametrize("phase,expected", [
@@ -186,7 +186,7 @@ def test_claim_is_refused_when_the_participant_session_is_missing():
 def test_successful_claim_refreshes_canonical_state():
     fake, _ = _render(_workspace_via_adapter(), claim_result={"Claimed": True})
     assert fake.rerun.called
-    assert any("Team Captain" in text for text in _texts(fake, "success"))
+    assert any("Mission Captain" in text for text in _texts(fake, "success"))
 
 
 def test_claimed_captain_is_projected_as_the_effective_captain_after_refresh():
@@ -221,7 +221,7 @@ def test_already_claimed_team_shows_safe_state_and_never_offers_the_claim():
 
     fake, seen = _render(workspace)
     labels = [call.args[0] for call in fake.button.call_args_list if call.args]
-    assert "Become Team Captain" not in labels
+    assert "Become Mission Captain" not in labels
     assert "args" not in seen
     assert any("Captain already selected" in text for text in _texts(fake, "info"))
 

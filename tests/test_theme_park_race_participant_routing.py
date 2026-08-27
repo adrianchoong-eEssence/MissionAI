@@ -328,7 +328,7 @@ def test_captain_selection_is_offered_only_in_the_captain_selection_state():
             _workspace("CAPTAIN_SELECTION", False), "", "DEVICE",
         ) is False
         assert [call.args[0] for call in fake.button.call_args_list] == [
-            "Become Team Captain",
+            "Become Mission Captain",
         ]
 
     with patch.object(theme_park_race, "st") as fake:

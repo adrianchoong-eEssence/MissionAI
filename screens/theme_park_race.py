@@ -5,6 +5,7 @@ own a participant, team, event, submission, Captain or scoring store.
 """
 from __future__ import annotations
 
+import html
 import os
 from datetime import datetime
 
@@ -34,15 +35,154 @@ def _submit_trace(activity_id: str, **fields) -> None:
 
 
 _LIFECYCLE_COPY = {
-    "REGISTRATION": ("Registration", "Register to receive your canonical team assignment."),
-    "TEAM_FORMATION": ("Team Formation", "Registration is open. Your team assignment is held by EXOS."),
+    "REGISTRATION": ("Registration", "Register to receive your team assignment."),
+    "TEAM_FORMATION": ("Team Formation", "Registration is open. Your team assignment is on its way."),
     "FORMATION_LOCKED": ("Teams Locked", "Team formation has closed. Your team is now final."),
-    "CAPTAIN_SELECTION": ("Captain Selection", "Your team must select one Captain before the mission can start."),
-    "READY": ("Ready", "Teams and Captains are ready. Waiting for the facilitator to start the mission."),
-    "ACTIVE": ("Mission Active", "Follow your team’s configured mission route."),
-    "HELD": ("Mission Held", "Mission activity is temporarily held. Your progress is preserved."),
-    "ENDED": ("MISSION ENDED", "Submissions are closed. Final results are preserved."),
+    "CAPTAIN_SELECTION": ("Captain Selection", "Your team must choose one Mission Captain before missions can start."),
+    "READY": ("Get Ready", "Teams and Captains are set. Your facilitator will start the mission shortly."),
+    "ACTIVE": ("Mission Active", "Complete your team's missions."),
+    "HELD": ("Mission AI Paused", "Please wait for your facilitator."),
+    "ENDED": ("Mission Complete 🎉", "Thank you for participating."),
 }
+
+
+# Fixed, code-authored badge content only — never interpolate participant or
+# facilitator free text (mission titles, instructions, rejection reasons)
+# into these.  A dynamic value with an embedded newline defeated Markdown's
+# indentation handling once already (the raw team card incident); the fix
+# there was to keep free text out of unsafe_allow_html entirely, which this
+# module follows throughout.
+_STATE_BADGES = {
+    "AVAILABLE": ("tp-badge-available", "🟡", "AVAILABLE"),
+    "SELECTED": ("tp-badge-progress", "🔵", "IN PROGRESS"),
+    "SUBMITTED": ("tp-badge-submitted", "📨", "AWAITING REVIEW"),
+    "APPROVED": ("tp-badge-approved", "✅", "COMPLETED"),
+    "REJECTED": ("tp-badge-rejected", "⚠️", "RESUBMISSION REQUIRED"),
+    "CLOSED": ("tp-badge-locked", "🔒", "CLOSED"),
+    "TEMPORARILY_UNAVAILABLE": ("tp-badge-paused", "⏸", "PAUSED"),
+}
+
+
+def _state_badge_html(state: str) -> str:
+    css_class, icon, label = _STATE_BADGES.get(str(state or "").upper(), ("tp-badge-locked", "•", "UNAVAILABLE"))
+    return f'<span class="tp-badge {css_class}">{icon} {label}</span>'
+
+
+def _inject_mission_theme() -> None:
+    """One-time, fully static CSS for the Theme Park Mission Captain surface.
+
+    Every rule here is fixed and code-authored; nothing dynamic is ever
+    interpolated into this block.  EXOS Navy/Gold anchor the brand; a teal
+    accent gives Theme Park Mission its own identity next to Formula
+    R.A.C.E.'s red, distinct from it rather than copying it.
+    """
+    st.markdown(
+        """
+        <style>
+        :root {
+          --tp-navy:#082D58; --tp-navy-deep:#051D3B; --tp-gold:#B59A37;
+          --tp-teal:#0E9C8B; --tp-blue:#2E6DB4; --tp-green:#1E8E5A;
+          --tp-red:#C4342F; --tp-amber:#B8790A; --tp-mist:#5B7089;
+        }
+        .tp-header { background:linear-gradient(135deg,var(--tp-navy) 0%,var(--tp-navy-deep) 100%); border:1px solid rgba(181,154,55,.45); border-radius:16px; padding:1.1rem 1.25rem; margin-bottom:1rem; color:#fff; }
+        .tp-header-kicker { font:800 .68rem/1 Inter,system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase; color:var(--tp-gold); margin-bottom:.2rem; }
+        .tp-header-team { font:800 2rem/1.08 'Barlow Condensed',Impact,sans-serif; letter-spacing:.01em; text-transform:uppercase; color:#fff; overflow-wrap:anywhere; margin:0; }
+        .tp-header-stats { display:flex; align-items:baseline; gap:.55rem; margin-top:.6rem; }
+        .tp-header-count { font:800 2.5rem/1 'Barlow Condensed',Impact,sans-serif; color:var(--tp-gold); }
+        .tp-header-count-label { font:800 .74rem Inter,sans-serif; letter-spacing:.07em; text-transform:uppercase; color:#e8edf3; }
+        .tp-header-remaining { margin-top:.5rem; display:inline-block; padding:.3rem .7rem; border-radius:999px; background:rgba(181,154,55,.2); border:1px solid rgba(181,154,55,.55); color:var(--tp-gold); font:800 .76rem Inter,sans-serif; letter-spacing:.04em; }
+        .tp-progress-track { background:rgba(255,255,255,.2); border-radius:999px; height:8px; margin:.65rem 0 .1rem; overflow:hidden; }
+        .tp-progress-fill { background:var(--tp-gold); height:100%; border-radius:999px; }
+        .tp-badge { display:inline-flex; align-items:center; gap:.32rem; padding:.34rem .7rem; border-radius:999px; font:800 .74rem Inter,system-ui,sans-serif; letter-spacing:.03em; text-transform:uppercase; border:1.5px solid transparent; white-space:nowrap; }
+        .tp-badge-available { background:#FFF3D6; color:#6B4400; border-color:#D99B12; }
+        .tp-badge-progress  { background:#DFF5F2; color:#08463E; border-color:var(--tp-teal); }
+        .tp-badge-submitted { background:#E4EEFB; color:#173C6B; border-color:var(--tp-blue); }
+        .tp-badge-approved  { background:#E1F5E7; color:#0F4A29; border-color:var(--tp-green); }
+        .tp-badge-rejected  { background:#FBE4E3; color:#6B0F0C; border-color:var(--tp-red); }
+        .tp-badge-locked    { background:#EAEEF3; color:#33414F; border-color:#B8C3D0; }
+        .tp-badge-paused    { background:#FCE7CC; color:#5E3600; border-color:var(--tp-amber); }
+        .tp-card-meta { color:var(--tp-mist); font:700 .72rem Inter,sans-serif; letter-spacing:.04em; text-transform:uppercase; margin-bottom:.1rem; }
+        .tp-points { display:inline-flex; align-items:center; gap:.25rem; padding:.2rem .55rem; border-radius:999px; background:rgba(181,154,55,.16); color:#6B4400; font:800 .7rem Inter,sans-serif; letter-spacing:.03em; }
+        .tp-secret-banner { background:linear-gradient(120deg,rgba(181,154,55,.28),rgba(8,45,88,.94)); border:1px solid var(--tp-gold); border-radius:12px; padding:.75rem 1rem; margin-bottom:.6rem; color:#fff; font:800 .88rem Inter,sans-serif; letter-spacing:.03em; text-transform:uppercase; }
+        .tp-paused-banner { background:linear-gradient(120deg,rgba(184,121,10,.24),rgba(8,45,88,.92)); border:1px solid var(--tp-amber); border-radius:14px; padding:1.4rem 1.1rem; margin:.4rem 0 .6rem; color:#fff; text-align:center; }
+        .tp-paused-banner-title { font:800 1.5rem/1.15 'Barlow Condensed',Impact,sans-serif; letter-spacing:.02em; text-transform:uppercase; margin-bottom:.35rem; }
+        .tp-rejected-banner { background:#FBE4E3; border:2px solid var(--tp-red); border-radius:12px; padding:.85rem 1rem; margin:.4rem 0 .5rem; color:#5A0D0A; }
+        .tp-rejected-title { font:800 1rem Inter,system-ui,sans-serif; letter-spacing:.04em; text-transform:uppercase; margin-bottom:.15rem; }
+        div.stButton>button, div[data-testid="stFormSubmitButton"]>button { min-height:48px; border-radius:10px; font-weight:800; letter-spacing:.01em; }
+        /* Theme Park's own primary-action colour, on top of Streamlit's default
+           red. Injected only by _inject_mission_theme(), which only the Theme
+           Park participant surface calls, so it never reaches the legacy
+           Captain shell's page — that surface injects its own, separate CSS
+           and is a different entrypoint entirely. */
+        div.stButton>button[kind="primary"] { background:var(--tp-navy); border-color:var(--tp-navy); color:#fff; }
+        div.stButton>button[kind="primary"]:hover { background:var(--tp-navy-deep); border-color:var(--tp-navy-deep); color:#fff; }
+        div.stButton>button[kind="primary"]:disabled { background:#C3CCD6; border-color:#C3CCD6; color:#5B7089; opacity:1; }
+        div[data-testid="stFileUploader"] { border:1.5px dashed var(--tp-teal); border-radius:10px; padding:.5rem; }
+        @media (max-width:600px) {
+          .tp-header-team { font-size:1.65rem; }
+          .tp-header-count { font-size:2.05rem; }
+          .block-container { padding-left:.6rem !important; padding-right:.6rem !important; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_mission_header(workspace) -> None:
+    """Persistent Team/progress dashboard. Every value is canonical and live.
+
+    Team identity is the loudest element on the page; Captain status is
+    rendered separately (by ``_render_captain_authority``) as secondary
+    information underneath, never competing with it.
+    """
+    team = str(workspace.get("TeamIdentity") or workspace.get("TeamID") or "Your Team").strip()
+    # Team identity is facilitator-configured free text, not a closed enum —
+    # escape it before it enters raw HTML.  A dynamic value with an embedded
+    # newline once defeated Markdown's own indentation handling this exact
+    # way (the raw team card incident); html.escape is the actual fix, not
+    # just avoiding textwrap.dedent.  The visual upper-case treatment is CSS
+    # (text-transform), not a Python .upper() — the underlying text a screen
+    # reader or a test sees stays exactly what the facilitator configured.
+    safe_team = html.escape(team)
+    progress = workspace.get("Progress", {}) or {}
+    completed = int(progress.get("Completed", 0) or 0)
+    total = int(progress.get("Total", 0) or 0)
+    remaining = max(total - completed, 0)
+    fraction = min(completed / total, 1.0) if total > 0 else 0.0
+    remaining_label = "ALL MISSIONS DONE" if remaining == 0 and total > 0 else f"{remaining} TO GO"
+    # Everything below is ONE markdown call inside a single .tp-header wrapper.
+    # The kicker/team/stats/remaining pieces were previously written as four
+    # separate st.markdown calls with no enclosing card, so the navy/gold
+    # background never actually rendered and their white/near-white text sat
+    # directly on the page background instead — invisible, not just low
+    # contrast.  A native st.progress() bar also can't live inside a single
+    # HTML string, so the indicator here is a plain width-percentage div —
+    # `fraction` is always a float derived from Progress counts, never
+    # participant/facilitator text, so it carries no escaping risk.
+    st.markdown(
+        '<div class="tp-header">'
+        '<div class="tp-header-kicker">MISSION CAPTAIN</div>'
+        f'<div class="tp-header-team">TEAM {safe_team}</div>'
+        '<div class="tp-header-stats">'
+        f'<span class="tp-header-count">{completed}/{total}</span>'
+        '<span class="tp-header-count-label">MISSIONS<br/>COMPLETED</span>'
+        '</div>'
+        f'<div class="tp-progress-track"><div class="tp-progress-fill" style="width:{fraction * 100:.0f}%;"></div></div>'
+        f'<span class="tp-header-remaining">{remaining_label}</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_paused_banner() -> None:
+    st.markdown(
+        '<div class="tp-paused-banner">'
+        '<div class="tp-paused-banner-title">⏸ Mission AI Paused</div>'
+        '<div>Please wait for your facilitator.</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 
 OPEN_MISSION_BOARD = "OPEN_MISSION_BOARD"
@@ -122,15 +262,11 @@ def _route_rows(workspace):
 
 
 def _render_ended_participant_screen(workspace):
-    """Render the terminal state from canonical progress, without any writes."""
-    progress = workspace.get("Progress", {}) or {}
-    completed = int(progress.get("Completed", 0) or 0)
-    total = int(progress.get("Total", 0) or 0)
-    team = str(workspace.get("TeamIdentity") or workspace.get("TeamID") or "your team")
-    st.success("Mission Complete 🎉")
-    st.markdown(f"**Team {team}**")
-    st.metric("Completed missions", f"{completed}/{total}")
-    st.info("No new submissions can be made. Please wait for the facilitator’s final announcement.")
+    """Render the terminal, celebratory state from canonical progress, no writes."""
+    st.success("MISSION COMPLETE 🎉")
+    _render_mission_header(workspace)
+    st.write("Thank you for participating.")
+    st.info("Please wait for your facilitator to announce the winning team.")
 
 
 def _restore_captain_recovery(identity):
@@ -165,9 +301,9 @@ def _render_captain_claim(db, workspace, device_id):
         )
         return
 
-    st.write("Your team does not have a Team Captain yet.")
+    st.write("Your team doesn't have a Mission Captain yet.")
     if not st.button(
-        "Become Team Captain", type="primary", width="stretch",
+        "Become Mission Captain", type="primary", width="stretch",
         key=f"theme_race_claim_{event_id}",
     ):
         return
@@ -183,15 +319,15 @@ def _render_captain_claim(db, workspace, device_id):
         return
 
     if result.get("Claimed"):
-        st.success("You are now this team’s Team Captain.")
+        st.success("You are now this team's Mission Captain.")
         st.rerun()
     elif result.get("RecoveryRequired"):
         st.warning(
-            "Captain access is already active on a different device. "
+            "Mission Captain access is already active on a different device. "
             "Recover it on that device, or ask your facilitator to transfer it."
         )
     elif result.get("CaptainAlreadyClaimed"):
-        st.info("Captain already selected for this team.")
+        st.info("Mission Captain already selected for this team.")
         st.rerun()
     else:
         st.info("Captain selection is not open for this team right now.")
@@ -203,13 +339,13 @@ def _render_captain_authority(db, workspace, enrollment_credential, device_id):
         if workspace.get("Lifecycle") == "CAPTAIN_SELECTION":
             _render_captain_claim(db, workspace, device_id)
         else:
-            st.info("Only the selected Captain can submit evidence for this team.")
+            st.info("Only the Mission Captain can submit evidence for this team.")
         return False
 
-    st.success("You are this team’s Captain.")
+    st.caption("🧭 You are the Mission Captain")
     if not workspace.get("CaptainSessionActive", False):
-        st.warning("Captain authority needs recovery on this device before a mission can be submitted.")
-        if st.button("Restore Captain authority", type="primary", width="stretch", key=f"theme_race_recover_captain_{event_id}"):
+        st.warning("Mission Captain access needs to be restored on this device before you can submit.")
+        if st.button("Restore Mission Captain Access", type="primary", width="stretch", key=f"theme_race_recover_captain_{event_id}"):
             if not enrollment_credential:
                 st.error("Secure registration is still loading. Try again in a moment.")
                 return False
@@ -217,13 +353,13 @@ def _render_captain_authority(db, workspace, enrollment_credential, device_id):
                 st.session_state.get("participant_join_code", ""), enrollment_credential, device_id,
             )
             _restore_captain_recovery(identity)
-            st.success("Captain authority restored from the canonical EXOS session.")
+            st.success("Mission Captain access restored.")
             st.rerun()
         return False
     return True
 
 
-def _render_evidence_form(db, workspace, mission, captain_active=True):
+def _render_evidence_form(db, workspace, mission, captain_active=True, show_title=True, show_instruction=True):
     """Render this mission's evidence form and, on submit, call board_submit.
 
     The Submit button is constructed on EVERY render where this mission is
@@ -238,6 +374,17 @@ def _render_evidence_form(db, workspace, mission, captain_active=True):
     constructed, and a conditional branch skipped ahead of it drops the click
     with nothing to show for it.  Authorization is instead re-checked, fresh,
     at the moment the already-fired click is handled below.
+
+    ``show_title`` is False when the caller (the mission board card) has
+    already rendered the mission's name; the Configured Route caller has no
+    such card and still needs its own title here.
+
+    ``show_instruction`` is False for a REJECTED resubmission: the rejection
+    banner above this form already carries the facilitator's specific
+    feedback, and repeating the same generic brief the Captain already saw
+    (and already attempted) only adds clutter to the card's densest state.
+    The safety note is never suppressed — it is not the redundant text this
+    is guarding against, and it can matter on every attempt.
     """
     evidence = mission.get("Evidence", {}) or {}
     text_config = evidence.get("Text", {}) or {}
@@ -245,13 +392,12 @@ def _render_evidence_form(db, workspace, mission, captain_active=True):
     numeric_config = evidence.get("NumericResult", {}) or {}
     activity_id = mission["ActivityID"]
     submitting_key = f"theme_race_submitting_{activity_id}"
-    st.subheader(mission.get("DisplayName") or "Current mission")
-    if mission.get("ParticipantInstruction"):
+    if show_title:
+        st.subheader(mission.get("DisplayName") or "Current mission")
+    if show_instruction and mission.get("ParticipantInstruction"):
         st.write(mission["ParticipantInstruction"])
     if mission.get("SafetyNote"):
-        st.info(f"Safety: {mission['SafetyNote']}")
-    if mission.get("FacilitatorInstruction"):
-        st.caption("Facilitator notes are not shown to participants.")
+        st.warning(f"⚠️ {mission['SafetyNote']}")
 
     text = ""
     if text_config.get("Required"):
@@ -276,12 +422,14 @@ def _render_evidence_form(db, workspace, mission, captain_active=True):
 
     already_submitting = bool(st.session_state.get(submitting_key))
     authorized = captain_active and not already_submitting
+    is_resubmission = str(mission.get("MissionState", "")).upper() == "REJECTED"
+    submit_label = "🔁 Update & Resubmit" if is_resubmission else "✅ Submit Evidence"
     if not captain_active:
-        st.caption("Captain authority is required to submit this team mission.")
+        st.caption("Only the Mission Captain can submit for this team.")
     elif already_submitting:
         st.info("Submitting… please wait.")
     if st.button(
-        "Submit mission evidence", type="primary", width="stretch",
+        submit_label, type="primary", width="stretch",
         key=f"theme_race_submit_{activity_id}", disabled=not authorized,
     ):
         _submit_trace(
@@ -368,7 +516,7 @@ def _render_evidence_form(db, workspace, mission, captain_active=True):
         finally:
             st.session_state[submitting_key] = False
         if str(workspace.get("StrategyMode", "")).upper() == "OPEN_MISSION_BOARD":
-            st.success("Mission evidence submitted for facilitator review. Your team's board remains canonical after refresh.")
+            st.success("📨 Submitted! Awaiting facilitator review.")
         else:
             st.success("Mission evidence submitted. The next route mission is now available unless this evidence is later rejected.")
         st.rerun()
@@ -384,7 +532,7 @@ def _upload_board_photo(workspace, mission_id, suffix, uploaded_photo):
     )
 
 
-def _render_ride_evidence_form(db, workspace, mission, captain_active=True):
+def _render_ride_evidence_form(db, workspace, mission, captain_active=True, show_title=True):
     """Ride proof UI. Server-side board RPC repeats all Captain/team checks.
 
     See ``_render_evidence_form`` for why the submit button is always
@@ -395,13 +543,14 @@ def _render_ride_evidence_form(db, workspace, mission, captain_active=True):
     evidence = mission.get("Evidence", {}) or {}
     required = mission.get("RideRequiredParticipantCount", 0)
     members = {row.get("ParticipantID", ""): row.get("Name", row.get("ParticipantID", "")) for row in workspace.get("TeamMembers", [])}
-    st.subheader(mission.get("DisplayName") or "Ride mission")
-    st.info(f"Required riders: {required} of {len(members)} current canonical team members. Full-team participation earns no extra competitive points.")
+    if show_title:
+        st.subheader(mission.get("DisplayName") or "Ride mission")
+    st.write(f"Required riders: {required} of {len(members)} current team members.")
     st.caption("An attraction exterior photo is not queue-entry proof. Follow attraction staff instructions and never capture evidence where park rules prohibit it.")
     pathway_options = mission.get("RideParticipation", {}).get("EvidencePathways") or []
     pathway = st.selectbox("Evidence pathway", pathway_options, key=f"theme_race_ride_path_{activity_id}")
     riders = st.multiselect(
-        "Canonical team members who entered the official queue", list(members),
+        "Team members who entered the official queue", list(members),
         format_func=lambda key: members.get(key, key), key=f"theme_race_ride_riders_{activity_id}",
     )
     remaining = [member_id for member_id in members if member_id not in riders]
@@ -427,11 +576,11 @@ def _render_ride_evidence_form(db, workspace, mission, captain_active=True):
     already_submitting = bool(st.session_state.get(submitting_key))
     authorized = captain_active and not already_submitting
     if not captain_active:
-        st.caption("Captain authority is required to submit this team mission.")
+        st.caption("Only the Mission Captain can submit for this team.")
     elif already_submitting:
         st.info("Submitting… please wait.")
     if st.button(
-        "Record ride outcome" if attempt != "COMPLETED" else "Submit ride evidence",
+        "Record Outcome" if attempt != "COMPLETED" else "✅ Submit Ride Evidence",
         type="primary", width="stretch", key=f"theme_race_ride_submit_{activity_id}",
         disabled=not authorized,
     ):
@@ -501,8 +650,110 @@ def _render_ride_evidence_form(db, workspace, mission, captain_active=True):
                     return
         finally:
             st.session_state[submitting_key] = False
-        st.success("Ride outcome recorded from canonical board state.")
+        st.success("📨 Ride outcome recorded.")
         st.rerun()
+
+
+_MISSION_CLASS_LABEL = {
+    "STANDARD": "🎯 STANDARD MISSION",
+    "RIDE": "🎢 RIDE MISSION",
+    "BONUS": "⭐ BONUS MISSION",
+    "SECRET": "🔓 SECRET MISSION",
+}
+
+
+def _render_mission_card(db, workspace, mission, captain_active):
+    """One scannable mission card: title, type, state badge, points, action.
+
+    A Secret Mission is never locked by the time it reaches this board (the
+    engine excludes a still-locked Secret Mission from MissionBoard entirely),
+    so any Secret Mission rendered here has just been released — it always
+    gets the reveal banner, never facilitator/UAT release mechanics.
+    """
+    activity_id = mission.get("ActivityID", "")
+    state = str(mission.get("MissionState", "LOCKED")).upper()
+    mission_class = str(mission.get("MissionClass", "STANDARD")).upper()
+    with st.container(border=True):
+        if mission_class == "SECRET":
+            st.markdown('<div class="tp-secret-banner">🔓 Secret Mission Unlocked</div>', unsafe_allow_html=True)
+        st.caption(_MISSION_CLASS_LABEL.get(mission_class, "🎯 MISSION"))
+        st.markdown(f"#### {mission.get('DisplayName') or 'Mission'}")
+
+        badge_html = _state_badge_html(state)
+        try:
+            points = int((mission.get("Scoring", {}) or {}).get("Maximum") or 0)
+        except (TypeError, ValueError):
+            points = 0
+        if points > 0:
+            badge_html += f' <span class="tp-points">🏅 UP TO {points} PTS</span>'
+        st.markdown(badge_html, unsafe_allow_html=True)
+
+        meta = " · ".join(
+            part for part in (
+                str(mission.get("Zone", "") or "").strip(),
+                str(mission.get("LocationDescription", "") or "").strip(),
+            ) if part
+        )
+        if meta:
+            st.markdown(f'<div class="tp-card-meta">{html.escape(meta)}</div>', unsafe_allow_html=True)
+
+        if state == "AVAILABLE":
+            st.write(mission.get("ParticipantInstruction", ""))
+            if mission.get("SafetyNote"):
+                st.warning(f"⚠️ {mission['SafetyNote']}")
+            # Always constructed regardless of captain_active: it is
+            # re-derived from a live session join on every independent
+            # rerun and is not guaranteed identical between the render
+            # that shows this button and the one that processes its
+            # click.  Gating construction on it can silently drop a click
+            # with no error — see _render_evidence_form for the full case.
+            if st.button(
+                "🎯 Select Mission", type="primary", width="stretch",
+                key=f"theme_race_board_select_{activity_id}", disabled=not captain_active,
+            ):
+                if not captain_active:
+                    st.caption("Only the Mission Captain can select a mission.")
+                    return
+                try:
+                    db.runtime.select_theme_park_race_mission(st.session_state.get("participant_session_token", ""), activity_id)
+                except RuntimeDatabaseError as error:
+                    st.error(str(error))
+                    return
+                st.rerun()
+        elif state in {"SELECTED", "REJECTED"}:
+            if state == "REJECTED":
+                # The same evidence form below is otherwise identical to a
+                # never-submitted SELECTED mission; without this banner a
+                # Captain cannot tell "returned for resubmission" from
+                # "not yet attempted".  Fixed banner text only — the
+                # facilitator's own reason is written via native st.write,
+                # never interpolated into this HTML.
+                st.markdown(
+                    '<div class="tp-rejected-banner">'
+                    '<div class="tp-rejected-title">⚠️ Resubmission Required</div>'
+                    '<div>Your submission was reviewed and returned.</div>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+                reason = str(mission.get("RejectionReason", "") or "").strip()
+                if reason:
+                    st.markdown("**Facilitator feedback:**")
+                    st.write(reason)
+            if mission_class == "RIDE":
+                _render_ride_evidence_form(db, workspace, mission, captain_active, show_title=False)
+            else:
+                _render_evidence_form(
+                    db, workspace, mission, captain_active,
+                    show_title=False, show_instruction=state != "REJECTED",
+                )
+        elif state == "TEMPORARILY_UNAVAILABLE":
+            st.write("This mission is paused for now. Choose another available mission — no penalty.")
+        elif state == "CLOSED":
+            st.write("This mission is closed.")
+        elif state == "SUBMITTED":
+            st.write("EXOS has received your submission.")
+        elif state == "APPROVED":
+            st.write("Nicely done — this mission is locked in.")
 
 
 def _render_open_mission_board(db, workspace, captain_active):
@@ -511,91 +762,27 @@ def _render_open_mission_board(db, workspace, captain_active):
     if not board:
         st.info("No mission is currently available.")
         return
-    st.markdown("#### Mission opportunity board")
+    st.markdown("### 🗺️ Mission Board")
     for mission in board:
-        activity_id = mission.get("ActivityID", "")
-        state = str(mission.get("MissionState", "LOCKED")).upper()
-        label = f"{mission.get('DisplayName', activity_id)} · {mission.get('MissionClass', 'STANDARD')} · {state}"
-        with st.expander(label, expanded=state in {"SELECTED", "REJECTED"}):
-            st.caption(f"{mission.get('Zone', '')} · {mission.get('LocationDescription', '')}")
-            st.write(mission.get("ParticipantInstruction", ""))
-            if mission.get("SafetyNote"):
-                st.info(f"Safety: {mission['SafetyNote']}")
-            st.caption(f"Operational status: {mission.get('OperationalStatus', state)}")
-            if state == "AVAILABLE":
-                # Always constructed regardless of captain_active: it is
-                # re-derived from a live session join on every independent
-                # rerun and is not guaranteed identical between the render
-                # that shows this button and the one that processes its
-                # click.  Gating construction on it can silently drop a click
-                # with no error — see _render_evidence_form for the full case.
-                if st.button(
-                    "Select this mission", type="primary",
-                    key=f"theme_race_board_select_{activity_id}", disabled=not captain_active,
-                ):
-                    if not captain_active:
-                        st.caption("Captain authority is required to select a mission.")
-                        return
-                    try:
-                        db.runtime.select_theme_park_race_mission(st.session_state.get("participant_session_token", ""), activity_id)
-                    except RuntimeDatabaseError as error:
-                        st.error(str(error))
-                        return
-                    st.rerun()
-            elif state in {"SELECTED", "REJECTED"}:
-                if state == "REJECTED":
-                    # The same evidence form below is otherwise identical to a
-                    # never-submitted SELECTED mission; without this banner a
-                    # Captain cannot tell "returned for resubmission" from
-                    # "not yet attempted".
-                    st.warning("⚠️ Resubmission required")
-                    st.write("Your previous submission was reviewed and returned by the facilitator.")
-                    reason = str(mission.get("RejectionReason", "") or "").strip()
-                    if reason:
-                        st.markdown("**Facilitator feedback:**")
-                        st.info(reason)
-                    st.caption("Update your evidence below and submit again.")
-                if str(mission.get("MissionClass", "")).upper() == "RIDE":
-                    _render_ride_evidence_form(db, workspace, mission, captain_active)
-                else:
-                    _render_evidence_form(db, workspace, mission, captain_active)
-            elif state == "TEMPORARILY_UNAVAILABLE":
-                st.info("This mission is temporarily unavailable. Choose another available mission; no score penalty applies.")
-            elif state == "CLOSED":
-                st.info("This mission is closed and cannot be selected.")
-            elif state == "SUBMITTED":
-                st.info("Evidence is awaiting facilitator review.")
-            elif state == "APPROVED":
-                st.success("Mission approved.")
+        _render_mission_card(db, workspace, mission, captain_active)
 
 
 def render_theme_park_race_participant(db, enrollment_credential="", device_id=""):
     """Participant/Captain surface driven solely by the canonical workspace."""
+    _inject_mission_theme()
     session_token = st.session_state.get("participant_session_token", "")
     try:
         workspace = _workspace(db, session_token)
     except RuntimeDatabaseError as error:
         # A failed workspace read otherwise removes the whole surface, including
         # Captain selection, with no way back short of a full page reload.
-        st.warning("Theme Park Race state is reconnecting.")
+        st.warning("Mission AI is reconnecting.")
         st.caption(str(error))
         if st.button("Retry", width="stretch", key="theme_race_workspace_retry"):
             st.rerun()
         return
     lifecycle = workspace.get("Lifecycle", "REGISTRATION")
-    title, message = _LIFECYCLE_COPY.get(lifecycle, ("Theme Park Race", "Waiting for canonical event state."))
-    st.subheader(title)
-    team_identity = str(workspace.get("TeamIdentity", "") or "").strip()
-    if team_identity:
-        st.caption(f"Team {team_identity}")
-    st.info(message)
     strategy_mode = str(workspace.get("StrategyMode", "CONFIGURED_TEAM_ROUTE")).upper()
-    progress_label = "Team mission progress" if strategy_mode == "OPEN_MISSION_BOARD" else "Team route progress"
-    st.caption(f"{progress_label}: {workspace.get('Progress', {}).get('Completed', 0)} / {workspace.get('Progress', {}).get('Total', 0)}")
-    if strategy_mode != "OPEN_MISSION_BOARD":
-        route_rows = _route_rows(workspace)
-        if route_rows:
-            st.dataframe(route_rows, hide_index=True, width="stretch")
 
     # An ended Mission is terminal on every reconnect.  Do this before Captain
     # authority rendering so an old browser cannot expose recovery, selection,
@@ -603,6 +790,29 @@ def render_theme_park_race_participant(db, enrollment_credential="", device_id="
     if lifecycle == "ENDED":
         _render_ended_participant_screen(workspace)
         return
+
+    if lifecycle in {"ACTIVE", "HELD"}:
+        # The persistent dashboard replaces the generic lifecycle banner once
+        # there is a team and a mission board worth glancing at; earlier
+        # lifecycle states (registration, Captain selection, ...) have no
+        # progress yet, so they keep the plain title/message form below.
+        _render_mission_header(workspace)
+    else:
+        title, message = _LIFECYCLE_COPY.get(lifecycle, ("Mission AI", "Waiting for your facilitator."))
+        team_identity = str(workspace.get("TeamIdentity", "") or "").strip()
+        st.subheader(title)
+        if team_identity:
+            st.caption(f"Team {team_identity}")
+        st.info(message)
+
+    if strategy_mode != "OPEN_MISSION_BOARD":
+        st.caption(f"Team route progress: {workspace.get('Progress', {}).get('Completed', 0)} / {workspace.get('Progress', {}).get('Total', 0)}")
+        route_rows = _route_rows(workspace)
+        if route_rows:
+            st.dataframe(route_rows, hide_index=True, width="stretch")
+
+    if lifecycle == "HELD":
+        _render_paused_banner()
 
     captain_active = _render_captain_authority(db, workspace, enrollment_credential, device_id)
     if lifecycle != "ACTIVE":
@@ -612,10 +822,10 @@ def render_theme_park_race_participant(db, enrollment_credential="", device_id="
         return
     mission = workspace.get("CurrentMission")
     if not mission:
-        st.success("Your team has completed its configured route.")
+        st.success("🎉 Your team has completed every mission on this route.")
         return
     if not captain_active:
-        st.caption("Mission details and progress remain visible to the whole team. Captain authority is required to submit.")
+        st.caption("Mission details are visible to the whole team. Only the Mission Captain can submit.")
         st.subheader(mission.get("DisplayName") or "Current mission")
         st.write(mission.get("ParticipantInstruction", ""))
         return

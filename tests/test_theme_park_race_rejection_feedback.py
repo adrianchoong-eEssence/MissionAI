@@ -130,9 +130,9 @@ def test_rejected_mission_renders_the_resubmission_required_banner():
     assert workspace["MissionBoard"][0]["MissionState"] == "REJECTED"
 
     fake = _render(workspace)
-    warnings = _texts(fake, "warning")
-    assert "⚠️ Resubmission required" in warnings
-    assert any("reviewed and returned" in text for text in _texts(fake, "write"))
+    markdown_texts = _texts(fake, "markdown")
+    assert any("Resubmission Required" in text for text in markdown_texts)
+    assert any("reviewed and returned" in text for text in markdown_texts)
 
 
 def test_rejected_state_reads_distinctly_from_selected_in_the_projection():
@@ -153,9 +153,8 @@ def test_facilitator_rejection_reason_is_visible_to_the_captain():
     assert workspace["MissionBoard"][0]["RejectionReason"] == REASON
 
     fake = _render(workspace)
-    shown = _texts(fake, "info", "markdown")
-    assert REASON in shown
-    assert "**Facilitator feedback:**" in shown
+    assert REASON in _texts(fake, "write")
+    assert "**Facilitator feedback:**" in _texts(fake, "markdown")
     # The query is scoped: only this team's rejected submission, only REJECT rows.
     path, query = calls[0]
     assert path == "reviews_v2"
@@ -178,7 +177,7 @@ def test_the_latest_reject_review_wins_when_a_submission_was_reviewed_more_than_
 def test_a_missing_reason_still_renders_the_banner_without_a_fabricated_message():
     workspace, _ = _workspace_via_adapter(status="REJECTED", reviews_rows=[])
     fake = _render(workspace)
-    assert "⚠️ Resubmission required" in _texts(fake, "warning")
+    assert any("Resubmission Required" in text for text in _texts(fake, "markdown"))
     assert not any("Facilitator feedback" in text for text in _texts(fake, "markdown"))
 
 
@@ -202,7 +201,7 @@ def test_ride_class_rejection_also_shows_the_banner_before_the_ride_form():
     with patch.object(TPR, "_render_ride_evidence_form") as ride_form:
         fake = _render(workspace)
     ride_form.assert_called_once()
-    assert "⚠️ Resubmission required" in _texts(fake, "warning")
+    assert any("Resubmission Required" in text for text in _texts(fake, "markdown"))
 
 
 # E. resubmission removes the rejection presentation and returns to awaiting review.
@@ -214,8 +213,8 @@ def test_resubmission_clears_the_rejection_banner_and_returns_to_awaiting_review
     assert board["RejectionReason"] == ""
 
     fake = _render(workspace)
-    assert "⚠️ Resubmission required" not in _texts(fake, "warning")
-    assert any("awaiting facilitator review" in text for text in _texts(fake, "info"))
+    assert not any("Resubmission Required" in text for text in _texts(fake, "markdown"))
+    assert any("received your submission" in text for text in _texts(fake, "write"))
 
 
 def test_resubmission_reuses_the_same_submission_id_so_the_new_revision_gates_review():
@@ -287,8 +286,9 @@ def test_approve_path_and_score_semantics_are_unaffected():
 def test_approved_mission_renders_the_existing_success_state_unchanged():
     workspace, _ = _workspace_via_adapter(status="APPROVED", reviews_rows=[])
     fake = _render(workspace)
-    assert any("Mission approved." in text for text in _texts(fake, "success"))
-    assert "⚠️ Resubmission required" not in _texts(fake, "warning")
+    assert any("COMPLETED" in text for text in _texts(fake, "markdown"))
+    assert any("locked in" in text for text in _texts(fake, "write"))
+    assert not any("Resubmission Required" in text for text in _texts(fake, "markdown"))
 
 
 def test_facilitator_review_routing_and_stale_revision_protection_are_unchanged():

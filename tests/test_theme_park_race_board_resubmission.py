@@ -278,7 +278,7 @@ def test_the_submit_button_is_disabled_while_a_submission_is_in_flight():
     fake, calls, _ = _render_evidence_form(state="REJECTED", already_submitting=True, click=False)
     submit_call = next(
         call for call in fake.button.call_args_list
-        if call.args and "Submit mission evidence" in call.args[0]
+        if call.kwargs.get("key") == f"theme_race_submit_{ACTIVITY_ID}"
     )
     assert submit_call.kwargs.get("disabled") is True
 
@@ -287,7 +287,7 @@ def test_the_submit_button_is_enabled_when_nothing_is_in_flight():
     fake, calls, _ = _render_evidence_form(state="REJECTED", click=False)
     submit_call = next(
         call for call in fake.button.call_args_list
-        if call.args and "Submit mission evidence" in call.args[0]
+        if call.kwargs.get("key") == f"theme_race_submit_{ACTIVITY_ID}"
     )
     assert submit_call.kwargs.get("disabled") is False
 
