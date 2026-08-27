@@ -11,6 +11,7 @@ from datetime import datetime
 
 import streamlit as st
 
+from branding import COMPANY_NAME, PLATFORM_EXPANSION, PLATFORM_NAME
 from data.google_drive import get_photo_url, upload_photo
 from data.runtime_database import RuntimeDatabaseError
 from engines.theme_park_race import projector_projection
@@ -46,12 +47,14 @@ _LIFECYCLE_COPY = {
 }
 
 
-# Fixed, code-authored badge content only — never interpolate participant or
-# facilitator free text (mission titles, instructions, rejection reasons)
-# into these.  A dynamic value with an embedded newline defeated Markdown's
-# indentation handling once already (the raw team card incident); the fix
-# there was to keep free text out of unsafe_allow_html entirely, which this
-# module follows throughout.
+# Fixed, code-authored badge/icon content only — never interpolate
+# participant or facilitator free text (mission titles, instructions,
+# rejection reasons) into these.  A dynamic value with an embedded newline
+# defeated Markdown's indentation handling once already (the raw team card
+# incident); the fix there was to keep free text out of unsafe_allow_html
+# entirely, which this module follows throughout.  Label text is unchanged
+# from Sprint 1 — the visual system underneath is new, but a Captain who read
+# "AWAITING REVIEW" once still reads exactly that.
 _STATE_BADGES = {
     "AVAILABLE": ("tp-badge-available", "🟡", "AVAILABLE"),
     "SELECTED": ("tp-badge-progress", "🔵", "IN PROGRESS"),
@@ -62,66 +65,176 @@ _STATE_BADGES = {
     "TEMPORARILY_UNAVAILABLE": ("tp-badge-paused", "⏸", "PAUSED"),
 }
 
+# One recognisable identity per mission class: icon, label and an accent hue
+# distinct from every other class and from every state colour, so a class is
+# legible even for someone who cannot rely on colour alone.
+_CLASS_STYLE = {
+    "STANDARD": ("🎯", "STANDARD", "#2DD4BF"),
+    "RIDE": ("🎢", "RIDE", "#FF8A3D"),
+    "BONUS": ("⚡", "BONUS", "#FFC94D"),
+    "SECRET": ("🔒", "SECRET", "#A78BFA"),
+}
+
 
 def _state_badge_html(state: str) -> str:
     css_class, icon, label = _STATE_BADGES.get(str(state or "").upper(), ("tp-badge-locked", "•", "UNAVAILABLE"))
     return f'<span class="tp-badge {css_class}">{icon} {label}</span>'
 
 
+def _class_style(mission_class: str) -> tuple[str, str, str]:
+    return _CLASS_STYLE.get(str(mission_class or "").upper(), _CLASS_STYLE["STANDARD"])
+
+
 def _inject_mission_theme() -> None:
     """One-time, fully static CSS for the Theme Park Mission Captain surface.
 
     Every rule here is fixed and code-authored; nothing dynamic is ever
-    interpolated into this block.  EXOS Navy/Gold anchor the brand; a teal
-    accent gives Theme Park Mission its own identity next to Formula
-    R.A.C.E.'s red, distinct from it rather than copying it.
+    interpolated into this block.
+
+    Sprint 1 kept the default white Streamlit page and dropped one navy card
+    onto it — reviewed as "just one box, boring".  This instead re-themes the
+    whole page: a dark mission-control canvas, Streamlit's own chrome (header,
+    toolbar, default light inputs) restyled to belong to it, and mission tiles
+    built from real ``st.container(key=...)`` blocks rather than plain
+    ``st.expander``/``border=True`` boxes.  Buttons, uploaders and text areas
+    are still genuine Streamlit widgets underneath — only their presentation
+    changes, exactly like Formula R.A.C.E.'s own separate dark theme
+    (``_race_css`` in the legacy Captain shell) already does for its page;
+    this module still injects nothing there and that surface injects nothing
+    here.
+
+    ``st.container(key="...")`` renders as ``st-key-{key}`` on a real DOM
+    node, so a fixed, code-authored key naming scheme (never built from
+    participant/facilitator text) lets plain CSS substring selectors
+    (``[class*="..."]``) style every tile, and every tile of one mission
+    class or lifecycle state, without knowing IDs in advance.
     """
     st.markdown(
         """
         <style>
         :root {
-          --tp-navy:#082D58; --tp-navy-deep:#051D3B; --tp-gold:#B59A37;
-          --tp-teal:#0E9C8B; --tp-blue:#2E6DB4; --tp-green:#1E8E5A;
-          --tp-red:#C4342F; --tp-amber:#B8790A; --tp-mist:#5B7089;
+          --tp-bg-0:#050b14; --tp-bg-1:#0a1626; --tp-bg-2:#101f33; --tp-bg-3:#16283e;
+          --tp-gold:#D9B24C; --tp-gold-deep:#B59A37;
+          --tp-teal:#2DD4BF; --tp-blue:#4FA3E8; --tp-green:#3ED598;
+          --tp-red:#FF5C5C; --tp-amber:#E8A23D; --tp-ink:#EAF0F8; --tp-mist:#8CA0BE;
         }
-        .tp-header { background:linear-gradient(135deg,var(--tp-navy) 0%,var(--tp-navy-deep) 100%); border:1px solid rgba(181,154,55,.45); border-radius:16px; padding:1.1rem 1.25rem; margin-bottom:1rem; color:#fff; }
-        .tp-header-kicker { font:800 .68rem/1 Inter,system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase; color:var(--tp-gold); margin-bottom:.2rem; }
-        .tp-header-team { font:800 2rem/1.08 'Barlow Condensed',Impact,sans-serif; letter-spacing:.01em; text-transform:uppercase; color:#fff; overflow-wrap:anywhere; margin:0; }
-        .tp-header-stats { display:flex; align-items:baseline; gap:.55rem; margin-top:.6rem; }
-        .tp-header-count { font:800 2.5rem/1 'Barlow Condensed',Impact,sans-serif; color:var(--tp-gold); }
-        .tp-header-count-label { font:800 .74rem Inter,sans-serif; letter-spacing:.07em; text-transform:uppercase; color:#e8edf3; }
-        .tp-header-remaining { margin-top:.5rem; display:inline-block; padding:.3rem .7rem; border-radius:999px; background:rgba(181,154,55,.2); border:1px solid rgba(181,154,55,.55); color:var(--tp-gold); font:800 .76rem Inter,sans-serif; letter-spacing:.04em; }
-        .tp-progress-track { background:rgba(255,255,255,.2); border-radius:999px; height:8px; margin:.65rem 0 .1rem; overflow:hidden; }
-        .tp-progress-fill { background:var(--tp-gold); height:100%; border-radius:999px; }
-        .tp-badge { display:inline-flex; align-items:center; gap:.32rem; padding:.34rem .7rem; border-radius:999px; font:800 .74rem Inter,system-ui,sans-serif; letter-spacing:.03em; text-transform:uppercase; border:1.5px solid transparent; white-space:nowrap; }
-        .tp-badge-available { background:#FFF3D6; color:#6B4400; border-color:#D99B12; }
-        .tp-badge-progress  { background:#DFF5F2; color:#08463E; border-color:var(--tp-teal); }
-        .tp-badge-submitted { background:#E4EEFB; color:#173C6B; border-color:var(--tp-blue); }
-        .tp-badge-approved  { background:#E1F5E7; color:#0F4A29; border-color:var(--tp-green); }
-        .tp-badge-rejected  { background:#FBE4E3; color:#6B0F0C; border-color:var(--tp-red); }
-        .tp-badge-locked    { background:#EAEEF3; color:#33414F; border-color:#B8C3D0; }
-        .tp-badge-paused    { background:#FCE7CC; color:#5E3600; border-color:var(--tp-amber); }
-        .tp-card-meta { color:var(--tp-mist); font:700 .72rem Inter,sans-serif; letter-spacing:.04em; text-transform:uppercase; margin-bottom:.1rem; }
-        .tp-points { display:inline-flex; align-items:center; gap:.25rem; padding:.2rem .55rem; border-radius:999px; background:rgba(181,154,55,.16); color:#6B4400; font:800 .7rem Inter,sans-serif; letter-spacing:.03em; }
-        .tp-secret-banner { background:linear-gradient(120deg,rgba(181,154,55,.28),rgba(8,45,88,.94)); border:1px solid var(--tp-gold); border-radius:12px; padding:.75rem 1rem; margin-bottom:.6rem; color:#fff; font:800 .88rem Inter,sans-serif; letter-spacing:.03em; text-transform:uppercase; }
-        .tp-paused-banner { background:linear-gradient(120deg,rgba(184,121,10,.24),rgba(8,45,88,.92)); border:1px solid var(--tp-amber); border-radius:14px; padding:1.4rem 1.1rem; margin:.4rem 0 .6rem; color:#fff; text-align:center; }
-        .tp-paused-banner-title { font:800 1.5rem/1.15 'Barlow Condensed',Impact,sans-serif; letter-spacing:.02em; text-transform:uppercase; margin-bottom:.35rem; }
-        .tp-rejected-banner { background:#FBE4E3; border:2px solid var(--tp-red); border-radius:12px; padding:.85rem 1rem; margin:.4rem 0 .5rem; color:#5A0D0A; }
-        .tp-rejected-title { font:800 1rem Inter,system-ui,sans-serif; letter-spacing:.04em; text-transform:uppercase; margin-bottom:.15rem; }
+        .stApp {
+          background:
+            radial-gradient(circle at 15% -5%, rgba(45,212,191,.10), transparent 42%),
+            radial-gradient(circle at 100% 5%, rgba(217,178,76,.12), transparent 48%),
+            linear-gradient(180deg, var(--tp-bg-0) 0%, var(--tp-bg-1) 60%, var(--tp-bg-0) 100%) !important;
+        }
+        .stApp, .stApp p, .stApp li, .stApp label, [data-testid="stMarkdownContainer"] { color:var(--tp-ink) !important; }
+        [data-testid="stCaptionContainer"] { color:var(--tp-mist) !important; }
+        [data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stMainMenu"], [data-testid="stAppDeployButton"] { display:none !important; }
+        [data-testid="stMainBlockContainer"] { padding:.6rem .8rem 3rem !important; max-width:520px; }
+        div[data-testid="stAlert"] { background:rgba(255,255,255,.05) !important; border:1px solid rgba(255,255,255,.14) !important; border-radius:12px !important; }
+        div[data-testid="stAlert"] p { color:var(--tp-ink) !important; }
+        [data-testid="stTextArea"] textarea, [data-testid="stTextInput"] input, [data-testid="stNumberInputField"] {
+          background:var(--tp-bg-2) !important; color:var(--tp-ink) !important; border:1px solid rgba(255,255,255,.16) !important; border-radius:10px !important;
+        }
+        [data-testid="stSelectbox"] [data-baseweb="select"] > div, [data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+          background:var(--tp-bg-2) !important; border-color:rgba(255,255,255,.16) !important; color:var(--tp-ink) !important;
+        }
+        [data-testid="stFileUploaderDropzone"] { background:var(--tp-bg-2) !important; border:1.5px dashed var(--tp-teal) !important; border-radius:12px !important; }
+        [data-testid="stFileUploaderDropzoneInstructions"] span, [data-testid="stFileUploaderDropzoneInstructions"] small { color:var(--tp-mist) !important; }
+        [data-testid="stWidgetLabel"] p { color:var(--tp-ink) !important; font-weight:700 !important; }
+        [data-testid="stProgress"] > div > div { background:rgba(255,255,255,.14) !important; }
+        [data-testid="stProgress"] > div > div > div { background:var(--tp-gold) !important; }
+
+        /* ---- Mission AI wordmark + Captain HUD -------------------------- */
+        .mh-kicker { font:800 .7rem/1 Inter,system-ui,sans-serif; letter-spacing:.24em; text-transform:uppercase; color:var(--tp-teal); margin-bottom:.3rem; }
+        .mh-team { font:800 2.7rem/.95 'Barlow Condensed',Impact,sans-serif; letter-spacing:.01em; text-transform:uppercase; color:#fff; overflow-wrap:anywhere; margin:.1rem 0 .7rem; text-shadow:0 8px 28px rgba(45,212,191,.18); }
+        .mh-stats { display:flex; align-items:baseline; gap:.6rem; }
+        .mh-count { font:800 3.1rem/1 'Barlow Condensed',Impact,sans-serif; color:var(--tp-gold); }
+        .mh-count-label { font:800 .78rem Inter,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--tp-mist); }
+        .mh-segments { display:flex; gap:.28rem; margin:.7rem 0 .5rem; }
+        .mh-segment { flex:1; height:9px; border-radius:999px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.1); }
+        .mh-segment.filled { background:linear-gradient(90deg,var(--tp-gold-deep),var(--tp-gold)); border-color:var(--tp-gold); }
+        .mh-remaining { display:inline-block; padding:.32rem .8rem; border-radius:999px; background:rgba(45,212,191,.14); border:1px solid rgba(45,212,191,.5); color:var(--tp-teal); font:800 .78rem Inter,sans-serif; letter-spacing:.05em; }
+        .mh-remaining.done { background:rgba(62,213,152,.16); border-color:var(--tp-green); color:var(--tp-green); }
+
+        /* ---- Restrained platform brand marks (EXOS / eEssence) ----------
+           One quiet line under the wordmark kicker, an order of magnitude
+           smaller than .mh-team — the team stays the loudest thing on the
+           page. Never repeated per-tile; see the sign-off block and footer
+           below for the only other two places brand identity appears. */
+        .mh-brand-line { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin:-.05rem 0 .55rem; }
+        .mh-brand-powered { font:800 .56rem Inter,system-ui,sans-serif; letter-spacing:.12em; text-transform:uppercase; color:var(--tp-mist); opacity:.7; }
+        .mh-brand-exos { color:var(--tp-gold); font-weight:800; }
+        .mh-brand-by { font:600 .56rem Inter,system-ui,sans-serif; letter-spacing:.04em; color:var(--tp-mist); opacity:.5; font-style:italic; }
+        .mh-alert-kicker { font:800 .62rem Inter,system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase; color:rgba(255,255,255,.68); margin-bottom:.2rem; }
+
+        /* ---- Status badges (fixed enum content only) -------------------- */
+        .tp-badge { display:inline-flex; align-items:center; gap:.32rem; padding:.34rem .7rem; border-radius:999px; font:800 .72rem Inter,system-ui,sans-serif; letter-spacing:.03em; text-transform:uppercase; border:1.5px solid transparent; white-space:nowrap; }
+        .tp-badge-available { background:rgba(217,178,76,.16); color:var(--tp-gold); border-color:var(--tp-gold); }
+        .tp-badge-progress  { background:rgba(45,212,191,.14); color:var(--tp-teal); border-color:var(--tp-teal); }
+        .tp-badge-submitted { background:rgba(140,160,190,.14); color:var(--tp-mist); border-color:rgba(140,160,190,.5); }
+        .tp-badge-approved  { background:rgba(62,213,152,.14); color:var(--tp-green); border-color:var(--tp-green); }
+        .tp-badge-rejected  { background:rgba(255,92,92,.16); color:#FF8A8A; border-color:var(--tp-red); }
+        .tp-badge-locked    { background:rgba(140,160,190,.1); color:var(--tp-mist); border-color:rgba(140,160,190,.35); }
+        .tp-badge-paused    { background:rgba(232,162,61,.16); color:var(--tp-amber); border-color:var(--tp-amber); }
+        .tp-points { display:inline-flex; align-items:center; gap:.25rem; padding:.2rem .55rem; border-radius:999px; background:rgba(217,178,76,.12); color:var(--tp-gold); font:800 .68rem Inter,sans-serif; letter-spacing:.03em; }
+
+        /* ---- Mission tiles: real st.container(key="tile-...") blocks ----
+           The accent strip and class label colour are set via small
+           inline-styled elements the tile itself renders (colour comes only
+           from the fixed _CLASS_STYLE lookup, keyed by the closed
+           MissionClass enum — never participant/facilitator text), not via
+           a CSS custom property on the container, which Python cannot set
+           directly on an st.container(key=...) wrapper.  The strip sits in
+           normal flow with negative margins bleeding to the padded edges,
+           not position:absolute — an absolutely positioned full-height bar
+           here once overlapped the title on any tile tall enough to need
+           one (a RIDE tile's evidence form), since its height tracked the
+           tile's total content rather than a single line. */
+        div[class*="st-key-tile-"] { background:linear-gradient(165deg,var(--tp-bg-3) 0%,var(--tp-bg-2) 100%); border:1px solid rgba(255,255,255,.1); border-radius:16px; padding:1.05rem 1.05rem .9rem; margin-bottom:.75rem; overflow:hidden; }
+        div[class*="-tilestate-available-"] { box-shadow:0 0 0 1px rgba(217,178,76,.5), 0 10px 28px rgba(217,178,76,.12); }
+        div[class*="-tilestate-rejected-"] { box-shadow:0 0 0 1px rgba(255,92,92,.55), 0 10px 28px rgba(255,92,92,.14); }
+        div[class*="-tilestate-selected-"] { box-shadow:0 0 0 1px rgba(45,212,191,.4); }
+        div[class*="-tilestate-submitted-"], div[class*="-tilestate-approved-"] { opacity:.82; }
+        .mh-tile-accent-bar { height:4px; border-radius:4px; margin:-1.05rem -1.05rem .8rem; }
+        .mh-tile-class { display:flex; align-items:center; gap:.4rem; font:800 .68rem Inter,sans-serif; letter-spacing:.1em; text-transform:uppercase; margin-bottom:.25rem; }
+        .mh-tile-class-icon { font-size:1.05rem; }
+        .mh-tile-title { font:800 1.3rem/1.18 'Barlow Condensed',Impact,sans-serif; letter-spacing:.01em; color:#fff; margin:.05rem 0 .5rem; overflow-wrap:anywhere; }
+        .mh-tile-meta { color:var(--tp-mist); font:700 .68rem Inter,sans-serif; letter-spacing:.04em; text-transform:uppercase; margin:.4rem 0 .1rem; }
+        div[class*="st-key-board-disabled"] { opacity:.55; filter:grayscale(.25); }
+        .mh-secret-banner { background:linear-gradient(120deg,rgba(167,139,250,.32),rgba(8,20,38,.92)); border:1px solid var(--tp-purple,#A78BFA); border-radius:12px; padding:.7rem 1rem; margin-bottom:.6rem; color:#fff; }
+        .mh-secret-banner-title { font:800 .84rem Inter,sans-serif; letter-spacing:.03em; text-transform:uppercase; }
+        .mh-rejected-banner { background:rgba(255,92,92,.14); border:1.5px solid var(--tp-red); border-radius:12px; padding:.8rem 1rem; margin:.5rem 0; color:#FFD6D6; }
+        .mh-rejected-title { font:800 .95rem Inter,system-ui,sans-serif; letter-spacing:.04em; text-transform:uppercase; margin-bottom:.15rem; color:#fff; }
+
+        /* ---- Paused / Ended full-width banners --------------------------- */
+        .mh-paused-banner { background:linear-gradient(120deg,rgba(232,162,61,.22),rgba(8,20,38,.94)); border:1px solid var(--tp-amber); border-radius:16px; padding:1.6rem 1.1rem; margin:.5rem 0 .8rem; color:#fff; text-align:center; }
+        .mh-paused-title { font:800 1.6rem/1.15 'Barlow Condensed',Impact,sans-serif; letter-spacing:.02em; text-transform:uppercase; margin-bottom:.4rem; }
+        .mh-complete-banner { background:linear-gradient(120deg,rgba(62,213,152,.24),rgba(8,20,38,.94)); border:1px solid var(--tp-green); border-radius:16px; padding:1.6rem 1.1rem; margin:.5rem 0 .8rem; color:#fff; text-align:center; }
+        .mh-complete-title { font:800 1.7rem/1.15 'Barlow Condensed',Impact,sans-serif; letter-spacing:.02em; text-transform:uppercase; margin-bottom:.2rem; }
+
+        /* ---- Brand sign-off (ENDED, screenshot-worthy) and persistent
+           footer. Two distinct, restrained blocks — never both on the same
+           screen, so eEssence/EXOS is never repeated back-to-back. */
+        .mh-sign-off { margin-top:1.3rem; padding-top:1.1rem; border-top:1px solid rgba(255,255,255,.18); }
+        .mh-sign-off-name { font:800 .78rem Inter,system-ui,sans-serif; letter-spacing:.22em; text-transform:uppercase; opacity:.9; }
+        .mh-sign-off-line { font:600 .7rem Inter,system-ui,sans-serif; letter-spacing:.04em; opacity:.75; margin-top:.2rem; }
+        .mh-sign-off-line strong { font-weight:800; }
+        .mh-footer { text-align:center; margin:2.2rem 0 .4rem; padding-top:1rem; border-top:1px solid rgba(255,255,255,.08); }
+        .mh-footer-line { font:600 .6rem Inter,system-ui,sans-serif; letter-spacing:.08em; color:var(--tp-mist); opacity:.5; }
+        .mh-footer-line strong { opacity:.85; letter-spacing:.12em; }
+
+        /* ---- Buttons / uploader, Theme Park's own colour ----------------- */
         div.stButton>button, div[data-testid="stFormSubmitButton"]>button { min-height:48px; border-radius:10px; font-weight:800; letter-spacing:.01em; }
-        /* Theme Park's own primary-action colour, on top of Streamlit's default
-           red. Injected only by _inject_mission_theme(), which only the Theme
-           Park participant surface calls, so it never reaches the legacy
-           Captain shell's page — that surface injects its own, separate CSS
-           and is a different entrypoint entirely. */
-        div.stButton>button[kind="primary"] { background:var(--tp-navy); border-color:var(--tp-navy); color:#fff; }
-        div.stButton>button[kind="primary"]:hover { background:var(--tp-navy-deep); border-color:var(--tp-navy-deep); color:#fff; }
-        div.stButton>button[kind="primary"]:disabled { background:#C3CCD6; border-color:#C3CCD6; color:#5B7089; opacity:1; }
-        div[data-testid="stFileUploader"] { border:1.5px dashed var(--tp-teal); border-radius:10px; padding:.5rem; }
+        div.stButton>button[kind="primary"] { background:var(--tp-gold-deep); border-color:var(--tp-gold-deep); color:#0a1626; }
+        div.stButton>button[kind="primary"]:hover { background:var(--tp-gold); border-color:var(--tp-gold); color:#0a1626; }
+        div.stButton>button[kind="primary"]:disabled { background:rgba(140,160,190,.25); border-color:rgba(140,160,190,.25); color:var(--tp-mist); opacity:1; }
+        div.stButton>button[kind="secondary"] { background:var(--tp-bg-2); border-color:rgba(255,255,255,.18); color:var(--tp-ink); }
+        /* The file uploader's own "Browse files" control is a different
+           internal Streamlit component (stBaseButton, not st.button), so
+           the div.stButton rule above never reaches it. */
+        [data-testid="stBaseButton-secondary"] { background:var(--tp-bg-3) !important; border-color:rgba(255,255,255,.22) !important; color:var(--tp-ink) !important; }
+
         @media (max-width:600px) {
-          .tp-header-team { font-size:1.65rem; }
-          .tp-header-count { font-size:2.05rem; }
-          .block-container { padding-left:.6rem !important; padding-right:.6rem !important; }
+          .mh-team { font-size:2.15rem; }
+          .mh-count { font-size:2.5rem; }
         }
         </style>
         """,
@@ -129,12 +242,38 @@ def _inject_mission_theme() -> None:
     )
 
 
+_MAX_PROGRESS_SEGMENTS = 12
+
+
+def _segmented_progress_html(completed: int, total: int) -> str:
+    """A per-mission segment strip, not a plain bar — the Captain can count
+    completed vs. remaining missions at a glance instead of reading numbers.
+    Every value here is an int derived from canonical Progress counts, never
+    participant/facilitator text, so building this HTML carries no escaping
+    risk.  Beyond ``_MAX_PROGRESS_SEGMENTS`` missions the per-mission strip
+    stops being scannable, so it falls back to one proportional segment.
+    """
+    if total <= 0:
+        return ""
+    if total > _MAX_PROGRESS_SEGMENTS:
+        fraction = min(completed / total, 1.0)
+        return f'<div class="mh-segments"><div class="mh-segment filled" style="flex:{fraction:.4f} 0 0"></div><div class="mh-segment" style="flex:{1 - fraction:.4f} 0 0"></div></div>'
+    segments = "".join(
+        f'<div class="mh-segment{" filled" if position < completed else ""}"></div>'
+        for position in range(total)
+    )
+    return f'<div class="mh-segments">{segments}</div>'
+
+
 def _render_mission_header(workspace) -> None:
-    """Persistent Team/progress dashboard. Every value is canonical and live.
+    """The mission HUD: identity, progress and what's left, at a glance.
 
     Team identity is the loudest element on the page; Captain status is
     rendered separately (by ``_render_captain_authority``) as secondary
-    information underneath, never competing with it.
+    information underneath, never competing with it.  Unlike Sprint 1's
+    boxed navy card, this sits directly on the page's own dark canvas —
+    a HUD overlay, not a floating panel — so the first viewport reads as one
+    continuous mission surface rather than "a box on a white page".
     """
     team = str(workspace.get("TeamIdentity") or workspace.get("TeamID") or "Your Team").strip()
     # Team identity is facilitator-configured free text, not a closed enum —
@@ -149,27 +288,35 @@ def _render_mission_header(workspace) -> None:
     completed = int(progress.get("Completed", 0) or 0)
     total = int(progress.get("Total", 0) or 0)
     remaining = max(total - completed, 0)
-    fraction = min(completed / total, 1.0) if total > 0 else 0.0
-    remaining_label = "ALL MISSIONS DONE" if remaining == 0 and total > 0 else f"{remaining} TO GO"
-    # Everything below is ONE markdown call inside a single .tp-header wrapper.
-    # The kicker/team/stats/remaining pieces were previously written as four
-    # separate st.markdown calls with no enclosing card, so the navy/gold
-    # background never actually rendered and their white/near-white text sat
-    # directly on the page background instead — invisible, not just low
-    # contrast.  A native st.progress() bar also can't live inside a single
-    # HTML string, so the indicator here is a plain width-percentage div —
-    # `fraction` is always a float derived from Progress counts, never
-    # participant/facilitator text, so it carries no escaping risk.
+    done = remaining == 0 and total > 0
+    remaining_label = "ALL MISSIONS DONE" if done else f"{remaining} MISSION{'S' if remaining != 1 else ''} REMAINING"
     st.markdown(
-        '<div class="tp-header">'
-        '<div class="tp-header-kicker">MISSION CAPTAIN</div>'
-        f'<div class="tp-header-team">TEAM {safe_team}</div>'
-        '<div class="tp-header-stats">'
-        f'<span class="tp-header-count">{completed}/{total}</span>'
-        '<span class="tp-header-count-label">MISSIONS<br/>COMPLETED</span>'
+        '<div class="mh-kicker">MISSION AI</div>'
+        '<div class="mh-brand-line">'
+        f'<span class="mh-brand-powered">POWERED BY <span class="mh-brand-exos">{html.escape(PLATFORM_NAME)}™</span></span>'
+        f'<span class="mh-brand-by">by {html.escape(COMPANY_NAME)}</span>'
         '</div>'
-        f'<div class="tp-progress-track"><div class="tp-progress-fill" style="width:{fraction * 100:.0f}%;"></div></div>'
-        f'<span class="tp-header-remaining">{remaining_label}</span>'
+        f'<div class="mh-team">{safe_team}</div>'
+        '<div class="mh-stats">'
+        f'<span class="mh-count">{completed}/{total}</span>'
+        '<span class="mh-count-label">MISSIONS<br/>COMPLETE</span>'
+        '</div>'
+        f'{_segmented_progress_html(completed, total)}'
+        f'<span class="mh-remaining{" done" if done else ""}">{remaining_label}</span>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_brand_footer() -> None:
+    """A subtle, persistent platform signature — one line, always the same,
+    never a banner. The ENDED screen gets its own dedicated sign-off instead
+    of this (see ``_render_ended_participant_screen``), so EXOS/eEssence is
+    never repeated twice on the same screen."""
+    st.markdown(
+        '<div class="mh-footer">'
+        f'<div class="mh-footer-line"><strong>{html.escape(PLATFORM_NAME)}™</strong></div>'
+        f'<div class="mh-footer-line">{html.escape(PLATFORM_EXPANSION)}</div>'
+        f'<div class="mh-footer-line">An {html.escape(COMPANY_NAME)} Experience</div>'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -177,8 +324,8 @@ def _render_mission_header(workspace) -> None:
 
 def _render_paused_banner() -> None:
     st.markdown(
-        '<div class="tp-paused-banner">'
-        '<div class="tp-paused-banner-title">⏸ Mission AI Paused</div>'
+        '<div class="mh-paused-banner">'
+        '<div class="mh-paused-title">⏸ Mission AI Paused</div>'
         '<div>Please wait for your facilitator.</div>'
         '</div>',
         unsafe_allow_html=True,
@@ -261,12 +408,36 @@ def _route_rows(workspace):
     return rows
 
 
-def _render_ended_participant_screen(workspace):
-    """Render the terminal, celebratory state from canonical progress, no writes."""
-    st.success("MISSION COMPLETE 🎉")
-    _render_mission_header(workspace)
-    st.write("Thank you for participating.")
-    st.info("Please wait for your facilitator to announce the winning team.")
+def _render_ended_participant_screen(workspace) -> None:
+    """Render the terminal, celebratory state from canonical progress, no writes.
+
+    Built as a screenshot-worthy sign-off: a participant who captures this
+    screen naturally carries Mission AI, EXOS and eEssence branding with it.
+    Team identity and the completion count still come from this same call —
+    a second ``_render_mission_header`` call would duplicate both.
+    """
+    team = str(workspace.get("TeamIdentity") or workspace.get("TeamID") or "Your Team").strip()
+    safe_team = html.escape(team)
+    progress = workspace.get("Progress", {}) or {}
+    completed = int(progress.get("Completed", 0) or 0)
+    total = int(progress.get("Total", 0) or 0)
+    st.markdown(
+        '<div class="mh-complete-banner">'
+        '<div class="mh-complete-title">🎉 Mission Complete</div>'
+        '<div class="mh-kicker" style="margin-top:.9rem;">TEAM</div>'
+        f'<div class="mh-team">{safe_team}</div>'
+        f'<div class="mh-count">{completed}/{total}</div>'
+        '<div class="mh-count-label">MISSIONS COMPLETED</div>'
+        '<div style="margin-top:1.1rem;">Thank you for participating.</div>'
+        '<div style="opacity:.82;margin-top:.15rem;">Please wait for your facilitator to announce the winning team.</div>'
+        '<div class="mh-sign-off">'
+        '<div class="mh-sign-off-name">MISSION AI</div>'
+        f'<div class="mh-sign-off-line">Powered by <strong>{html.escape(PLATFORM_NAME)}™</strong></div>'
+        f'<div class="mh-sign-off-line">An {html.escape(COMPANY_NAME)} Experience</div>'
+        '</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _restore_captain_recovery(identity):
@@ -516,7 +687,7 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
         finally:
             st.session_state[submitting_key] = False
         if str(workspace.get("StrategyMode", "")).upper() == "OPEN_MISSION_BOARD":
-            st.success("📨 Submitted! Awaiting facilitator review.")
+            st.success(f"📨 Evidence received. Sent to {PLATFORM_NAME} — awaiting facilitator review.")
         else:
             st.success("Mission evidence submitted. The next route mission is now available unless this evidence is later rejected.")
         st.rerun()
@@ -530,6 +701,23 @@ def _upload_board_photo(workspace, mission_id, suffix, uploaded_photo):
         team_name=st.session_state.get("participant_team", workspace["TeamID"]),
         participant_name=st.session_state.get("participant_name", ""), uploaded_file=uploaded_photo,
     )
+
+
+# Display-only labels for two closed enums the ride form exposes to the
+# Captain. The selectbox's underlying returned value is still the exact
+# canonical enum string passed everywhere below (payloads, comparisons) —
+# only the on-screen text changes, via st.selectbox(format_func=...).
+_RIDE_PATHWAY_LABELS = {
+    "GROUND_CONTROL": "Ground Control (some ride, some support)",
+    "FULL_TEAM": "Full Team (everyone rides)",
+    "FACILITATOR_VERIFIED": "Facilitator Verified",
+}
+_RIDE_ATTEMPT_LABELS = {
+    "COMPLETED": "Completed",
+    "ABORTED_BY_ATTRACTION": "Aborted by Attraction",
+    "TEAM_WITHDREW": "Team Withdrew",
+    "ATTEMPTED": "Attempted",
+}
 
 
 def _render_ride_evidence_form(db, workspace, mission, captain_active=True, show_title=True):
@@ -548,7 +736,11 @@ def _render_ride_evidence_form(db, workspace, mission, captain_active=True, show
     st.write(f"Required riders: {required} of {len(members)} current team members.")
     st.caption("An attraction exterior photo is not queue-entry proof. Follow attraction staff instructions and never capture evidence where park rules prohibit it.")
     pathway_options = mission.get("RideParticipation", {}).get("EvidencePathways") or []
-    pathway = st.selectbox("Evidence pathway", pathway_options, key=f"theme_race_ride_path_{activity_id}")
+    pathway = st.selectbox(
+        "Evidence pathway", pathway_options,
+        format_func=lambda value: _RIDE_PATHWAY_LABELS.get(value, value),
+        key=f"theme_race_ride_path_{activity_id}",
+    )
     riders = st.multiselect(
         "Team members who entered the official queue", list(members),
         format_func=lambda key: members.get(key, key), key=f"theme_race_ride_riders_{activity_id}",
@@ -563,6 +755,7 @@ def _render_ride_evidence_form(db, workspace, mission, captain_active=True, show
     remarks = st.text_area(evidence.get("Text", {}).get("Label") or "Team note", key=f"theme_race_ride_text_{activity_id}")
     attempt = st.selectbox(
         "Ride attempt outcome", ["COMPLETED", "ABORTED_BY_ATTRACTION", "TEAM_WITHDREW", "ATTEMPTED"],
+        format_func=lambda value: _RIDE_ATTEMPT_LABELS.get(value, value),
         key=f"theme_race_ride_attempt_{activity_id}",
     )
     queue_photo = post_photo = None
@@ -654,30 +847,52 @@ def _render_ride_evidence_form(db, workspace, mission, captain_active=True, show
         st.rerun()
 
 
-_MISSION_CLASS_LABEL = {
-    "STANDARD": "🎯 STANDARD MISSION",
-    "RIDE": "🎢 RIDE MISSION",
-    "BONUS": "⭐ BONUS MISSION",
-    "SECRET": "🔓 SECRET MISSION",
+# Lower-case, hyphen-safe tokens only — used solely to build a
+# st.container(key=...) string, never rendered as text.
+_STATE_TOKENS = {
+    "AVAILABLE": "available", "SELECTED": "selected", "SUBMITTED": "submitted",
+    "APPROVED": "approved", "REJECTED": "rejected", "CLOSED": "locked",
+    "TEMPORARILY_UNAVAILABLE": "paused",
 }
 
 
-def _render_mission_card(db, workspace, mission, captain_active):
-    """One scannable mission card: title, type, state badge, points, action.
+def _render_mission_card(db, workspace, mission, captain_active, interactive=True):
+    """One mission tile: class identity, title, state badge, points, action.
 
     A Secret Mission is never locked by the time it reaches this board (the
     engine excludes a still-locked Secret Mission from MissionBoard entirely),
     so any Secret Mission rendered here has just been released — it always
     gets the reveal banner, never facilitator/UAT release mechanics.
+
+    ``interactive=False`` is the HELD/paused presentation: the tile still
+    shows what it is and its current state, but renders no button and no
+    evidence form at all, so a paused Mission can never reach the select or
+    submit RPCs regardless of Captain authority — a stricter guarantee than
+    gating on ``captain_active`` alone.
     """
     activity_id = mission.get("ActivityID", "")
     state = str(mission.get("MissionState", "LOCKED")).upper()
     mission_class = str(mission.get("MissionClass", "STANDARD")).upper()
-    with st.container(border=True):
+    icon, class_label, accent = _class_style(mission_class)
+    state_token = _STATE_TOKENS.get(state, "locked")
+    class_token = mission_class.lower() if mission_class in _CLASS_STYLE else "standard"
+    tile_key = f"tile-tileclass-{class_token}-tilestate-{state_token}-{activity_id}"
+
+    with st.container(key=tile_key, border=False):
         if mission_class == "SECRET":
-            st.markdown('<div class="tp-secret-banner">🔓 Secret Mission Unlocked</div>', unsafe_allow_html=True)
-        st.caption(_MISSION_CLASS_LABEL.get(mission_class, "🎯 MISSION"))
-        st.markdown(f"#### {mission.get('DisplayName') or 'Mission'}")
+            st.markdown(
+                '<div class="mh-secret-banner">'
+                f'<div class="mh-alert-kicker">🛰️ {html.escape(PLATFORM_NAME)} Alert</div>'
+                '<div class="mh-secret-banner-title">🔓 Secret Mission Unlocked</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f'<div class="mh-tile-accent-bar" style="background:{accent}"></div>'
+            f'<div class="mh-tile-class" style="color:{accent}"><span class="mh-tile-class-icon">{icon}</span>{class_label}</div>'
+            f'<div class="mh-tile-title">{html.escape(str(mission.get("DisplayName") or "Mission"))}</div>',
+            unsafe_allow_html=True,
+        )
 
         badge_html = _state_badge_html(state)
         try:
@@ -685,7 +900,7 @@ def _render_mission_card(db, workspace, mission, captain_active):
         except (TypeError, ValueError):
             points = 0
         if points > 0:
-            badge_html += f' <span class="tp-points">🏅 UP TO {points} PTS</span>'
+            badge_html += f' <span class="tp-points">⚡ UP TO {points} PTS</span>'
         st.markdown(badge_html, unsafe_allow_html=True)
 
         meta = " · ".join(
@@ -695,10 +910,15 @@ def _render_mission_card(db, workspace, mission, captain_active):
             ) if part
         )
         if meta:
-            st.markdown(f'<div class="tp-card-meta">{html.escape(meta)}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="mh-tile-meta">{html.escape(meta)}</div>', unsafe_allow_html=True)
+
+        if not interactive:
+            st.caption("Paused — resumes when your facilitator restarts the mission.")
+            return
 
         if state == "AVAILABLE":
-            st.write(mission.get("ParticipantInstruction", ""))
+            # Instructions reveal only once the mission is selected/in
+            # progress — an available tile stays scannable, not a brief.
             if mission.get("SafetyNote"):
                 st.warning(f"⚠️ {mission['SafetyNote']}")
             # Always constructed regardless of captain_active: it is
@@ -708,17 +928,21 @@ def _render_mission_card(db, workspace, mission, captain_active):
             # click.  Gating construction on it can silently drop a click
             # with no error — see _render_evidence_form for the full case.
             if st.button(
-                "🎯 Select Mission", type="primary", width="stretch",
+                "🎯 Accept Mission", type="primary", width="stretch",
                 key=f"theme_race_board_select_{activity_id}", disabled=not captain_active,
             ):
                 if not captain_active:
-                    st.caption("Only the Mission Captain can select a mission.")
+                    st.caption("Only the Mission Captain can accept a mission.")
                     return
                 try:
                     db.runtime.select_theme_park_race_mission(st.session_state.get("participant_session_token", ""), activity_id)
                 except RuntimeDatabaseError as error:
                     st.error(str(error))
                     return
+                # A toast, not a permanent banner: it survives the rerun below
+                # (Streamlit queues it for the next script run) and fades on
+                # its own, so this one EXOS mention never becomes clutter.
+                st.toast(f"Mission accepted — {PLATFORM_NAME} has activated your next challenge.", icon="🛰️")
                 st.rerun()
         elif state in {"SELECTED", "REJECTED"}:
             if state == "REJECTED":
@@ -729,8 +953,8 @@ def _render_mission_card(db, workspace, mission, captain_active):
                 # facilitator's own reason is written via native st.write,
                 # never interpolated into this HTML.
                 st.markdown(
-                    '<div class="tp-rejected-banner">'
-                    '<div class="tp-rejected-title">⚠️ Resubmission Required</div>'
+                    '<div class="mh-rejected-banner">'
+                    '<div class="mh-rejected-title">⚠️ Resubmission Required</div>'
                     '<div>Your submission was reviewed and returned.</div>'
                     '</div>',
                     unsafe_allow_html=True,
@@ -742,29 +966,40 @@ def _render_mission_card(db, workspace, mission, captain_active):
             if mission_class == "RIDE":
                 _render_ride_evidence_form(db, workspace, mission, captain_active, show_title=False)
             else:
+                # SELECTED reveals the brief for the first time (text
+                # reduction: an AVAILABLE tile never showed it).  REJECTED
+                # suppresses it again — the rejection banner above already
+                # carries the facilitator's specific feedback, and repeating
+                # the same generic brief the Captain already attempted once
+                # only adds clutter to the card's densest state.
                 _render_evidence_form(
                     db, workspace, mission, captain_active,
                     show_title=False, show_instruction=state != "REJECTED",
                 )
         elif state == "TEMPORARILY_UNAVAILABLE":
-            st.write("This mission is paused for now. Choose another available mission — no penalty.")
+            st.caption("Paused for now — choose another mission. No penalty.")
         elif state == "CLOSED":
-            st.write("This mission is closed.")
+            st.caption("Closed.")
         elif state == "SUBMITTED":
-            st.write("EXOS has received your submission.")
+            st.caption("Sent to EXOS. Awaiting facilitator review.")
         elif state == "APPROVED":
-            st.write("Nicely done — this mission is locked in.")
+            st.caption("Mission locked in.")
 
 
-def _render_open_mission_board(db, workspace, captain_active):
+def _render_open_mission_board(db, workspace, captain_active, interactive=True):
     """Render only this team's canonical available/selected board state."""
     board = workspace.get("MissionBoard", [])
     if not board:
         st.info("No mission is currently available.")
         return
-    st.markdown("### 🗺️ Mission Board")
-    for mission in board:
-        _render_mission_card(db, workspace, mission, captain_active)
+    st.markdown('<div class="mh-kicker" style="margin-top:.4rem;">MISSION BOARD</div>', unsafe_allow_html=True)
+    if interactive:
+        for mission in board:
+            _render_mission_card(db, workspace, mission, captain_active, interactive=True)
+    else:
+        with st.container(key="board-disabled", border=False):
+            for mission in board:
+                _render_mission_card(db, workspace, mission, captain_active, interactive=False)
 
 
 def render_theme_park_race_participant(db, enrollment_credential="", device_id=""):
@@ -815,10 +1050,22 @@ def render_theme_park_race_participant(db, enrollment_credential="", device_id="
         _render_paused_banner()
 
     captain_active = _render_captain_authority(db, workspace, enrollment_credential, device_id)
+
+    if lifecycle == "HELD":
+        # The board recedes (dimmed, no buttons or forms at all) rather than
+        # vanishing — the Captain can still see what's in progress while
+        # paused, but interactive=False means no click here can ever reach
+        # select/submit, regardless of Captain authority.
+        if strategy_mode == "OPEN_MISSION_BOARD":
+            _render_open_mission_board(db, workspace, captain_active, interactive=False)
+        _render_brand_footer()
+        return
+
     if lifecycle != "ACTIVE":
         return
     if strategy_mode == "OPEN_MISSION_BOARD":
         _render_open_mission_board(db, workspace, captain_active)
+        _render_brand_footer()
         return
     mission = workspace.get("CurrentMission")
     if not mission:
@@ -830,6 +1077,7 @@ def render_theme_park_race_participant(db, enrollment_credential="", device_id="
         st.write(mission.get("ParticipantInstruction", ""))
         return
     _render_evidence_form(db, workspace, mission)
+    _render_brand_footer()
 
 
 def render_theme_park_race_facilitator(db, control, event_id):

@@ -214,7 +214,7 @@ def test_resubmission_clears_the_rejection_banner_and_returns_to_awaiting_review
 
     fake = _render(workspace)
     assert not any("Resubmission Required" in text for text in _texts(fake, "markdown"))
-    assert any("received your submission" in text for text in _texts(fake, "write"))
+    assert any("Sent to EXOS" in text for text in _texts(fake, "caption"))
 
 
 def test_resubmission_reuses_the_same_submission_id_so_the_new_revision_gates_review():
@@ -287,7 +287,7 @@ def test_approved_mission_renders_the_existing_success_state_unchanged():
     workspace, _ = _workspace_via_adapter(status="APPROVED", reviews_rows=[])
     fake = _render(workspace)
     assert any("COMPLETED" in text for text in _texts(fake, "markdown"))
-    assert any("locked in" in text for text in _texts(fake, "write"))
+    assert any("locked in" in text for text in _texts(fake, "caption"))
     assert not any("Resubmission Required" in text for text in _texts(fake, "markdown"))
 
 

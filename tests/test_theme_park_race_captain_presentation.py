@@ -126,7 +126,7 @@ def test_mission_completion_count_is_canonical_and_dynamic(completed, total):
 
 def test_remaining_count_shows_missions_left():
     at, _ = _app(_workspace(completed=3, total=4))
-    assert "1 TO GO" in _all_visible_text(at)
+    assert "1 MISSION REMAINING" in _all_visible_text(at)
 
 
 def test_remaining_count_celebrates_when_nothing_is_left():
@@ -143,7 +143,7 @@ def test_available_mission_shows_available_badge_and_select_action():
     text = _all_visible_text(at)
     assert "AVAILABLE" in text
     labels = [b.label for b in at.button]
-    assert any("Select Mission" in label for label in labels)
+    assert any("Accept Mission" in label for label in labels)
 
 
 # 5. SUBMITTED / Awaiting Review — unmistakable, no active submit button.
@@ -190,12 +190,12 @@ def test_rejected_mission_keeps_facilitator_feedback_visible():
 
 def test_rejection_banner_css_is_high_contrast_not_yellow_on_yellow():
     source = (ROOT / "screens/theme_park_race.py").read_text()
-    start = source.index(".tp-rejected-banner")
+    start = source.index(".mh-rejected-banner")
     end = source.index("}", start)
     rule = source[start:end]
-    # A red-bordered card with dark-red text on a light-red tint, not yellow.
-    assert "#C4342F" in rule or "var(--tp-red)" in rule or "5A0D0A" in source
-    assert "FFF" not in rule.upper() or "background:#FBE4E3" in source
+    # A red-bordered card with light text on a translucent red tint, not yellow.
+    assert "var(--tp-red)" in rule or "255,92,92" in rule
+    assert "yellow" not in rule.lower()
 
 
 # 9. Secret Mission reveal — no UAT/internal release wording.
@@ -224,9 +224,11 @@ def test_held_lifecycle_shows_mission_ai_paused():
 
 
 def test_held_lifecycle_does_not_render_the_mission_board():
+    """The board recedes (dimmed) but must render no interactive control at
+    all — stronger than merely renaming the button, since interactive=False
+    skips every button/form construction regardless of Captain authority."""
     at, shared = _app(_workspace(lifecycle="HELD"))
-    labels = [b.label for b in at.button]
-    assert not any("Select Mission" in label for label in labels)
+    assert not list(at.button)
     assert shared["calls"] == []
 
 
@@ -235,7 +237,7 @@ def test_held_lifecycle_does_not_render_the_mission_board():
 def test_ended_lifecycle_shows_mission_complete():
     at, _ = _app(_workspace(lifecycle="ENDED", completed=4, total=4))
     text = _all_visible_text(at)
-    assert "MISSION COMPLETE" in text
+    assert "mission complete" in text.casefold()
     assert "Thank you for participating." in text
     assert "4/4" in text
 
@@ -301,7 +303,7 @@ def test_primary_actions_meet_the_minimum_touch_target_css_rule():
 def test_select_and_submit_buttons_are_full_width_for_mobile():
     source = (ROOT / "screens/theme_park_race.py").read_text()
     for call_site in (
-        '"🎯 Select Mission", type="primary", width="stretch"',
+        '"🎯 Accept Mission", type="primary", width="stretch"',
         'submit_label, type="primary", width="stretch"',
     ):
         assert call_site in source
