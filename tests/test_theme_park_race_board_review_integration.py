@@ -217,7 +217,7 @@ def test_other_review_failures_surface_as_errors_not_silent_success():
 
 def test_facilitator_screen_reloads_canonical_state_after_every_decision():
     source = (ROOT / "screens/theme_park_race.py").read_text()
-    review = source.split('st.markdown("#### Submission review")', 1)[1]
+    review = source.split('st.markdown("#### Review Queue")', 1)[1]
     assert "_render_review_notice(event_id)" in review
     assert review.count("_queue_review_notice(event_id, submit_theme_park_race_review(") == 2
     assert review.count("st.rerun()") == 2

@@ -104,7 +104,7 @@ def _buttons(fake):
 def _review_buttons(fake):
     return {
         label: disabled for label, disabled in _buttons(fake).items()
-        if "Approve" in label or "Reject" in label
+        if "Approve" in label or "Resubmission" in label
     }
 
 
@@ -124,11 +124,11 @@ def _board_adapter():
 # 1 & 2. A SUBMITTED board submission renders both decisions.
 
 def test_open_mission_board_submitted_renders_approve():
-    assert "✅ Approve" in _review_buttons(_render())
+    assert "✓ Approve" in _review_buttons(_render())
 
 
 def test_open_mission_board_submitted_renders_reject():
-    assert "❌ Reject — request resubmission" in _review_buttons(_render())
+    assert "↻ Return for Resubmission" in _review_buttons(_render())
 
 
 def test_pending_review_is_expanded_and_names_its_team_and_mission():
@@ -171,7 +171,7 @@ def test_missing_facilitator_identity_is_explained_rather_than_silently_disabled
 
 def test_reject_calls_the_039_board_review_route_with_a_zero_score():
     control, calls = _board_adapter()
-    _render(notes="Photo does not show the mission.", click="Reject", control=control)
+    _render(notes="Photo does not show the mission.", click="Resubmission", control=control)
 
     assert len(calls) == 1
     call = calls[0]
@@ -182,7 +182,7 @@ def test_reject_calls_the_039_board_review_route_with_a_zero_score():
 
 def test_reject_supplies_the_exact_submission_and_submitted_at_revision():
     control, calls = _board_adapter()
-    _render(notes="Resubmit please.", click="Reject", control=control)
+    _render(notes="Resubmit please.", click="Resubmission", control=control)
 
     payload = calls[0]["payload"]
     assert payload["p_submission_id"] == SUBMISSION_ID
@@ -191,7 +191,7 @@ def test_reject_supplies_the_exact_submission_and_submitted_at_revision():
 
 def test_reject_supplies_facilitator_identity_and_reason():
     control, calls = _board_adapter()
-    _render(actor="Ruth", notes="Photo is out of focus.", click="Reject", control=control)
+    _render(actor="Ruth", notes="Photo is out of focus.", click="Resubmission", control=control)
 
     payload = calls[0]["payload"]
     assert payload["p_actor"] == "Ruth"
@@ -200,7 +200,7 @@ def test_reject_supplies_facilitator_identity_and_reason():
 
 def test_reject_preserves_server_side_idempotency_for_the_reviewed_revision():
     control, calls = _board_adapter()
-    _render(notes="Resubmit.", click="Reject", control=control)
+    _render(notes="Resubmit.", click="Resubmission", control=control)
     key = calls[0]["payload"]["p_idempotency_key"]
     assert SUBMISSION_ID in key and REVISION in key and "REJECT" in key
 
@@ -208,8 +208,8 @@ def test_reject_preserves_server_side_idempotency_for_the_reviewed_revision():
 def test_reject_requires_a_reason_and_cannot_be_mis_clicked_without_one():
     fake = _render(notes="")
     buttons = _review_buttons(fake)
-    assert buttons["❌ Reject — request resubmission"] is True
-    assert buttons["✅ Approve"] is False
+    assert buttons["↻ Return for Resubmission"] is True
+    assert buttons["✓ Approve"] is False
 
 
 def test_reject_never_approves_and_never_carries_a_score():
@@ -217,7 +217,7 @@ def test_reject_never_approves_and_never_carries_a_score():
     # Even with a score typed into the approve input, REJECT must send zero.
     submission = dict(SUBMISSION, Score=95)
     _render(
-        notes="No.", click="Reject", control=control,
+        notes="No.", click="Resubmission", control=control,
         workspace=_workspace(queue=[submission]),
     )
     payload = calls[0]["payload"]
@@ -243,7 +243,7 @@ def test_approve_calls_the_039_board_review_route_with_the_facilitator_score():
     assert payload["p_reason"] == "Clear evidence."
 
 
-@pytest.mark.parametrize("click,decision", [("Approve", "APPROVE"), ("Reject", "REJECT")])
+@pytest.mark.parametrize("click,decision", [("Approve", "APPROVE"), ("Resubmission", "REJECT")])
 def test_neither_decision_routes_through_the_standard_review_contract(click, decision):
     control, calls = _board_adapter()
     _render(notes="reason", click=click, control=control)

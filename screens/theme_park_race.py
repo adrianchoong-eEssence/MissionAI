@@ -1080,6 +1080,206 @@ def render_theme_park_race_participant(db, enrollment_credential="", device_id="
     _render_brand_footer()
 
 
+_AVAILABILITY_LABELS = {
+    "AVAILABLE": "Available",
+    "TEMPORARILY_UNAVAILABLE": "Temporarily Unavailable",
+    "CLOSED": "Closed",
+}
+_SECRET_STATE_LABELS = {"LOCKED": "Locked", "RELEASED": "Released"}
+
+
+def _human_timestamp(value) -> str:
+    """Best-effort human rendering of a canonical ISO-8601 timestamp.
+
+    Presentation only -- the raw value is still shown verbatim as a secondary
+    diagnostic caption everywhere the existing code already surfaced it (the
+    OPEN_MISSION_BOARD stale-revision context), so nothing canonical is lost.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return "Just now"
+    try:
+        cleaned = text[:-1] + "+00:00" if text.endswith("Z") else text
+        return datetime.fromisoformat(cleaned).strftime("%b %d, %I:%M %p").replace(" 0", " ")
+    except ValueError:
+        return text
+
+
+def _facilitator_status(lifecycle: str, runtime_phase: str) -> tuple[str, str, str]:
+    """Presentation label for the exact canonical fields the control
+    branching below already switches on -- never a new lifecycle source."""
+    if lifecycle == "ENDED" or runtime_phase == "CLOSED":
+        return ("ended", "■", "ENDED")
+    if runtime_phase == "HELD":
+        return ("paused", "⏸", "PAUSED")
+    if runtime_phase == "ACTIVE":
+        return ("live", "●", "LIVE")
+    if runtime_phase == "READY":
+        return ("ready", "◇", "READY")
+    return ("unknown", "?", "UNAVAILABLE")
+
+
+def _inject_facilitator_theme() -> None:
+    """Static CSS for the Facilitator Mission Control surface.
+
+    Same dark, gold-accented Mission AI visual language as the participant
+    HUD (``_inject_mission_theme``), but built for laptop/tablet operator
+    scanning rather than a narrow mobile card feed -- a wider canvas, denser
+    layout. Its own class namespace (``mc-*``) and its own injector: the two
+    surfaces never render on the same page, and keeping them independent
+    means a future change to one can never silently reach the other.
+    """
+    st.markdown(
+        """
+        <style>
+        :root {
+          --mc-bg-0:#050b14; --mc-bg-1:#0a1626; --mc-bg-2:#101f33; --mc-bg-3:#16283e;
+          --mc-gold:#D9B24C; --mc-gold-deep:#B59A37;
+          --mc-teal:#2DD4BF; --mc-blue:#4FA3E8; --mc-green:#3ED598;
+          --mc-red:#FF5C5C; --mc-amber:#E8A23D; --mc-ink:#EAF0F8; --mc-mist:#8CA0BE;
+        }
+        .stApp {
+          background:
+            radial-gradient(circle at 10% -10%, rgba(45,212,191,.08), transparent 42%),
+            radial-gradient(circle at 100% 0%, rgba(217,178,76,.10), transparent 48%),
+            linear-gradient(180deg, var(--mc-bg-0) 0%, var(--mc-bg-1) 55%, var(--mc-bg-0) 100%) !important;
+        }
+        .stApp, .stApp p, .stApp li, .stApp label, [data-testid="stMarkdownContainer"] { color:var(--mc-ink) !important; }
+        [data-testid="stCaptionContainer"] { color:var(--mc-mist) !important; }
+        [data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stMainMenu"], [data-testid="stAppDeployButton"] { display:none !important; }
+        [data-testid="stMainBlockContainer"] { padding:.8rem 1.2rem 3rem !important; max-width:900px; }
+        div[data-testid="stAlert"] { background:rgba(255,255,255,.05) !important; border:1px solid rgba(255,255,255,.14) !important; border-radius:12px !important; }
+        div[data-testid="stAlert"] p { color:var(--mc-ink) !important; }
+        [data-testid="stTextInput"] input, [data-testid="stNumberInputField"] {
+          background:var(--mc-bg-2) !important; color:var(--mc-ink) !important; border:1px solid rgba(255,255,255,.16) !important; border-radius:10px !important;
+        }
+        [data-testid="stSelectbox"] [data-baseweb="select"] > div {
+          background:var(--mc-bg-2) !important; border-color:rgba(255,255,255,.16) !important; color:var(--mc-ink) !important;
+        }
+        [data-testid="stWidgetLabel"] p { color:var(--mc-ink) !important; font-weight:700 !important; }
+        [data-testid="stMetric"] { background:var(--mc-bg-2); border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:.6rem .8rem; }
+        [data-testid="stMetric"] label p, [data-testid="stMetricLabel"] p { color:var(--mc-mist) !important; font-size:.68rem !important; letter-spacing:.06em; text-transform:uppercase; }
+        [data-testid="stMetricValue"] { color:var(--mc-ink) !important; }
+        [data-testid="stExpander"] { background:var(--mc-bg-2) !important; border:1px solid rgba(255,255,255,.12) !important; border-radius:14px !important; }
+        /* Streamlit's own generated class sets an explicit light
+           background-color on an OPEN summary header (its expanded-state
+           highlight) -- overriding only `color` left that light background
+           in place, making the header unreadable. background-color must be
+           forced here too, not just inherited from the expander wrapper. */
+        [data-testid="stExpander"] summary { background-color:var(--mc-bg-2) !important; color:var(--mc-ink) !important; font-weight:700; }
+        [data-testid="stExpander"] summary:hover { background-color:var(--mc-bg-3) !important; }
+        [data-testid="stExpander"] summary p { color:var(--mc-ink) !important; }
+        div.stButton>button, div[data-testid="stFormSubmitButton"]>button { min-height:46px; border-radius:10px; font-weight:800; }
+        div.stButton>button[kind="primary"] { background:var(--mc-gold-deep); border-color:var(--mc-gold-deep); color:#0a1626; }
+        div.stButton>button[kind="primary"]:hover { background:var(--mc-gold); border-color:var(--mc-gold); color:#0a1626; }
+        div.stButton>button[kind="primary"]:disabled { background:rgba(140,160,190,.25); border-color:rgba(140,160,190,.25); color:var(--mc-mist); opacity:1; }
+        div.stButton>button[kind="secondary"] { background:var(--mc-bg-2); border-color:rgba(255,255,255,.2); color:var(--mc-ink); }
+        div[class*="st-key-mc-danger-"] button { background:rgba(255,92,92,.14) !important; border:1.5px solid var(--mc-red) !important; color:#FFD6D6 !important; }
+        div[class*="st-key-mc-danger-"] button:hover { background:rgba(255,92,92,.26) !important; }
+        div[class*="st-key-mc-danger-"] button:disabled { background:rgba(140,160,190,.15) !important; border-color:rgba(140,160,190,.3) !important; color:var(--mc-mist) !important; }
+
+        .mc-kicker { font:800 .7rem/1 Inter,system-ui,sans-serif; letter-spacing:.24em; text-transform:uppercase; color:var(--mc-teal); margin-bottom:.2rem; }
+        .mc-title { font:800 1.9rem/1.05 'Barlow Condensed',Impact,sans-serif; letter-spacing:.01em; text-transform:uppercase; color:#fff; margin:0 0 .35rem; }
+        .mc-brand-line { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+        .mc-brand-powered { font:800 .56rem Inter,system-ui,sans-serif; letter-spacing:.12em; text-transform:uppercase; color:var(--mc-mist); opacity:.7; }
+        .mc-brand-exos { color:var(--mc-gold); font-weight:800; }
+        .mc-brand-by { font:600 .56rem Inter,system-ui,sans-serif; color:var(--mc-mist); opacity:.5; font-style:italic; }
+
+        .mc-identity-kicker { font:800 .6rem Inter,sans-serif; letter-spacing:.16em; text-transform:uppercase; color:var(--mc-mist); opacity:.75; margin-bottom:.15rem; text-align:right; }
+        .mc-identity-confirmed { font:700 .74rem Inter,sans-serif; color:var(--mc-green); text-align:right; margin-top:.2rem; }
+
+        .mc-status-card { border-radius:16px; padding:1rem 1.2rem; margin:.6rem 0 1rem; border:1px solid rgba(255,255,255,.12); }
+        .mc-status-label { font:800 .66rem Inter,sans-serif; letter-spacing:.18em; text-transform:uppercase; opacity:.7; margin-bottom:.25rem; }
+        .mc-status-value { font:800 1.9rem/1 'Barlow Condensed',Impact,sans-serif; letter-spacing:.02em; }
+        .mc-status-ready { background:linear-gradient(120deg,rgba(79,163,232,.2),rgba(8,20,38,.92)); border-color:var(--mc-blue); }
+        .mc-status-ready .mc-status-value { color:var(--mc-blue); }
+        .mc-status-live { background:linear-gradient(120deg,rgba(62,213,152,.22),rgba(8,20,38,.92)); border-color:var(--mc-green); }
+        .mc-status-live .mc-status-value { color:var(--mc-green); }
+        .mc-status-paused { background:linear-gradient(120deg,rgba(232,162,61,.24),rgba(8,20,38,.92)); border-color:var(--mc-amber); }
+        .mc-status-paused .mc-status-value { color:var(--mc-amber); }
+        .mc-status-ended { background:linear-gradient(120deg,rgba(255,92,92,.2),rgba(8,20,38,.92)); border-color:var(--mc-red); }
+        .mc-status-ended .mc-status-value { color:#FF8A8A; }
+        .mc-status-unknown { background:rgba(140,160,190,.1); border-color:rgba(140,160,190,.35); }
+        .mc-status-unknown .mc-status-value { color:var(--mc-mist); }
+
+        .mc-workload-card { border-radius:14px; padding:.85rem 1.1rem; margin:.3rem 0 1rem; border:1px solid rgba(255,255,255,.1); }
+        .mc-workload-clear { background:rgba(62,213,152,.06); color:var(--mc-mist); }
+        .mc-workload-alert { background:rgba(217,178,76,.14); border:1.5px solid var(--mc-gold); }
+        .mc-workload-line { font:800 .92rem Inter,sans-serif; letter-spacing:.02em; }
+        .mc-workload-alert .mc-workload-line { color:var(--mc-gold); }
+
+        .mc-section-title { font:800 .78rem Inter,sans-serif; letter-spacing:.14em; text-transform:uppercase; color:var(--mc-teal); margin:1.6rem 0 .6rem; }
+
+        .mc-team-card { background:linear-gradient(165deg,var(--mc-bg-3) 0%,var(--mc-bg-2) 100%); border:1px solid rgba(255,255,255,.1); border-left:4px solid rgba(255,255,255,.15); border-radius:12px; padding:.85rem 1rem; margin-bottom:.65rem; }
+        .mc-team-card-alert { border-left-color:var(--mc-amber); box-shadow:0 0 0 1px rgba(232,162,61,.35); }
+        .mc-team-name { font:800 1.15rem/1.1 'Barlow Condensed',Impact,sans-serif; letter-spacing:.01em; text-transform:uppercase; color:#fff; }
+        .mc-team-meta { font:600 .72rem Inter,sans-serif; color:var(--mc-mist); margin:.15rem 0 .55rem; }
+        .mc-team-progress-row { display:flex; align-items:center; gap:.6rem; }
+        .mc-team-progress-bar { flex:1; height:8px; border-radius:999px; background:rgba(255,255,255,.12); overflow:hidden; }
+        .mc-team-progress-fill { height:100%; background:linear-gradient(90deg,var(--mc-gold-deep),var(--mc-gold)); }
+        .mc-team-progress-count { font:800 .74rem Inter,sans-serif; letter-spacing:.03em; color:var(--mc-ink); white-space:nowrap; }
+        .mc-team-status-line { font:800 .68rem Inter,sans-serif; letter-spacing:.05em; text-transform:uppercase; margin-top:.4rem; }
+        .mc-team-status-pending { color:var(--mc-gold); }
+        .mc-team-status-rejected { color:#FF8A8A; }
+
+        .mc-review-kicker { font:800 .68rem Inter,sans-serif; letter-spacing:.16em; text-transform:uppercase; color:var(--mc-amber); margin-bottom:.3rem; }
+        .mc-review-team { font:800 1.3rem/1.15 'Barlow Condensed',Impact,sans-serif; text-transform:uppercase; color:#fff; margin-bottom:.3rem; }
+        .mc-review-row { font:700 .78rem Inter,sans-serif; color:var(--mc-mist); margin:.1rem 0; }
+        .mc-review-row strong { color:var(--mc-ink); font-weight:800; }
+
+        .mc-mission-summary-row { display:flex; justify-content:space-between; gap:.6rem; font:700 .78rem Inter,sans-serif; padding:.35rem 0; border-bottom:1px solid rgba(255,255,255,.08); }
+        .mc-mission-summary-label { color:var(--mc-mist); letter-spacing:.06em; text-transform:uppercase; font-size:.68rem; }
+        .mc-mission-summary-value { color:var(--mc-ink); font-weight:800; text-align:right; }
+
+        .mc-alert-banner { background:linear-gradient(120deg,rgba(167,139,250,.28),rgba(8,20,38,.92)); border:1px solid #A78BFA; border-radius:12px; padding:.75rem 1rem; margin:.7rem 0; color:#fff; }
+        .mc-alert-kicker { font:800 .62rem Inter,sans-serif; letter-spacing:.16em; text-transform:uppercase; color:rgba(255,255,255,.68); margin-bottom:.15rem; }
+        .mc-alert-title { font:800 .92rem Inter,sans-serif; letter-spacing:.03em; text-transform:uppercase; }
+
+        @media (max-width:640px) {
+          [data-testid="stMainBlockContainer"] { padding:.6rem .7rem 2.5rem !important; }
+          .mc-title { font-size:1.5rem; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_facilitator_team_card(row) -> None:
+    """One team's scan-in-two-seconds status: identity, progress, workload.
+
+    Deliberately omits the current/selected mission activity ids the old
+    dataframe row exposed -- they are internal identifiers, not something a
+    facilitator scanning for action needs, and dropping them is itself part
+    of the wording cleanup (no raw ids where a human summary already covers
+    it: progress count, pending review, resubmission required)."""
+    team = html.escape(str(row.get("TeamIdentity", row.get("TeamID", "Team"))))
+    captain = html.escape(str(row.get("CaptainName") or "Not selected"))
+    registered = int(row.get("RegisteredParticipants", 0) or 0)
+    completed = int(row.get("Completed", 0) or 0)
+    total = int(row.get("Total", 0) or 0)
+    fraction = min(completed / total, 1.0) if total else 0.0
+    pending = int(row.get("PendingReview", 0) or 0)
+    rejected = int(row.get("Rejected", 0) or 0)
+    status_lines = ""
+    if pending:
+        status_lines += f'<div class="mc-team-status-line mc-team-status-pending">{pending} AWAITING REVIEW</div>'
+    if rejected:
+        status_lines += f'<div class="mc-team-status-line mc-team-status-rejected">RESUBMISSION REQUIRED · {rejected}</div>'
+    st.markdown(
+        f'<div class="mc-team-card{" mc-team-card-alert" if (pending or rejected) else ""}">'
+        f'<div class="mc-team-name">{team}</div>'
+        f'<div class="mc-team-meta">Captain: {captain} · {registered} registered</div>'
+        '<div class="mc-team-progress-row">'
+        f'<div class="mc-team-progress-bar"><div class="mc-team-progress-fill" style="width:{fraction * 100:.0f}%"></div></div>'
+        f'<div class="mc-team-progress-count">{completed}/{total} COMPLETE</div>'
+        '</div>'
+        f'{status_lines}'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def render_theme_park_race_facilitator(db, control, event_id):
     """Facilitator lifecycle, Captain, review, progress, scoring and controls."""
     try:
@@ -1087,19 +1287,69 @@ def render_theme_park_race_facilitator(db, control, event_id):
     except RuntimeDatabaseError as error:
         st.error(str(error))
         return
-    st.subheader("Theme Park Race Control")
-    metrics = st.columns(6)
-    metrics[0].metric("Lifecycle", workspace.get("Lifecycle", "—"))
-    metrics[1].metric("Registered", workspace.get("RegistrationCount", 0))
-    metrics[2].metric("Teams", workspace.get("TeamCount", 0))
-    metrics[3].metric("Captains", f"{workspace.get('CaptainCount', 0)}/{workspace.get('TeamCount', 0)}")
-    metrics[4].metric("Missions", workspace.get("MissionCount", 0))
-    metrics[5].metric("Pending reviews", workspace.get("PendingReviewCount", 0))
+    _inject_facilitator_theme()
 
-    actor = st.text_input("Facilitator identity", key=f"theme_race_actor_{event_id}")
     phase = str(workspace.get("TeamFormationPhase", "")).upper()
     runtime_phase = str(workspace.get("RuntimePhase", "READY")).upper()
     lifecycle = str(workspace.get("Lifecycle", "")).upper()
+    strategy_mode = str(workspace.get("StrategyMode", "")).upper()
+
+    header_col, identity_col = st.columns([3, 2])
+    with header_col:
+        st.markdown(
+            '<div class="mc-kicker">MISSION AI</div>'
+            '<div class="mc-title">Mission Control</div>'
+            '<div class="mc-brand-line">'
+            f'<span class="mc-brand-powered">POWERED BY <span class="mc-brand-exos">{html.escape(PLATFORM_NAME)}™</span></span>'
+            f'<span class="mc-brand-by">by {html.escape(COMPANY_NAME)}</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    with identity_col:
+        st.markdown('<div class="mc-identity-kicker">Facilitator</div>', unsafe_allow_html=True)
+        # Label text unchanged ("Facilitator identity") -- only its visual
+        # weight is reduced (collapsed label + a small kicker in its place).
+        # The audited actor requirement itself is untouched: same widget,
+        # same key, same value used in every control call below.
+        actor = st.text_input(
+            "Facilitator identity", key=f"theme_race_actor_{event_id}",
+            label_visibility="collapsed", placeholder="Enter your name",
+        )
+        if actor.strip():
+            st.markdown(f'<div class="mc-identity-confirmed">✓ {html.escape(actor.strip())}</div>', unsafe_allow_html=True)
+
+    status_token, status_icon, status_label = _facilitator_status(lifecycle, runtime_phase)
+    st.markdown(
+        f'<div class="mc-status-card mc-status-{status_token}">'
+        '<div class="mc-status-label">Mission Status</div>'
+        f'<div class="mc-status-value">{status_icon} {status_label}</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    metrics = st.columns(4)
+    metrics[0].metric("Registered", workspace.get("RegistrationCount", 0))
+    metrics[1].metric("Teams", workspace.get("TeamCount", 0))
+    metrics[2].metric("Captains", f"{workspace.get('CaptainCount', 0)}/{workspace.get('TeamCount', 0)}")
+    metrics[3].metric("Missions", workspace.get("MissionCount", 0))
+
+    # The facilitator's actual workload, not a seventh equal metric box --
+    # this is the one number that should pull the eye when it is non-zero.
+    pending_total = int(workspace.get("PendingReviewCount", 0) or 0)
+    rejected_total = sum(int(row.get("Rejected", 0) or 0) for row in workspace.get("Teams", []))
+    if pending_total or rejected_total:
+        lines = []
+        if pending_total:
+            lines.append(f'<div class="mc-workload-line">⚠ {pending_total} PENDING REVIEW{"S" if pending_total != 1 else ""}</div>')
+        if rejected_total:
+            lines.append(f'<div class="mc-workload-line">↻ {rejected_total} RESUBMISSION{"S" if rejected_total != 1 else ""} REQUIRED</div>')
+        st.markdown(f'<div class="mc-workload-card mc-workload-alert">{"".join(lines)}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(
+            '<div class="mc-workload-card mc-workload-clear"><div class="mc-workload-line">✓ No reviews pending</div></div>',
+            unsafe_allow_html=True,
+        )
+
     lifecycle_col, mission_col = st.columns(2)
     with lifecycle_col:
         if lifecycle == "ENDED":
@@ -1121,71 +1371,118 @@ def render_theme_park_race_facilitator(db, control, event_id):
     with mission_col:
         if lifecycle == "ENDED" or runtime_phase == "CLOSED":
             st.error("MISSION ENDED")
-            st.info("Submissions are closed. Final results are preserved.")
+            st.caption("Submissions are closed. Final results are preserved.")
         elif phase != "ACTIVE":
             st.caption("Mission start unlocks after every team has an effective Captain.")
         elif runtime_phase == "READY":
-            if st.button("Start Mission", type="primary", disabled=not actor, key=f"theme_race_start_{event_id}"):
+            if st.button("▶ Start Mission", type="primary", width="stretch", disabled=not actor, key=f"theme_race_start_{event_id}"):
                 control.set_theme_park_race_runtime_phase(event_id, "ACTIVE", actor); st.rerun()
         elif runtime_phase == "HELD":
             resume, close = st.columns(2)
-            if resume.button("Resume Mission", type="primary", disabled=not actor, key=f"theme_race_resume_{event_id}"):
-                control.set_theme_park_race_runtime_phase(event_id, "ACTIVE", actor); st.rerun()
-            if close.button("End Mission", disabled=not actor, key=f"theme_race_end_{event_id}"):
-                control.set_theme_park_race_runtime_phase(event_id, "CLOSED", actor); st.rerun()
+            with resume:
+                if st.button("▶ Resume Mission", type="primary", width="stretch", disabled=not actor, key=f"theme_race_resume_{event_id}"):
+                    control.set_theme_park_race_runtime_phase(event_id, "ACTIVE", actor); st.rerun()
+            with close, st.container(key="mc-danger-end"):
+                if st.button("■ End Mission", width="stretch", disabled=not actor, key=f"theme_race_end_{event_id}"):
+                    control.set_theme_park_race_runtime_phase(event_id, "CLOSED", actor); st.rerun()
         elif runtime_phase == "ACTIVE":
             pause, close = st.columns(2)
-            if pause.button("Hold Mission", disabled=not actor, key=f"theme_race_hold_{event_id}"):
-                control.set_theme_park_race_runtime_phase(event_id, "HELD", actor); st.rerun()
-            if close.button("End Mission", disabled=not actor, key=f"theme_race_end_{event_id}"):
-                control.set_theme_park_race_runtime_phase(event_id, "CLOSED", actor); st.rerun()
+            with pause:
+                if st.button("⏸ Hold Mission", width="stretch", disabled=not actor, key=f"theme_race_hold_{event_id}"):
+                    control.set_theme_park_race_runtime_phase(event_id, "HELD", actor); st.rerun()
+            with close, st.container(key="mc-danger-end"):
+                if st.button("■ End Mission", width="stretch", disabled=not actor, key=f"theme_race_end_{event_id}"):
+                    control.set_theme_park_race_runtime_phase(event_id, "CLOSED", actor); st.rerun()
         else:
             st.warning("Mission runtime state is unavailable.")
 
-    if lifecycle != "ENDED" and str(workspace.get("StrategyMode", "")).upper() == "OPEN_MISSION_BOARD":
-        with st.expander("Mission Board control", expanded=True):
-            operations = {row.get("ActivityID", ""): row for row in workspace.get("MissionOperations", [])}
-            if operations:
-                activity_id = st.selectbox(
-                    "Mission", list(operations),
-                    format_func=lambda key: f"{operations[key].get('DisplayName', key)} · {operations[key].get('MissionClass', 'STANDARD')}",
-                    key=f"theme_race_board_operation_mission_{event_id}",
-                )
-                operation = operations[activity_id]
-                operational_status = st.selectbox(
-                    "Operational status", ["AVAILABLE", "TEMPORARILY_UNAVAILABLE", "CLOSED"],
-                    index=["AVAILABLE", "TEMPORARILY_UNAVAILABLE", "CLOSED"].index(str(operation.get("OperationalStatus", "AVAILABLE")).upper()),
-                    key=f"theme_race_board_status_{event_id}",
-                )
-                secret_state = "RELEASED"
-                if str(operation.get("MissionClass", "")).upper() == "SECRET":
-                    secret_state = st.selectbox(
-                        "Secret mission state", ["LOCKED", "RELEASED"],
-                        index=["LOCKED", "RELEASED"].index(str(operation.get("SecretState", "LOCKED")).upper()),
-                        key=f"theme_race_board_secret_{event_id}",
+    if lifecycle != "ENDED" and strategy_mode == "OPEN_MISSION_BOARD":
+        st.markdown('<div class="mc-section-title">Mission Board Control</div>', unsafe_allow_html=True)
+        operations = {row.get("ActivityID", ""): row for row in workspace.get("MissionOperations", [])}
+        if operations:
+            # Confirmation is read back from the freshly reloaded canonical
+            # workspace above, not from the values just clicked -- so this
+            # never claims success the backend has not actually confirmed.
+            notice_activity_id = st.session_state.pop(f"theme_race_board_notice_{event_id}", None)
+            if notice_activity_id and notice_activity_id in operations:
+                notice_row = operations[notice_activity_id]
+                if (str(notice_row.get("MissionClass", "")).upper() == "SECRET"
+                        and str(notice_row.get("SecretState", "")).upper() == "RELEASED"):
+                    st.markdown(
+                        '<div class="mc-alert-banner">'
+                        f'<div class="mc-alert-kicker">🛰️ {html.escape(PLATFORM_NAME)} Alert</div>'
+                        '<div class="mc-alert-title">🔓 Secret Mission Released</div>'
+                        '</div>',
+                        unsafe_allow_html=True,
                     )
-                if st.button("Apply mission board control", disabled=not actor, key=f"theme_race_board_apply_{event_id}"):
-                    control.set_theme_park_race_mission_operation(event_id, activity_id, operational_status, secret_state, actor)
-                    st.rerun()
+                else:
+                    availability = str(notice_row.get("OperationalStatus", "")).upper()
+                    st.success(
+                        f"Mission Updated — {notice_row.get('DisplayName', notice_activity_id)} is now "
+                        f"{_AVAILABILITY_LABELS.get(availability, availability)}."
+                    )
 
-    st.markdown("#### Team progress and Captain status")
-    rows = [{
-        "Team": row.get("TeamIdentity", row.get("TeamID")),
-        "Registered": row.get("RegisteredParticipants", 0),
-        "Captain": row.get("CaptainName") or "Not selected",
-        "Progress": f"{row.get('Completed', 0)}/{row.get('Total', 0)}",
-        "Current mission": row.get("CurrentActivityID") or "Complete",
-        "Selected missions": ", ".join(row.get("SelectedMissionActivityIDs", [])) or "—",
-        "Pending review": row.get("PendingReview", 0),
-        "Rejected": row.get("Rejected", 0),
-    } for row in workspace.get("Teams", [])]
-    st.dataframe(rows, hide_index=True, width="stretch")
+            activity_id = st.selectbox(
+                "Mission", list(operations),
+                format_func=lambda key: f"{operations[key].get('DisplayName', key)} · {operations[key].get('MissionClass', 'STANDARD')}",
+                key=f"theme_race_board_operation_mission_{event_id}",
+            )
+            operation = operations[activity_id]
+            mission_class = str(operation.get("MissionClass", "STANDARD")).upper()
+            current_availability = str(operation.get("OperationalStatus", "AVAILABLE")).upper()
+            current_secret_state = str(operation.get("SecretState", "LOCKED")).upper()
+
+            # The current canonical state, read-only, before any control
+            # below can change it.
+            summary_rows = [
+                ("Mission", operation.get("DisplayName", activity_id)),
+                ("Type", mission_class),
+                ("Availability", _AVAILABILITY_LABELS.get(current_availability, current_availability)),
+            ]
+            if mission_class == "SECRET":
+                summary_rows.append(("Secret State", _SECRET_STATE_LABELS.get(current_secret_state, current_secret_state)))
+            st.markdown(
+                "".join(
+                    '<div class="mc-mission-summary-row">'
+                    f'<span class="mc-mission-summary-label">{html.escape(str(label))}</span>'
+                    f'<span class="mc-mission-summary-value">{html.escape(str(value))}</span>'
+                    '</div>'
+                    for label, value in summary_rows
+                ),
+                unsafe_allow_html=True,
+            )
+
+            operational_status = st.selectbox(
+                "Availability", ["AVAILABLE", "TEMPORARILY_UNAVAILABLE", "CLOSED"],
+                index=["AVAILABLE", "TEMPORARILY_UNAVAILABLE", "CLOSED"].index(current_availability),
+                format_func=lambda value: _AVAILABILITY_LABELS.get(value, value),
+                key=f"theme_race_board_status_{event_id}",
+            )
+            secret_state = "RELEASED"
+            if mission_class == "SECRET":
+                secret_state = st.selectbox(
+                    "Secret mission state", ["LOCKED", "RELEASED"],
+                    index=["LOCKED", "RELEASED"].index(current_secret_state),
+                    format_func=lambda value: _SECRET_STATE_LABELS.get(value, value),
+                    key=f"theme_race_board_secret_{event_id}",
+                )
+            if st.button("Apply Mission Board Control", type="primary", disabled=not actor, key=f"theme_race_board_apply_{event_id}"):
+                control.set_theme_park_race_mission_operation(event_id, activity_id, operational_status, secret_state, actor)
+                st.session_state[f"theme_race_board_notice_{event_id}"] = activity_id
+                st.rerun()
+
+    st.markdown('<div class="mc-section-title">Team Status</div>', unsafe_allow_html=True)
+    teams = workspace.get("Teams", [])
+    if not teams:
+        st.caption("No teams yet.")
+    for row in teams:
+        _render_facilitator_team_card(row)
 
     if lifecycle != "ENDED" and phase in {"CAPTAIN_SELECTION", "ACTIVE"}:
         with st.expander("Facilitator Captain transfer"):
-            teams = {row.get("TeamID", ""): row for row in workspace.get("Teams", [])}
-            if teams:
-                team_id = st.selectbox("Team", list(teams), format_func=lambda key: teams[key].get("TeamIdentity", key), key=f"theme_race_transfer_team_{event_id}")
+            transfer_teams = {row.get("TeamID", ""): row for row in workspace.get("Teams", [])}
+            if transfer_teams:
+                team_id = st.selectbox("Team", list(transfer_teams), format_func=lambda key: transfer_teams[key].get("TeamIdentity", key), key=f"theme_race_transfer_team_{event_id}")
                 members = [row for row in db.runtime.get_theme_park_race_players(event_id) if row.get("TeamID") == team_id]
                 choices = {row.get("ParticipantID", ""): row for row in members}
                 if choices:
@@ -1196,9 +1493,8 @@ def render_theme_park_race_facilitator(db, control, event_id):
                         st.success("Captain transfer recorded. The new Captain must recover Captain authority on their device.")
                         st.rerun()
 
-    st.markdown("#### Submission review")
+    st.markdown("#### Review Queue")
     _render_review_notice(event_id)
-    strategy_mode = str(workspace.get("StrategyMode", "")).upper()
     queue = workspace.get("ReviewQueue", [])
     if not queue:
         st.caption("No submissions are awaiting review.")
@@ -1212,16 +1508,29 @@ def render_theme_park_race_facilitator(db, control, event_id):
         str(row.get("ActivityID", "")): str(row.get("DisplayName") or row.get("ActivityID", ""))
         for row in workspace.get("MissionOperations", [])
     }
+    mission_classes = {
+        str(row.get("ActivityID", "")): str(row.get("MissionClass") or "STANDARD").upper()
+        for row in workspace.get("MissionOperations", [])
+    }
     for submission in queue:
         submission_id = submission.get("SubmissionID", "")
         team_id = str(submission.get("TeamID", ""))
         activity_id = str(submission.get("ActivityID", ""))
         team_label = team_names.get(team_id) or str(submission.get("TeamName") or team_id or "Team")
         mission_label = mission_names.get(activity_id) or activity_id or "Mission"
+        mission_class = mission_classes.get(activity_id, "STANDARD")
         # A pending review is the facilitator's work: never hide it behind a
-        # collapsed panel they have to discover.
+        # collapsed panel they have to discover -- expanded=True, and the
+        # first thing inside is the structured REVIEW REQUIRED summary.
         with st.expander(f"{team_label} · {mission_label} · SUBMITTED", expanded=True):
-            st.caption(f"Team {team_label} · Mission {mission_label}")
+            st.markdown(
+                '<div class="mc-review-kicker">⚠ Review Required</div>'
+                f'<div class="mc-review-team">Team {html.escape(team_label)}</div>'
+                f'<div class="mc-review-row">Mission: <strong>{html.escape(mission_label)}</strong></div>'
+                f'<div class="mc-review-row">Type: <strong>{html.escape(mission_class)}</strong></div>'
+                f'<div class="mc-review-row">Submitted: <strong>{html.escape(_human_timestamp(submission.get("SubmittedAt")))}</strong></div>',
+                unsafe_allow_html=True,
+            )
             if submission.get("Remarks"):
                 st.markdown("**Text evidence**")
                 st.write(submission["Remarks"])
@@ -1229,9 +1538,11 @@ def render_theme_park_race_facilitator(db, control, event_id):
             if photo:
                 st.image(photo, width="stretch")
             if submission.get("RideAttemptStatus"):
+                pathway = submission.get("RideEvidencePathway") or ""
+                attempt = submission.get("RideAttemptStatus") or ""
                 st.caption(
-                    f"Ride pathway: {submission.get('RideEvidencePathway') or '—'} · "
-                    f"Attempt: {submission.get('RideAttemptStatus')} · "
+                    f"Ride pathway: {_RIDE_PATHWAY_LABELS.get(pathway, pathway) or '—'} · "
+                    f"Attempt: {_RIDE_ATTEMPT_LABELS.get(attempt, attempt)} · "
                     f"Canonical riders declared: {len(submission.get('RiderParticipantIDs', []))} / "
                     f"{submission.get('RequiredRideParticipants') or '—'} required from "
                     f"{submission.get('CanonicalTeamMemberCount') or '—'} members"
@@ -1264,7 +1575,7 @@ def render_theme_park_race_facilitator(db, control, event_id):
             with approve:
                 st.caption("Approve and award the score above.")
                 if st.button(
-                    "✅ Approve", type="primary", width="stretch",
+                    "✓ Approve", type="primary", width="stretch",
                     disabled=not actor, key=f"theme_race_approve_{submission_id}",
                 ):
                     _queue_review_notice(event_id, submit_theme_park_race_review(
@@ -1273,19 +1584,22 @@ def render_theme_park_race_facilitator(db, control, event_id):
                     ))
                     st.rerun()
             with reject:
-                st.caption("Reject and reopen the mission. Scores 0. A reason is required.")
-                # Requiring the reason keeps Reject deliberate and guarantees the
-                # 039 contract receives one; it can never approve or carry a score.
-                if st.button(
-                    "❌ Reject — request resubmission", width="stretch",
-                    disabled=not actor or not notes.strip(),
-                    key=f"theme_race_reject_{submission_id}",
-                ):
-                    _queue_review_notice(event_id, submit_theme_park_race_review(
-                        control, strategy_mode, submission,
-                        decision="REJECT", score=0, actor=actor, notes=notes,
-                    ))
-                    st.rerun()
+                st.caption("Return this mission for resubmission. Scores 0. A reason is required.")
+                # Requiring the reason keeps this deliberate and guarantees the
+                # 039 contract receives one; it can never approve or carry a
+                # score. Visually differentiated (red) as the terminal-feeling
+                # decision, same disabled/click semantics as before.
+                with st.container(key=f"mc-danger-reject-{submission_id}"):
+                    if st.button(
+                        "↻ Return for Resubmission", width="stretch",
+                        disabled=not actor or not notes.strip(),
+                        key=f"theme_race_reject_{submission_id}",
+                    ):
+                        _queue_review_notice(event_id, submit_theme_park_race_review(
+                            control, strategy_mode, submission,
+                            decision="REJECT", score=0, actor=actor, notes=notes,
+                        ))
+                        st.rerun()
 
 
 def render_theme_park_race_projector(db, event_id):
