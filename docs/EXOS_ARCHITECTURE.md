@@ -88,6 +88,75 @@ it cannot launch, recover, review, or score.
   `TeamID` only as a diagnostic fallback. Country, flags, icons, emoji, and
   images are optional theme metadata.
 
+## Team Formation V1 — additive Core capability
+
+Sprint 2 introduces a configuration-gated Core capability for large individual
+participant events. It is not a Genting-specific application or identity model.
+`participants_v2` remains the canonical participant record and `teams_v2`
+remains the canonical team record.
+
+- An event opts in only through `event_payload.TeamFormation.SchemaVersion = 1`.
+  Events without that configuration retain the frozen Standard assignment and
+  recovery behavior.
+- The supported modes are `RANDOM_ASSIGN` and `PREASSIGNED`. The lifecycle is
+  `DRAFT` → `REGISTRATION_OPEN` → `FORMATION_LOCKED` →
+  `CAPTAIN_SELECTION` → `ACTIVE`.
+- Team capacity is stored on the existing `teams_v2` row and is mandatory only
+  for a configured Team Formation event. Allocation, recovery, and correction
+  are security-definer Core RPCs; no client selects or reassigns its own team.
+- Random registration locks the event and an opaque credential hash, considers
+  only below-capacity teams, and randomly selects among the least-populated
+  eligible teams. The joining device generates and persists a base64url
+  32-byte enrollment/recovery credential before its first request; only its
+  SHA-256 hash is stored. Display names are presentation data, never identity
+  or recovery credentials. Retry/recovery returns the same canonical
+  participant and team only when that opaque credential is supplied.
+- Preassigned events provision canonical participant/team membership in
+  `participants_v2` before registration. The roster contains an opaque
+  enrollment-credential hash, while claim and recovery accept the matching
+  raw credential; they never accept a requested team.
+- A Team Formation Captain is an existing team participant with a database-
+  enforced single effective Captain and participant-linked Captain session.
+  Facilitator transfer is explicit and audited. This is separate from Formula
+  R.A.C.E.'s existing Team PIN access behavior.
+
+## Theme Park Race V1 — generic configured engine
+
+Theme Park Race is an event/programme configuration on Standard Core v2, not
+a standalone application and not a Genting-specific data model. An event opts
+in only when `event_payload.RaceConfiguration.EngineKind` is exactly
+`THEME_PARK_RACE`; no event name, programme name, client, venue, or activity
+title selects this engine.
+
+- `RaceConfiguration` is versioned (`SchemaVersion = 1`) and contains a
+  selected strategy, runtime phase, and display preferences.
+  `StrategyMode = CONFIGURED_TEAM_ROUTE` preserves configured team routes;
+  opt-in `StrategyMode = OPEN_MISSION_BOARD` gives teams a server-canonical
+  opportunity board. Mission content remains on existing
+  `activities_v2.activity_payload.race_station` payloads.
+- The participant lifecycle derives from canonical Team Formation phase plus
+  the engine runtime phase: `REGISTRATION`, `TEAM_FORMATION`,
+  `FORMATION_LOCKED`, `CAPTAIN_SELECTION`, `READY`, `ACTIVE`, `HELD`, and
+  terminal `ENDED`. `CLOSED` remains the persisted Core-v2 terminal runtime
+  value and is projected as `ENDED`; it cannot be restarted. `HELD` is an
+  explicit persisted pause state, never a client-side substitute for `READY`.
+- A Team Formation Captain submits only the canonical current activity for
+  that team's configured route. The 037 source contract writes the existing
+  `activity_runtime_v2` and `submissions_v2` records and uses existing review,
+  score and credit ledgers; it creates no Theme Park Race tables. Rejection
+  returns the same activity to the route for resubmission.
+- The 038 extension retains the 037 source file and route
+  strategy, while adding open-board selection/ride-attempt/operational state
+  through existing event payload, activity runtime, submission, review and
+  score-ledger records. It creates no table. Projector board views never
+  receive selected/current team strategy or private evidence.
+- Participant, facilitator and projector surfaces rebuild their projections
+  from Core records after reconnect. Projector is display-only. The browser
+  keeps the Team Formation opaque enrollment credential locally; it is never a
+  query parameter and the database retains only its Team Formation hash.
+- Formula R.A.C.E. remains on its current dedicated routing. The Theme Park
+  guard returns immediately for every engine other than `THEME_PARK_RACE`.
+
 ## Programme, review, performance, and ledgers
 
 - Programme duplication uses `clone_programme_stages` and the Standard adapter

@@ -104,3 +104,81 @@ documentation commits are not runtime changes.
 **Reason:** Future work may continue on the branch, but it must compare with the
 frozen reference, explicitly identify an unfreeze/change scope, and update this
 memory set when architectural facts change.
+
+## 11. Team Formation is a Core capability, not a programme implementation
+
+**Decision:** Sprint 2 Team Formation V1 is a configuration-gated Core-v2
+capability. It supports `RANDOM_ASSIGN` and `PREASSIGNED` over the existing
+event, team, participant, session, and audit entities. Genting and future theme
+park events consume it rather than clone it.
+
+**Reason:** Participant-scale events require transactional capacity, balanced
+assignment, recovery-safe canonical identity, and a single Captain authority.
+Those rules must be reusable and database-enforced, rather than implemented in
+a programme-specific Streamlit flow.
+
+**Scope:** The 036 contract is additive. Existing events without the
+configuration are unchanged. Formula R.A.C.E. Team PIN access remains on its
+dedicated path; the protected R.A.C.E. event is never a Team Formation fixture
+or certification target.
+
+**Identity contract:** A display name is not an enrollment or recovery
+credential. Each Team Formation participant uses a base64url 32-byte opaque
+credential, generated and retained by the joining device before its first
+request. The database persists only SHA-256 credential hashes and enforces
+event-scoped uniqueness. PREASSIGNED rosters supply those hashes, with raw
+credentials distributed outside the database; recovery accepts only the raw
+credential and a device identifier.
+
+## 12. Theme Park Race is a configured engine, not a Genting app
+
+**Decision:** Theme Park Race V1 is selected only by
+`RaceConfiguration.EngineKind = THEME_PARK_RACE`. `RaceConfiguration` owns
+versioned routes/runtime/display configuration; each mission remains an
+existing activity with a `race_station` payload. The engine uses Team
+Formation V1 Captain authority and the existing submission/review/ledger
+entities.
+
+**Reason:** Future theme-park races should be created primarily by
+configuration/content, while keeping identity, team, Captain, evidence,
+verification, recovery and live display semantics canonical.
+
+**Scope:** 037 adds no tables and no Formula R.A.C.E. changes. Its guarded
+submission route applies only to the exact Theme Park engine selection;
+Genting content/event population, deployment and the separate 66/250
+concurrency certification are outside this implementation boundary.
+
+## 13. Theme Park Race supports an open strategic board without replacing routes
+
+**Decision:** Keep `CONFIGURED_TEAM_ROUTE` unchanged and add opt-in
+`RaceConfiguration.StrategyMode = OPEN_MISSION_BOARD`. Board selection,
+operational availability, Secret release, ride attempts, submission, review,
+and scoring remain canonical Core state; the browser only projects it.
+
+**Reason:** Mission AI teams must choose strategic opportunities rather than
+follow a compulsory linear order, while future events such as AIA can vary
+ride, bonus and Secret catalogues and point values through configuration.
+
+**Scope:** The 038 source extension uses existing
+`events_v2`, `activity_runtime_v2`, submissions, reviews, score ledger,
+participant sessions and Captain sessions. It introduces no Genting model or
+table, does not modify 037 source, and preserves Formula R.A.C.E. isolation.
+Ride thresholds use current canonical membership; 100% participation creates
+no score multiplier and exterior-only evidence cannot prove completion.
+
+## 14. Theme Park Race End is terminal and distinct from Ready
+
+**Decision:** `CLOSED` remains the existing persisted terminal runtime value
+and projects as lifecycle `ENDED`; `HELD` is an explicit persisted pause.
+Once ended, a Theme Park Race cannot be restarted, and Mission controls and
+participant writes are blocked server-side while results, Captain history,
+Secret history, submissions, reviews, and scores remain intact.
+
+**Reason:** Mapping `CLOSED` to the old Ready fallback exposed a misleading
+Start control after End. A canonical terminal projection and irreversible
+runtime transition make reconnect behaviour deterministic without adding a
+new event or runtime model.
+
+**Scope:** Local 040 source replaces only the Theme Park runtime-phase and
+open-board operational-control RPCs. It creates no table and does not modify
+035–039, Team Formation V1 semantics, or Formula R.A.C.E.

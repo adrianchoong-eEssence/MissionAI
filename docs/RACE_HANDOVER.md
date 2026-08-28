@@ -101,6 +101,17 @@ the intended staging database.
 - Judging, penalties/bonuses, race result, result locking/unlocking, and
   Championship ranking/tie-break rules
 
+Team Formation V1 is a separate Core capability for events that explicitly opt
+in through `event_payload.TeamFormation`. It must not configure, redirect, or
+alter Formula R.A.C.E. Team PIN/Captain access. Formula R.A.C.E. events are not
+Team Formation fixtures or load-test targets.
+
+Theme Park Race V1 is likewise a separate configuration-selected engine. It
+uses only `RaceConfiguration.EngineKind = THEME_PARK_RACE`; its route/Captain
+guard returns without action for Formula R.A.C.E. events. It must not be used
+to change R.A.C.E. Team PIN, checkpoint, wallet, judging, result or projector
+behavior.
+
 Never collapse R.A.C.E. championship score, credits earned, and wallet balance
 into one Standard score/credit field. Never apply Standard participant recovery
 or Standard programme scoring assumptions to Captain access without an explicit

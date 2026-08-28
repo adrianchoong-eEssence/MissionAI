@@ -1,0 +1,155 @@
+{
+  "PackageSchemaVersion": 1,
+  "PackageKind": "EXOS_THEME_PARK_RACE_CONTENT",
+  "PackageID": "GENTING_THEME_PARK_RACE_V1",
+  "PackageVersion": "1.1.0-local-strategic-draft",
+  "LocalOnly": true,
+  "ActivationStatus": "DRAFT_PLACEHOLDER_NOT_APPROVED",
+  "EngineKind": "THEME_PARK_RACE",
+  "StrategyModel": "OBSERVE_ANALYSE_DECIDE_ACT_ADAPT_OUTSMART",
+  "Notes": [
+    "This package is local content/configuration only and makes no database or event write.",
+    "All mission names, locations, prompts, points, rides and reference assets in this draft are placeholders pending Adrian and Kai business sign-off.",
+    "{{EVENT_ID}} is resolved only by the local materializer immediately before a separately authorised load.",
+    "No GPS, geofencing, QR checkpoint, video evidence, ride API, wallet-credit award, live-event creation or deployment is configured."
+  ],
+  "VenueReference": {
+    "VenueName": "Genting SkyWorlds Theme Park",
+    "ContentStatus": "WORLD_NAMES_REFERENCE_ONLY; MISSION_PLACEMENT_PENDING_SITE_RECCE",
+    "SelectedWorlds": ["PENDING_SITE_RECCE"],
+    "Sources": [
+      {"URL": "https://gentingskyworlds.com/en/about-us.html", "Purpose": "Official park context only", "CheckedOn": "2026-08-23"},
+      {"URL": "https://gentingskyworlds.com/en/travel-information/useful-guides.html", "Purpose": "Ride and safety rules must be checked at the event date", "CheckedOn": "2026-08-23"}
+    ],
+    "SiteRecceGate": "No draft mission may be loaded until Genting/operator approval, a safe meeting point, accessibility review, operating status and evidence feasibility have been confirmed."
+  },
+  "EventBlueprint": {
+    "EventID": "{{EVENT_ID}}",
+    "EventName": "Genting Theme Park Race",
+    "ProgrammeName": "Genting Theme Park Race V1 — Strategic Draft",
+    "ProgrammeType": "STANDARD",
+    "ExpectedParticipants": 66,
+    "TeamStructure": {
+      "RecommendedTeamCount": 6,
+      "TargetBalancedTeamSize": 11,
+      "TotalCapacity": 66,
+      "FormationMode": "RANDOM_ASSIGN",
+      "IdentityConfiguration": {
+        "IdentityKind": "CONFIGURED_GENERIC_TEAM_IDENTITY",
+        "Teams": [
+          {"TeamID": "{{EVENT_ID}}-TEAM-01", "TeamToken": "TEAM-01", "TeamIdentity": "Aurora", "TeamName": "Aurora", "Capacity": 11},
+          {"TeamID": "{{EVENT_ID}}-TEAM-02", "TeamToken": "TEAM-02", "TeamIdentity": "Summit", "TeamName": "Summit", "Capacity": 11},
+          {"TeamID": "{{EVENT_ID}}-TEAM-03", "TeamToken": "TEAM-03", "TeamIdentity": "Horizon", "TeamName": "Horizon", "Capacity": 11},
+          {"TeamID": "{{EVENT_ID}}-TEAM-04", "TeamToken": "TEAM-04", "TeamIdentity": "Atlas", "TeamName": "Atlas", "Capacity": 11},
+          {"TeamID": "{{EVENT_ID}}-TEAM-05", "TeamToken": "TEAM-05", "TeamIdentity": "Ember", "TeamName": "Ember", "Capacity": 11},
+          {"TeamID": "{{EVENT_ID}}-TEAM-06", "TeamToken": "TEAM-06", "TeamIdentity": "Velocity", "TeamName": "Velocity", "Capacity": 11}
+        ]
+      }
+    },
+    "TeamFormationConfiguration": {
+      "SchemaVersion": 1,
+      "Mode": "RANDOM_ASSIGN",
+      "TeamCapacities": {
+        "{{EVENT_ID}}-TEAM-01": 11,
+        "{{EVENT_ID}}-TEAM-02": 11,
+        "{{EVENT_ID}}-TEAM-03": 11,
+        "{{EVENT_ID}}-TEAM-04": 11,
+        "{{EVENT_ID}}-TEAM-05": 11,
+        "{{EVENT_ID}}-TEAM-06": 11
+      },
+      "PreassignedRoster": []
+    },
+    "LifecyclePlan": [
+      {"State": "REGISTRATION", "CanonicalControl": "Team Formation V1 registration"},
+      {"State": "TEAM_FORMATION", "CanonicalControl": "RANDOM_ASSIGN allocation"},
+      {"State": "FORMATION_LOCKED", "CanonicalControl": "Team Formation lock"},
+      {"State": "CAPTAIN_SELECTION", "CanonicalControl": "Existing Captain selection"},
+      {"State": "READY", "CanonicalControl": "Team Formation ACTIVE; race RuntimePhase READY"},
+      {"State": "ACTIVE", "CanonicalControl": "Race RuntimePhase ACTIVE; open board server state"},
+      {"State": "HUNT_CLOSED", "CanonicalControl": "Race RuntimePhase CLOSED"},
+      {"State": "RESULTS", "CanonicalControl": "Existing review/score ledger/result-lock flow"}
+    ],
+    "RaceConfiguration": {
+      "SchemaVersion": 1,
+      "EngineKind": "THEME_PARK_RACE",
+      "StrategyMode": "OPEN_MISSION_BOARD",
+      "RuntimePhase": "READY",
+      "MissionBoard": {
+        "MaximumConcurrentSelections": 1,
+        "MissionOperations": {
+          "{{EVENT_ID}}-TPR-OPEN-OBSERVE": {"OperationalStatus": "AVAILABLE", "SecretState": "RELEASED"},
+          "{{EVENT_ID}}-TPR-RIDE-PLACEHOLDER": {"OperationalStatus": "TEMPORARILY_UNAVAILABLE", "SecretState": "RELEASED"},
+          "{{EVENT_ID}}-TPR-BONUS-PLACEHOLDER": {"OperationalStatus": "AVAILABLE", "SecretState": "RELEASED"},
+          "{{EVENT_ID}}-TPR-SECRET-PLACEHOLDER": {"OperationalStatus": "AVAILABLE", "SecretState": "LOCKED"},
+          "{{EVENT_ID}}-TPR-ADAPT": {"OperationalStatus": "AVAILABLE", "SecretState": "RELEASED"},
+          "{{EVENT_ID}}-TPR-OUTSMART": {"OperationalStatus": "AVAILABLE", "SecretState": "RELEASED"}
+        }
+      },
+      "Projector": {
+        "DefaultView": "TEAM_PROGRESS",
+        "ShowOverallScoring": true,
+        "ShowEvidence": false,
+        "ShowTeamStrategy": false,
+        "ShowScoresBeforeResults": false
+      }
+    },
+    "ScoringPolicy": {
+      "PolicyVersion": 1,
+      "ContentStatus": "CONFIGURABLE_PLACEHOLDER_VALUES_NOT_APPROVED",
+      "Ledger": "EXISTING_SCORE_LEDGER_ONLY",
+      "WalletCredits": {"Enabled": false, "AwardPerMission": 0, "Reason": "Wallet credits are not leaderboard points."},
+      "MissionPoints": "SET_PER_ACTIVITY_AT_APPROVED_CONTENT_LOAD",
+      "QualityPoints": "OPTIONAL_PER_ACTIVITY_AT_APPROVED_CONTENT_LOAD",
+      "RideParticipation": {"ThresholdPercent": 80, "Rounding": "CEILING", "FullParticipationBonus": 0, "CompensationPoints": "PENDING_BUSINESS_DECISION"},
+      "TimeComponent": {"Enabled": false, "Reason": "No unverified travel, queue or device time is scored in V1."},
+      "Adjustments": "Audited facilitator review/re-review before existing score lock only.",
+      "Ranking": "Deterministic existing score-ledger ranking; final tie-break policy pending business sign-off."
+    },
+    "CaptainExperience": {
+      "Authority": "Existing effective Captain with active Captain session only.",
+      "Board": "Shows only this team's visible missions, configured class/value, zone/location, operational status, evidence requirements and own completion state. Competitor choices are never returned.",
+      "Reconnect": "Board, selection, operational status, submissions and ride threshold rebuild from canonical Core records."
+    },
+    "FacilitatorExperience": {
+      "MissionControl": "Canonical operational status, secret lock/release, review queue, ride pathway/threshold result, approve/reject/resubmit, reviewed score and runtime controls.",
+      "Runtime": "Start ACTIVE; hold READY; close CLOSED through existing Theme Park Race runtime control."
+    },
+    "ProjectorPlan": {
+      "TEAM_PROGRESS": "Approved-mission counts only; never selected/current missions.",
+      "STANDINGS": "Existing team score/rank when facilitator enables it.",
+      "MISSION_AGGREGATE": "Optional approved mission aggregate and operational state; never private evidence or team strategy.",
+      "SECRET_ANNOUNCEMENT": "Released secret mission name only."
+    }
+  },
+  "Programme": {
+    "ProgrammeID": "{{EVENT_ID}}-TPR-PROGRAMME",
+    "ProgrammeName": "Genting Theme Park Race V1 — Strategic Draft",
+    "Modules": [{"ModuleID": "{{EVENT_ID}}-TPR-MODULE-01", "ModuleName": "Draft Strategic Mission Board", "ModuleOrder": 1, "Day": 1, "Status": "Draft"}]
+  },
+  "ActivitiesV2": [
+    {
+      "ActivityID": "{{EVENT_ID}}-TPR-OPEN-OBSERVE", "ModuleID": "{{EVENT_ID}}-TPR-MODULE-01", "ActivityName": "DRAFT PLACEHOLDER — Observe", "ActivityType": "THEME_PARK_RACE_MISSION", "ActivityOrder": 1, "ParticipantScope": "TEAM", "SubmissionType": "PENDING_APPROVED_BRIEF", "DurationMinutes": 0,
+      "RaceStation": {"ContentStatus": "DRAFT_PLACEHOLDER_NOT_APPROVED", "Enabled": true, "DisplayOrder": 1, "DisplayName": "DRAFT PLACEHOLDER — Observe", "MissionClass": "STANDARD", "Zone": "PENDING_SITE_RECCE", "LocationDescription": "PENDING_SITE_RECCE", "ParticipantInstruction": "PENDING_ADRIAN_AND_KAI_APPROVED_MISSION_BRIEF", "FacilitatorInstruction": "PENDING_APPROVED_REVIEW_RUBRIC", "Evidence": {"Text": {"Required": true, "Label": "PENDING"}, "Photo": {"Required": true, "Label": "Private evidence photo"}, "NumericResult": {"Required": false, "Label": "PENDING", "Minimum": null, "Maximum": null}}, "PrivateReferenceImage": {"Required": false, "Visibility": "FACILITATOR_ONLY", "StorageReference": "", "Status": "PENDING_APPROVAL"}, "ReviewRequired": true, "Scoring": {"Enabled": true, "Maximum": null}, "SafetyNote": "PENDING_GENTING_OPERATOR_AND_SITE_RECCE_APPROVAL", "CompletionState": {"OnSubmit": "SUBMITTED", "OnApprove": "APPROVED", "OnReject": "REJECTED"}, "Resubmission": {"AllowedAfter": "REJECTED", "Mechanism": "EXISTING_SUBMISSION_REVISION"}}
+    },
+    {
+      "ActivityID": "{{EVENT_ID}}-TPR-RIDE-PLACEHOLDER", "ModuleID": "{{EVENT_ID}}-TPR-MODULE-01", "ActivityName": "DRAFT PLACEHOLDER — Ride", "ActivityType": "THEME_PARK_RACE_MISSION", "ActivityOrder": 2, "ParticipantScope": "TEAM", "SubmissionType": "RIDE_EVIDENCE_PATHWAY", "DurationMinutes": 0,
+      "RaceStation": {"ContentStatus": "DRAFT_PLACEHOLDER_NOT_APPROVED", "Enabled": true, "DisplayOrder": 2, "DisplayName": "DRAFT PLACEHOLDER — Ride", "MissionClass": "RIDE", "Zone": "PENDING_CONFIRMED_ATTRACTION", "LocationDescription": "PENDING_GENTING_OPERATOR_APPROVAL", "ParticipantInstruction": "PENDING_APPROVED_RIDE_BRIEF", "FacilitatorInstruction": "Verify official queue-entry/post-ride or controlled facilitator fallback; exterior-only evidence is invalid.", "Evidence": {"Text": {"Required": true, "Label": "Ride team note"}, "Photo": {"Required": false, "Label": "Handled by configured ride evidence pathway"}, "NumericResult": {"Required": false, "Label": "Not used", "Minimum": null, "Maximum": null}}, "RideParticipation": {"RequiredPercent": 80, "Rounding": "CEILING", "EvidencePathways": ["GROUND_CONTROL", "FULL_TEAM", "FACILITATOR_VERIFIED"], "FullParticipationBonus": 0}, "PrivateReferenceImage": {"Required": false, "Visibility": "FACILITATOR_ONLY", "StorageReference": "", "Status": "PENDING_APPROVAL"}, "ReviewRequired": true, "Scoring": {"Enabled": true, "Maximum": null}, "SafetyNote": "Follow attraction and staff rules. Never require phone use where prohibited or create queue obstruction.", "CompletionState": {"OnSubmit": "SUBMITTED", "OnApprove": "APPROVED", "OnReject": "REJECTED"}, "Resubmission": {"AllowedAfter": "REJECTED", "Mechanism": "EXISTING_SUBMISSION_REVISION"}}
+    },
+    {
+      "ActivityID": "{{EVENT_ID}}-TPR-BONUS-PLACEHOLDER", "ModuleID": "{{EVENT_ID}}-TPR-MODULE-01", "ActivityName": "DRAFT PLACEHOLDER — Bonus", "ActivityType": "THEME_PARK_RACE_MISSION", "ActivityOrder": 3, "ParticipantScope": "TEAM", "SubmissionType": "PENDING_APPROVED_BRIEF", "DurationMinutes": 0,
+      "RaceStation": {"ContentStatus": "DRAFT_PLACEHOLDER_NOT_APPROVED", "Enabled": true, "DisplayOrder": 3, "DisplayName": "DRAFT PLACEHOLDER — Bonus", "MissionClass": "BONUS", "Zone": "PENDING_SITE_RECCE", "LocationDescription": "PENDING_SITE_RECCE", "ParticipantInstruction": "PENDING_APPROVED_OPTIONAL_BONUS_BRIEF", "FacilitatorInstruction": "PENDING_APPROVED_REVIEW_RUBRIC", "Evidence": {"Text": {"Required": true, "Label": "PENDING"}, "Photo": {"Required": true, "Label": "Private evidence photo"}, "NumericResult": {"Required": true, "Label": "PENDING", "Minimum": null, "Maximum": null}}, "PrivateReferenceImage": {"Required": false, "Visibility": "FACILITATOR_ONLY", "StorageReference": "", "Status": "PENDING_APPROVAL"}, "ReviewRequired": true, "Scoring": {"Enabled": true, "Maximum": null}, "SafetyNote": "PENDING_GENTING_OPERATOR_AND_SITE_RECCE_APPROVAL", "CompletionState": {"OnSubmit": "SUBMITTED", "OnApprove": "APPROVED", "OnReject": "REJECTED"}, "Resubmission": {"AllowedAfter": "REJECTED", "Mechanism": "EXISTING_SUBMISSION_REVISION"}}
+    },
+    {
+      "ActivityID": "{{EVENT_ID}}-TPR-SECRET-PLACEHOLDER", "ModuleID": "{{EVENT_ID}}-TPR-MODULE-01", "ActivityName": "DRAFT PLACEHOLDER — Secret", "ActivityType": "THEME_PARK_RACE_MISSION", "ActivityOrder": 4, "ParticipantScope": "TEAM", "SubmissionType": "PENDING_RELEASED_BRIEF", "DurationMinutes": 0,
+      "RaceStation": {"ContentStatus": "DRAFT_PLACEHOLDER_NOT_APPROVED", "Enabled": true, "DisplayOrder": 4, "DisplayName": "DRAFT PLACEHOLDER — Secret", "MissionClass": "SECRET", "Zone": "HIDDEN_UNTIL_RELEASE", "LocationDescription": "HIDDEN_UNTIL_RELEASE", "ParticipantInstruction": "PENDING_FACILITATOR_RELEASE", "FacilitatorInstruction": "Release through canonical Mission Board control only after approved briefing is ready.", "Evidence": {"Text": {"Required": true, "Label": "PENDING"}, "Photo": {"Required": true, "Label": "Private evidence photo"}, "NumericResult": {"Required": false, "Label": "PENDING", "Minimum": null, "Maximum": null}}, "PrivateReferenceImage": {"Required": false, "Visibility": "FACILITATOR_ONLY", "StorageReference": "", "Status": "PENDING_APPROVAL"}, "ReviewRequired": true, "Scoring": {"Enabled": true, "Maximum": null}, "SafetyNote": "PENDING_GENTING_OPERATOR_AND_SITE_RECCE_APPROVAL", "CompletionState": {"OnSubmit": "SUBMITTED", "OnApprove": "APPROVED", "OnReject": "REJECTED"}, "Resubmission": {"AllowedAfter": "REJECTED", "Mechanism": "EXISTING_SUBMISSION_REVISION"}}
+    },
+    {
+      "ActivityID": "{{EVENT_ID}}-TPR-ADAPT", "ModuleID": "{{EVENT_ID}}-TPR-MODULE-01", "ActivityName": "DRAFT PLACEHOLDER — Adapt", "ActivityType": "THEME_PARK_RACE_MISSION", "ActivityOrder": 5, "ParticipantScope": "TEAM", "SubmissionType": "PENDING_APPROVED_BRIEF", "DurationMinutes": 0,
+      "RaceStation": {"ContentStatus": "DRAFT_PLACEHOLDER_NOT_APPROVED", "Enabled": true, "DisplayOrder": 5, "DisplayName": "DRAFT PLACEHOLDER — Adapt", "MissionClass": "STANDARD", "Zone": "PENDING_SITE_RECCE", "LocationDescription": "PENDING_SITE_RECCE", "ParticipantInstruction": "PENDING_APPROVED_ADAPT_BRIEF", "FacilitatorInstruction": "PENDING_APPROVED_REVIEW_RUBRIC", "Evidence": {"Text": {"Required": true, "Label": "PENDING"}, "Photo": {"Required": true, "Label": "Private evidence photo"}, "NumericResult": {"Required": false, "Label": "PENDING", "Minimum": null, "Maximum": null}}, "PrivateReferenceImage": {"Required": false, "Visibility": "FACILITATOR_ONLY", "StorageReference": "", "Status": "PENDING_APPROVAL"}, "ReviewRequired": true, "Scoring": {"Enabled": true, "Maximum": null}, "SafetyNote": "PENDING_GENTING_OPERATOR_AND_SITE_RECCE_APPROVAL", "CompletionState": {"OnSubmit": "SUBMITTED", "OnApprove": "APPROVED", "OnReject": "REJECTED"}, "Resubmission": {"AllowedAfter": "REJECTED", "Mechanism": "EXISTING_SUBMISSION_REVISION"}}
+    },
+    {
+      "ActivityID": "{{EVENT_ID}}-TPR-OUTSMART", "ModuleID": "{{EVENT_ID}}-TPR-MODULE-01", "ActivityName": "DRAFT PLACEHOLDER — Outsmart", "ActivityType": "THEME_PARK_RACE_MISSION", "ActivityOrder": 6, "ParticipantScope": "TEAM", "SubmissionType": "PENDING_APPROVED_BRIEF", "DurationMinutes": 0,
+      "RaceStation": {"ContentStatus": "DRAFT_PLACEHOLDER_NOT_APPROVED", "Enabled": true, "DisplayOrder": 6, "DisplayName": "DRAFT PLACEHOLDER — Outsmart", "MissionClass": "BONUS", "Zone": "PENDING_SITE_RECCE", "LocationDescription": "PENDING_SITE_RECCE", "ParticipantInstruction": "PENDING_APPROVED_OUTSMART_BRIEF", "FacilitatorInstruction": "PENDING_APPROVED_REVIEW_RUBRIC", "Evidence": {"Text": {"Required": true, "Label": "PENDING"}, "Photo": {"Required": true, "Label": "Private evidence photo"}, "NumericResult": {"Required": false, "Label": "PENDING", "Minimum": null, "Maximum": null}}, "PrivateReferenceImage": {"Required": false, "Visibility": "FACILITATOR_ONLY", "StorageReference": "", "Status": "PENDING_APPROVAL"}, "ReviewRequired": true, "Scoring": {"Enabled": true, "Maximum": null}, "SafetyNote": "PENDING_GENTING_OPERATOR_AND_SITE_RECCE_APPROVAL", "CompletionState": {"OnSubmit": "SUBMITTED", "OnApprove": "APPROVED", "OnReject": "REJECTED"}, "Resubmission": {"AllowedAfter": "REJECTED", "Mechanism": "EXISTING_SUBMISSION_REVISION"}}
+    }
+  ]
+}

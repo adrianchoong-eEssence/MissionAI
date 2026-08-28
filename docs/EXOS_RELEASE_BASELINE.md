@@ -45,6 +45,50 @@ currently present or healthy in any database:
    Standard identity/restore/cross-device recovery patch. Depends on the Core
    schema and `extensions.digest`; it creates no tables or columns and never
    changes participant/team assignment.
+5. `supabase/036_exos_core_v2_team_formation_v1.sql` — additive Sprint 2 Core
+   Team Formation contract. Depends on the live 020/021/022/026 catalog. It
+   adds nullable capacity, hashed opaque Team Formation recovery credentials,
+   and Captain fields, scoped integrity constraints, guarded Core RPCs, and no
+   fixture. It is selected
+   only by `event_payload.TeamFormation.SchemaVersion = 1`; existing events
+   retain their current behavior. Its guarded rollback is
+   `036_exos_core_v2_team_formation_v1_rollback.sql`, and its read-only
+   verifier is `verification/exos_core_v2_team_formation_v1_verify.sql`.
+6. `supabase/037_theme_park_race_engine.sql` — additive generic Theme Park
+   Race V1 contract. Depends on 020/025, 022 and 036. It creates no tables;
+   it configures only `RaceConfiguration.EngineKind = THEME_PARK_RACE`, uses
+   existing activity `race_station` payloads and routes, and guards Captain
+   submissions through existing runtime/submission records. Its guarded
+   rollback is `037_theme_park_race_engine_rollback.sql`; its read-only
+   verifier is `verification/exos_v2_theme_park_race_engine_verify.sql`.
+7. `supabase/037a_theme_park_race_acl_hardening.sql` — additive privilege-only
+   remediation for an installed 037 engine. It resets preserved
+   `CREATE OR REPLACE` function ACLs to the reviewed 037 role matrix and makes
+   no schema, data, trigger, or event changes. It is required before 038 when
+   upgrading an earlier 037 installation.
+8. `supabase/038_theme_park_race_open_mission_board.sql` — additive
+   extension of the generic engine. It depends on 037 but leaves the 037 source
+   file unchanged, retains `CONFIGURED_TEAM_ROUTE`, and adds opt-in
+   `OPEN_MISSION_BOARD` behavior using existing event payload, activity runtime,
+   submissions, reviews, Captain sessions and score ledger records. It creates
+   no tables. Its present guarded rollback refuses to run when OPEN_MISSION_BOARD
+   configuration, runtime, submission lineage, or audit history exists; otherwise
+   it removes only 038-specific objects and restores the approved 037 replaced
+   function definitions without deleting operational history. Its verifier is
+   `verification/exos_v2_theme_park_race_open_mission_board_verify.sql`.
+9. `supabase/039_theme_park_race_review_reopen_contract.sql` — additive
+   OPEN_MISSION_BOARD facilitator review/reopen contract. It depends on 036,
+   037, 037a, and 038; creates no tables; preserves CONFIGURED_TEAM_ROUTE and
+   non-Theme-Park review behavior; and uses a server-derived revision score-ledger
+   identity. Its guarded rollback preserves operational history, and its verifier
+   is `verification/exos_v2_theme_park_race_review_reopen_contract_verify.sql`.
+10. `supabase/040_theme_park_race_terminal_lifecycle.sql` — terminal lifecycle
+   extension, dependent on 037/037a/038/039. It adds persisted
+   `HELD`, projects the existing persisted `CLOSED` terminal value as `ENDED`,
+   and prevents restart or post-end open-board operational writes. It creates
+   no tables. Its guarded rollback is
+   `040_theme_park_race_terminal_lifecycle_rollback.sql`; its read-only
+   verifier is `verification/exos_v2_theme_park_race_terminal_lifecycle_verify.sql`.
 
 ### R.A.C.E.-specific migrations, not Standard recovery migrations
 
@@ -81,10 +125,21 @@ currently present or healthy in any database:
 
 The repository contains no Supabase migration-history export or credentialed
 staging query result. Therefore the installed status of 020, 021, 025, and 026
-is **UNKNOWN from repository evidence**. The release incident record says 026
-was manually installed during Standard recovery UAT, but that is not a durable
-database-history artifact. Verify the target database before applying or
-reapplying any file. Do not describe 024 as an installed Standard migration.
+is **UNKNOWN from repository evidence**. Kai independently confirmed the Team
+Formation V1 RPCs from 036 in the EXOS Core v2 staging PostgreSQL catalog on
+2026-08-21; this is staging capability evidence, not migration-history
+evidence. The release incident record says 026 was manually installed during
+Standard recovery UAT, but that is not a durable database-history artifact.
+Verify the live catalog before applying or reapplying any file; migration
+history is not capability proof. Do not describe 024 as an installed Standard
+migration.
+
+Read-only staging catalog reconciliation during baseline repair established
+semantic final-contract equivalence for the 037/037a/038/039 Theme Park Race
+chain: expected signatures, function controls, ACLs, and triggers are present.
+Staging migration history has no individual 037/037a/038/039 entry, so this is
+not byte-identical historical SQL provenance. It is not human-UAT or load
+evidence. The same history records 040 terminal lifecycle installation.
 
 ## Secrets and configuration
 
