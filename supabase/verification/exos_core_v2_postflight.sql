@@ -32,7 +32,7 @@ select 'gcp_keyed_checkpoint_invariants' as check_name, location_evidence_id, ve
 from public.location_evidence_v2
 where latitude is null or longitude is null or captured_at is null;
 
-select 'ai_result_without_job' as check_name, ai_result_id, ai_job_id
+select 'ai_result_without_job' as check_name, ai_result_id, ar.ai_job_id
 from public.ai_results_v2 ar
 left join public.ai_jobs_v2 aj on aj.ai_job_id=ar.ai_job_id
 where aj.ai_job_id is null;
