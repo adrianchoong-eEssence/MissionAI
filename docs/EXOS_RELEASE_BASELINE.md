@@ -94,6 +94,11 @@ currently present or healthy in any database:
    no tables. Its guarded rollback is
    `040_theme_park_race_terminal_lifecycle_rollback.sql`; its read-only
    verifier is `verification/exos_v2_theme_park_race_terminal_lifecycle_verify.sql`.
+12. `supabase/040a_exos_core_v2_service_rpc_acl_hardening.sql` — final
+    privilege-only clean-project remediation for six service/admin RPCs created
+    by 020/022. It revokes persistent public/participant-role execution and
+    retains service-role execution without changing function definitions,
+    schema, triggers, application behavior, or data.
 
 ### R.A.C.E.-specific migrations, not Standard recovery migrations
 
