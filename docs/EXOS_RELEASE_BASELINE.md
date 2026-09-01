@@ -54,19 +54,24 @@ currently present or healthy in any database:
    retain their current behavior. Its guarded rollback is
    `036_exos_core_v2_team_formation_v1_rollback.sql`, and its read-only
    verifier is `verification/exos_core_v2_team_formation_v1_verify.sql`.
-6. `supabase/037_theme_park_race_engine.sql` — additive generic Theme Park
+6. `supabase/036a_team_formation_v1_acl_hardening.sql` — additive
+   privilege-only companion for clean Supabase projects whose public-function
+   default privileges explicitly grant `anon` and `authenticated`. It enforces
+   the reviewed Team Formation service/internal versus participant RPC role
+   matrix without changing 036 bodies, signatures, triggers, tables, or data.
+7. `supabase/037_theme_park_race_engine.sql` — additive generic Theme Park
    Race V1 contract. Depends on 020/025, 022 and 036. It creates no tables;
    it configures only `RaceConfiguration.EngineKind = THEME_PARK_RACE`, uses
    existing activity `race_station` payloads and routes, and guards Captain
    submissions through existing runtime/submission records. Its guarded
    rollback is `037_theme_park_race_engine_rollback.sql`; its read-only
    verifier is `verification/exos_v2_theme_park_race_engine_verify.sql`.
-7. `supabase/037a_theme_park_race_acl_hardening.sql` — additive privilege-only
+8. `supabase/037a_theme_park_race_acl_hardening.sql` — additive privilege-only
    remediation for an installed 037 engine. It resets preserved
    `CREATE OR REPLACE` function ACLs to the reviewed 037 role matrix and makes
    no schema, data, trigger, or event changes. It is required before 038 when
    upgrading an earlier 037 installation.
-8. `supabase/038_theme_park_race_open_mission_board.sql` — additive
+9. `supabase/038_theme_park_race_open_mission_board.sql` — additive
    extension of the generic engine. It depends on 037 but leaves the 037 source
    file unchanged, retains `CONFIGURED_TEAM_ROUTE`, and adds opt-in
    `OPEN_MISSION_BOARD` behavior using existing event payload, activity runtime,
@@ -76,13 +81,13 @@ currently present or healthy in any database:
    it removes only 038-specific objects and restores the approved 037 replaced
    function definitions without deleting operational history. Its verifier is
    `verification/exos_v2_theme_park_race_open_mission_board_verify.sql`.
-9. `supabase/039_theme_park_race_review_reopen_contract.sql` — additive
+10. `supabase/039_theme_park_race_review_reopen_contract.sql` — additive
    OPEN_MISSION_BOARD facilitator review/reopen contract. It depends on 036,
    037, 037a, and 038; creates no tables; preserves CONFIGURED_TEAM_ROUTE and
    non-Theme-Park review behavior; and uses a server-derived revision score-ledger
    identity. Its guarded rollback preserves operational history, and its verifier
    is `verification/exos_v2_theme_park_race_review_reopen_contract_verify.sql`.
-10. `supabase/040_theme_park_race_terminal_lifecycle.sql` — terminal lifecycle
+11. `supabase/040_theme_park_race_terminal_lifecycle.sql` — terminal lifecycle
    extension, dependent on 037/037a/038/039. It adds persisted
    `HELD`, projects the existing persisted `CLOSED` terminal value as `ENDED`,
    and prevents restart or post-end open-board operational writes. It creates
