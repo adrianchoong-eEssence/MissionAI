@@ -5,7 +5,14 @@ import streamlit as st
 from branding import apply_branding, configure_page
 from data.standard_core_v2_adapter import get_standard_database
 from engines.theme_park_race import is_theme_park_race
+import screens.participant as participant_screen
+from screens.maxis_participant_experience import render_maxis_theme_park_participant
 from screens.participant import show_participant
+
+# UAT-only presentation override. The canonical participant join flow and all
+# Core v2 authority/RPCs remain unchanged; only the Theme Park renderer is
+# replaced on this branch so Adrian can test the shared team experience.
+participant_screen.render_theme_park_race_participant = render_maxis_theme_park_participant
 
 configure_page(layout="centered")
 apply_branding(participant_pwa=True)
