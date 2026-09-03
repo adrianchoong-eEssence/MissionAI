@@ -484,14 +484,26 @@ class StandardCoreV2Adapter:
                 "p_device_id": device_id, "p_enrollment_credential": enrollment_credential,
             }
         elif mode == "PREASSIGNED":
-            rpc = "exos_v2_team_formation_claim_preassigned"
-            payload = {
-                "p_join_code": join_code, "p_enrollment_credential": enrollment_credential,
-                "p_device_id": device_id,
-            }
+            return self.claim_preassigned_team_formation_participant(
+                join_code, enrollment_credential, device_id,
+            )
         else:
             raise RuntimeDatabaseError("Team Formation is not open for this event.")
         return self._identity(self._rpc(rpc, payload, admin=False))
+
+    def claim_preassigned_team_formation_participant(
+        self, join_code, enrollment_credential, device_id,
+    ):
+        """Claim one canonical PREASSIGNED identity through Team Formation V1."""
+        return self._identity(self._rpc(
+            "exos_v2_team_formation_claim_preassigned",
+            {
+                "p_join_code": join_code,
+                "p_enrollment_credential": enrollment_credential,
+                "p_device_id": device_id,
+            },
+            admin=False,
+        ))
 
     def recover_team_formation_participant(self, join_code, enrollment_credential, device_id):
         return self._identity(self._rpc("exos_v2_recover_team_formation_participant", {

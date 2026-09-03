@@ -86,6 +86,12 @@ def _run_entrypoint(query_params=None, session_state=None, event=None, env=""):
         "screens.participant": types.SimpleNamespace(
             show_participant=lambda: routed.append("PARTICIPANT"),
         ),
+        "screens.maxis_participant_experience": types.SimpleNamespace(
+            render_maxis_theme_park_participant=lambda *args, **kwargs: None,
+        ),
+        "screens.maxis_personal_key": types.SimpleNamespace(
+            render_maxis_personal_key_login=lambda: routed.append("PERSONAL_KEY"),
+        ),
         "screens.formula_race_captain": types.SimpleNamespace(
             show_formula_race_captain=lambda: routed.append("FORMULA_CAPTAIN"),
         ),
@@ -96,6 +102,7 @@ def _run_entrypoint(query_params=None, session_state=None, event=None, env=""):
             FormulaRaceCoreV2StagingAdapter=_formula_adapter,
         ),
         "data.runtime_database": types.SimpleNamespace(
+            RuntimeDatabaseError=RuntimeError,
             get_runtime_database=lambda: None,
         ),
     }
@@ -110,6 +117,15 @@ def _run_entrypoint(query_params=None, session_state=None, event=None, env=""):
         except _Stop:
             pass
     return routed, fake_st
+
+
+def test_maxis_personal_key_url_routes_to_dedicated_screen():
+    routed, _ = _run_entrypoint(
+        query_params={"join_code": "MXKEY7", "personal_key": "1"},
+        event=None,
+        env="staging",
+    )
+    assert routed == ["PERSONAL_KEY"]
 
 
 # 1. THEME_PARK_RACE registration never reaches the legacy captain deployment.

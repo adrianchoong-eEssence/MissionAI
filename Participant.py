@@ -6,13 +6,7 @@ from branding import apply_branding, configure_page
 from data.standard_core_v2_adapter import get_standard_database
 from engines.theme_park_race import is_theme_park_race
 import screens.participant as participant_screen
-from screens.maxis_participant_experience import render_maxis_theme_park_participant
 from screens.participant import show_participant
-
-# UAT-only presentation override. The canonical participant join flow and all
-# Core v2 authority/RPCs remain unchanged; only the Theme Park renderer is
-# replaced on this branch so Adrian can test the shared team experience.
-participant_screen.render_theme_park_race_participant = render_maxis_theme_park_participant
 
 configure_page(layout="centered")
 apply_branding(participant_pwa=True)
@@ -63,11 +57,33 @@ def _is_theme_park_race_request() -> bool:
     return is_theme_park_race(event)
 
 
+def is_maxis_personal_key_request(params) -> bool:
+    """Recognise only the one approved Personal Key UAT URL."""
+    return (
+        str(params.get("personal_key", "") or "").strip() == "1"
+        and str(params.get("join_code", "") or "").strip().upper() == "MXKEY7"
+    )
+
+
 _race_captain_requested = str(st.query_params.get("race", "")).strip() == "1"
+
+# This branch's dedicated Maxis UAT URL has a deliberately smaller entry
+# surface. Identity authority still belongs to Team Formation V1; the branch
+# only replaces the presentation and supplies the URL's fixed join code.
+if is_maxis_personal_key_request(st.query_params):
+    from screens.maxis_personal_key import render_maxis_personal_key_login
+
+    render_maxis_personal_key_login()
+    st.stop()
 
 # Engine selection precedes every legacy captain route: a Theme Park Race is
 # resolved from configuration, never from a query parameter or a programme name.
 if _is_theme_park_race_request():
+    # UAT-only presentation override. Canonical engine/RPC authority remains
+    # unchanged, and the module is loaded only for a Theme Park request.
+    from screens.maxis_participant_experience import render_maxis_theme_park_participant
+
+    participant_screen.render_theme_park_race_participant = render_maxis_theme_park_participant
     show_participant()
     st.stop()
 
