@@ -486,7 +486,7 @@ def _render_captain_claim(db, workspace, device_id):
     try:
         result = db.runtime.claim_team_formation_captain(session_token, device_id)
     except RuntimeDatabaseError as error:
-        st.error(str(error))
+        st.error(_participant_runtime_error(error))
         return
 
     if result.get("Claimed"):
@@ -678,7 +678,7 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
                     _submit_trace(activity_id, RPC_COMPLETED=True)
                 except RuntimeDatabaseError as error:
                     _submit_trace(activity_id, RPC_COMPLETED=False, ERROR_CLASS=type(error).__name__)
-                    st.error(str(error))
+                    st.error(_participant_runtime_error(error))
                     return
                 except Exception as error:
                     _submit_trace(activity_id, RPC_COMPLETED=False, ERROR_CLASS=type(error).__name__)
@@ -718,6 +718,24 @@ _RIDE_ATTEMPT_LABELS = {
     "TEAM_WITHDREW": "Team Withdrew",
     "ATTEMPTED": "Attempted",
 }
+
+
+def _participant_runtime_error(error: Exception) -> str:
+    """Translate expected server rejections without weakening their authority."""
+    text = str(error or "").casefold()
+    if "maximum concurrent mission selections" in text:
+        return "Your team already has the maximum number of active missions. Submit or complete one before choosing another."
+    if "mission is not available" in text or "mission is unavailable" in text or "secret mission is locked" in text:
+        return "This mission is unavailable right now. Choose another mission or check with your facilitator."
+    if "captain" in text or "participant session is invalid" in text:
+        if "claim is not open" in text:
+            return "Mission Captain selection is not open for this event yet."
+        return "Only your Mission Captain on their active device can do this. Ask them to restore Mission Captain access if needed."
+    if "evidence" in text or "numeric result" in text or "ride completion requires" in text:
+        return "Your evidence is incomplete or does not match this mission. Check the mission card and try again."
+    if "not active" in text:
+        return "The mission is not active yet. Please wait for your facilitator."
+    return f"Mission AI could not complete that action. Please try again or check with your facilitator. ({error})"
 
 
 def _render_ride_evidence_form(db, workspace, mission, captain_active=True, show_title=True):
@@ -835,7 +853,7 @@ def _render_ride_evidence_form(db, workspace, mission, captain_active=True, show
                     _submit_trace(activity_id, RPC_COMPLETED=True)
                 except RuntimeDatabaseError as error:
                     _submit_trace(activity_id, RPC_COMPLETED=False, ERROR_CLASS=type(error).__name__)
-                    st.error(str(error))
+                    st.error(_participant_runtime_error(error))
                     return
                 except Exception as error:
                     _submit_trace(activity_id, RPC_COMPLETED=False, ERROR_CLASS=type(error).__name__)
@@ -860,9 +878,9 @@ def _render_mission_card(db, workspace, mission, captain_active, interactive=Tru
     """One mission tile: class identity, title, state badge, points, action.
 
     A Secret Mission is never locked by the time it reaches this board (the
-    engine excludes a still-locked Secret Mission from MissionBoard entirely),
-    so any Secret Mission rendered here has just been released — it always
-    gets the reveal banner, never facilitator/UAT release mechanics.
+    engine excludes a still-locked Secret Mission entirely).  The Maxis UAT
+    config releases its Secret cards from the start, so the participant sees a
+    visible surprise card rather than waiting for a facilitator release.
 
     ``interactive=False`` is the HELD/paused presentation: the tile still
     shows what it is and its current state, but renders no button and no
@@ -883,7 +901,7 @@ def _render_mission_card(db, workspace, mission, captain_active, interactive=Tru
             st.markdown(
                 '<div class="mh-secret-banner">'
                 f'<div class="mh-alert-kicker">🛰️ {html.escape(PLATFORM_NAME)} Alert</div>'
-                '<div class="mh-secret-banner-title">🔓 Secret Mission Unlocked</div>'
+                '<div class="mh-secret-banner-title">🕵️ Secret Mission Unlocked · Live Now</div>'
                 '</div>',
                 unsafe_allow_html=True,
             )
@@ -937,7 +955,7 @@ def _render_mission_card(db, workspace, mission, captain_active, interactive=Tru
                 try:
                     db.runtime.select_theme_park_race_mission(st.session_state.get("participant_session_token", ""), activity_id)
                 except RuntimeDatabaseError as error:
-                    st.error(str(error))
+                    st.error(_participant_runtime_error(error))
                     return
                 # A toast, not a permanent banner: it survives the rerun below
                 # (Streamlit queues it for the next script run) and fades on

@@ -171,6 +171,26 @@ def _render_reveal(player: dict) -> None:
     )
 
 
+def _render_post_reveal_experience(runtime, player: dict, device_id: str) -> bool:
+    """Hand the same personal-key URL to the canonical team/race projection.
+
+    During REGISTRATION_OPEN, the country reveal is deliberately the only
+    surface.  Once Team Formation advances, this remains the same participant
+    session and enters the generic Theme Park engine projection rather than a
+    parallel Maxis lifecycle.
+    """
+    try:
+        workspace = runtime.theme_park_race_participant_workspace(player["SessionToken"])
+    except RuntimeDatabaseError:
+        return False
+    if str(workspace.get("Lifecycle", "")).upper() == "TEAM_FORMATION":
+        return False
+    from screens.maxis_participant_experience import render_maxis_theme_park_participant
+
+    render_maxis_theme_park_participant(runtime, device_id=device_id)
+    return True
+
+
 def render_maxis_personal_key_login() -> None:
     runtime = get_standard_database()
     device_id = participant_device_id()
@@ -178,6 +198,8 @@ def render_maxis_personal_key_login() -> None:
 
     if _valid_identity(player):
         _persist_session(player)
+        if _render_post_reveal_experience(runtime, player, device_id):
+            return
         _render_reveal(player)
         return
 

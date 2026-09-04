@@ -19,15 +19,16 @@ from screens.theme_park_race import (
     _LIFECYCLE_COPY,
     _inject_mission_theme,
     _render_brand_footer,
-    _render_captain_authority,
+    _render_captain_claim,
     _render_ended_participant_screen,
     _render_evidence_form,
     _render_mission_header,
-    _render_open_mission_board,
+    _render_mission_card,
     _render_paused_banner,
     _route_rows,
     _workspace,
 )
+from services.personal_key_credentials import derive_personal_key_credential
 
 
 _ASSISTANT_MODEL = "gpt-5.6-luna"
@@ -88,7 +89,7 @@ def _render_individual_pass(workspace: dict) -> None:
         '<div class="mx-pass-kicker">SIGNED IN AS</div>'
         f'<div class="mx-pass-name">{_safe(name)}</div>'
         '<div class="mx-pass-grid">'
-        '<div class="mx-pass-cell"><div class="mx-pass-label">Team</div>'
+        '<div class="mx-pass-cell"><div class="mx-pass-label">Country</div>'
         f'<div class="mx-pass-value">{_safe(team)}</div></div>'
         '<div class="mx-pass-cell"><div class="mx-pass-label">Role</div>'
         f'<div class="mx-pass-value mx-pass-role">{_safe(role)}</div></div>'
@@ -153,7 +154,7 @@ def _render_team_experience(workspace: dict) -> None:
     count_copy = f"{len(members)} team member{'s' if len(members) != 1 else ''}" if members else "Team roster loading"
     st.markdown(
         '<div class="mx-team-shell">'
-        '<div class="mx-eyebrow">MY TEAM</div>'
+        '<div class="mx-eyebrow">YOUR COUNTRY TEAM</div>'
         f'<div class="mx-team-name">{_safe(team)}</div>'
         f'<div class="mx-team-count">{_safe(count_copy)}</div>'
         f'{captain_block}'
@@ -162,6 +163,71 @@ def _render_team_experience(workspace: dict) -> None:
         '</div>',
         unsafe_allow_html=True,
     )
+
+
+def _render_briefing() -> None:
+    st.markdown("### Mission briefing")
+    st.info(
+        "Not every mission is required. Choose the missions that best fit your team, "
+        "maximise your approved points, and return by the facilitator's announced deadline."
+    )
+    st.caption("Everyone can follow the board and progress. Only the Mission Captain can accept missions and submit evidence.")
+
+
+def _render_maxis_open_board(db, workspace: dict, captain_active: bool, *, interactive: bool = True) -> None:
+    """Group the existing canonical board without changing its authority rules."""
+    board = list(workspace.get("MissionBoard") or [])
+    if not board:
+        st.info("No mission is currently available.")
+        return
+    categories = (
+        ("🎢 RIDES", {"RIDE"}),
+        ("🎯 TASKS", {"STANDARD", "BONUS"}),
+        ("🕵️ SECRET MISSIONS", {"SECRET"}),
+    )
+    for title, classes in categories:
+        missions = [mission for mission in board if str(mission.get("MissionClass", "STANDARD")).upper() in classes]
+        if not missions:
+            continue
+        st.markdown(f"### {title}")
+        for mission in missions:
+            _render_mission_card(db, workspace, mission, captain_active, interactive=interactive)
+
+
+def _render_maxis_captain_authority(db, workspace: dict, device_id: str) -> bool:
+    """Keep Captain ownership canonical while using a Personal Key for recovery."""
+    if not workspace.get("IsCaptain"):
+        if workspace.get("Lifecycle") == "CAPTAIN_SELECTION":
+            _render_captain_claim(db, workspace, device_id)
+        else:
+            st.info("Only the Mission Captain can submit evidence for this country team.")
+        return False
+
+    st.caption("🧭 You are the Mission Captain")
+    if workspace.get("CaptainSessionActive", False):
+        return True
+
+    st.warning("Mission Captain access needs to be restored on this device before you can submit.")
+    with st.form("maxis_captain_recovery", clear_on_submit=True):
+        key = st.text_input("PERSONAL KEY", type="password", autocomplete="off")
+        submitted = st.form_submit_button("Restore Mission Captain Access", type="primary", width="stretch")
+    if not submitted:
+        return False
+    try:
+        credential = derive_personal_key_credential("MAXIS-UAT-PREASSIGNED", key)
+        identity = db.runtime.recover_team_formation_captain("MXKEY7", credential, device_id)
+    except (RuntimeDatabaseError, ValueError):
+        st.error("That Personal Key was not recognised. Check the code beside your name and try again.")
+        return False
+    finally:
+        # Neither the raw Personal Key nor its opaque derivative is retained
+        # by this screen after the single recovery call.
+        st.session_state.pop("maxis_captain_recovery-PERSONAL KEY", None)
+    if not identity or str(identity.get("ParticipantID", "")) != str(workspace.get("ParticipantID", "")):
+        st.error("Mission Captain access could not be restored on this device. Please contact the facilitator.")
+        return False
+    st.success("Mission Captain access restored.")
+    st.rerun()
 
 
 def _assistant_context(workspace: dict) -> dict:
@@ -350,12 +416,16 @@ def render_maxis_theme_park_participant(db, enrollment_credential="", device_id=
         st.subheader(title)
         st.info(message)
 
-    # Every authenticated participant gets an individual event pass before
-    # the shared team roster. No secret/session identifier is exposed.
+    # Team details are withheld until canonical Team Formation has passed the
+    # country-only registration stage.  This keeps the initial reveal free of
+    # roster, Captain and mission-board disclosure.
     _render_individual_pass(workspace)
 
-    if workspace.get("TeamID") or workspace.get("TeamIdentity"):
+    if lifecycle != "TEAM_FORMATION" and (workspace.get("TeamID") or workspace.get("TeamIdentity")):
         _render_team_experience(workspace)
+
+    if lifecycle == "READY":
+        _render_briefing()
 
     if strategy_mode != "OPEN_MISSION_BOARD":
         st.caption(f"Team route progress: {workspace.get('Progress', {}).get('Completed', 0)} / {workspace.get('Progress', {}).get('Total', 0)}")
@@ -366,7 +436,8 @@ def render_maxis_theme_park_participant(db, enrollment_credential="", device_id=
     if lifecycle == "HELD":
         _render_paused_banner()
 
-    captain_active = _render_captain_authority(db, workspace, enrollment_credential, device_id)
+    del enrollment_credential
+    captain_active = _render_maxis_captain_authority(db, workspace, device_id)
 
     # The assistant is read-only and remains useful to every team member.
     # It is shown during READY/ACTIVE/HELD but not after terminal END.
@@ -375,7 +446,7 @@ def render_maxis_theme_park_participant(db, enrollment_credential="", device_id=
 
     if lifecycle == "HELD":
         if strategy_mode == "OPEN_MISSION_BOARD":
-            _render_open_mission_board(db, workspace, captain_active, interactive=False)
+            _render_maxis_open_board(db, workspace, captain_active, interactive=False)
         _render_brand_footer()
         return
 
@@ -386,7 +457,7 @@ def render_maxis_theme_park_participant(db, enrollment_credential="", device_id=
     if strategy_mode == "OPEN_MISSION_BOARD":
         if not captain_active:
             st.caption("Follow the missions with your team. Your Mission Captain controls selection and submission.")
-        _render_open_mission_board(db, workspace, captain_active)
+        _render_maxis_open_board(db, workspace, captain_active)
         _render_brand_footer()
         return
 
