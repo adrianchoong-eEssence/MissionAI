@@ -15,6 +15,7 @@ from data.runtime_database import RuntimeDatabaseError
 from data.standard_core_v2_adapter import get_standard_database
 from screens.participant import participant_device_id, restore_participant_identity
 from services.personal_key_credentials import derive_personal_key_credential
+from services.maxis_team_formation_gate import country_reveal_is_active, team_formation_phase
 
 
 EVENT_ID = "MAXIS-UAT-PREASSIGNED"
@@ -174,20 +175,36 @@ def _render_reveal(player: dict) -> None:
 def _render_post_reveal_experience(runtime, player: dict, device_id: str) -> bool:
     """Hand the same personal-key URL to the canonical team/race projection.
 
-    During REGISTRATION_OPEN, the country reveal is deliberately the only
-    surface.  Once Team Formation advances, this remains the same participant
-    session and enters the generic Theme Park engine projection rather than a
-    parallel Maxis lifecycle.
+    The country reveal is deliberately the only surface during the canonical
+    pre-Captain phases.  Once Team Formation advances, this remains the same
+    participant session and enters the generic Theme Park engine projection
+    rather than a parallel Maxis lifecycle.
     """
     try:
         workspace = runtime.theme_park_race_participant_workspace(player["SessionToken"])
     except RuntimeDatabaseError:
+        # Do not silently regress a restored participant to the country-only
+        # screen when canonical state could not be read.  A retry will rebuild
+        # from the session token without creating another participant.
+        st.warning("Mission AI is reconnecting.")
+        st.caption("Your team state could not be refreshed yet. Please retry.")
+        if st.button("Retry", width="stretch", key="maxis_personal_key_workspace_retry"):
+            st.rerun()
+        return True
+    if country_reveal_is_active(workspace):
         return False
-    if str(workspace.get("Lifecycle", "")).upper() == "TEAM_FORMATION":
-        return False
+    if not team_formation_phase(workspace):
+        st.warning("Mission AI is reconnecting.")
+        st.caption("Your team state is not available yet. Please retry.")
+        if st.button("Retry", width="stretch", key="maxis_personal_key_phase_retry"):
+            st.rerun()
+        return True
     from screens.maxis_participant_experience import render_maxis_theme_park_participant
 
-    render_maxis_theme_park_participant(runtime, device_id=device_id)
+    # Reuse the canonical read that selected this screen.  This avoids a
+    # second, potentially stale/degraded read between the phase gate and the
+    # roster/Captain projection.
+    render_maxis_theme_park_participant(runtime, device_id=device_id, workspace=workspace)
     return True
 
 

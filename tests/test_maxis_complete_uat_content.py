@@ -62,15 +62,16 @@ def test_loader_is_guarded_and_does_not_contain_personal_keys_or_schema_changes(
     assert "DS4365" not in sql
 
 
-def test_maxis_personal_key_screen_preserves_country_only_until_canonical_formation_advance():
+def test_maxis_personal_key_screen_uses_canonical_phase_for_country_only_gate():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
     personal_key = (root / "screens/maxis_personal_key.py").read_text(encoding="utf-8")
     experience = (root / "screens/maxis_participant_experience.py").read_text(encoding="utf-8")
-    assert "workspace.get(\"Lifecycle\"" in personal_key
-    assert "render_maxis_theme_park_participant(runtime, device_id=device_id)" in personal_key
-    assert "if lifecycle != \"TEAM_FORMATION\"" in experience
+    assert "country_reveal_is_active(workspace)" in personal_key
+    assert "team_formation_phase(workspace)" in personal_key
+    assert "workspace=workspace" in personal_key
+    assert "country_roster_is_available(workspace)" in experience
     assert "🎢 RIDES" in experience
     assert "🎯 TASKS" in experience
     assert "🕵️ SECRET MISSIONS" in experience

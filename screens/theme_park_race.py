@@ -47,6 +47,17 @@ _LIFECYCLE_COPY = {
 }
 
 
+def _team_activation_blocked_message(workspace: dict) -> str:
+    """Human-facing feedback for the expected missing-Captain activation gate."""
+    captains = int(workspace.get("CaptainCount", 0) or 0)
+    teams = int(workspace.get("TeamCount", 0) or 0)
+    return (
+        "Teams cannot be activated yet.\n"
+        "Select one Captain for each country first.\n"
+        f"Captains: {captains} / {teams}"
+    )
+
+
 # Fixed, code-authored badge/icon content only — never interpolate
 # participant or facilitator free text (mission titles, instructions,
 # rejection reasons) into these.  A dynamic value with an embedded newline
@@ -1383,7 +1394,14 @@ def render_theme_park_race_facilitator(db, control, event_id):
                 control.open_team_captain_selection(event_id, actor); st.rerun()
         elif phase == "CAPTAIN_SELECTION":
             if st.button("Activate teams", type="primary", disabled=not actor, key=f"theme_race_activate_teams_{event_id}"):
-                control.activate_team_formation(event_id, actor); st.rerun()
+                try:
+                    control.activate_team_formation(event_id, actor)
+                except RuntimeDatabaseError:
+                    # Missing Captains is an expected Team Formation state,
+                    # not an application crash or a facilitator error.
+                    st.error(_team_activation_blocked_message(workspace))
+                else:
+                    st.rerun()
         else:
             st.success("Team Formation is active.")
     with mission_col:

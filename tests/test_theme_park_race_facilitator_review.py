@@ -108,6 +108,32 @@ def _review_buttons(fake):
     }
 
 
+def test_activation_with_missing_captains_shows_human_message_not_database_traceback():
+    workspace = _workspace(queue=[])
+    workspace.update({
+        "Lifecycle": "CAPTAIN_SELECTION",
+        "TeamFormationPhase": "CAPTAIN_SELECTION",
+        "RuntimePhase": "READY",
+        "CaptainCount": 0,
+        "TeamCount": 6,
+    })
+    control = MagicMock()
+    control.activate_team_formation.side_effect = RuntimeDatabaseError(
+        "every team must have an effective captain before activation"
+    )
+
+    fake = _render(click="Activate teams", workspace=workspace, control=control)
+
+    control.activate_team_formation.assert_called_once_with(EVENT_ID, "Facilitator A")
+    shown = "\n".join(str(call.args[0]) for call in fake.error.call_args_list if call.args)
+    assert shown == (
+        "Teams cannot be activated yet.\n"
+        "Select one Captain for each country first.\n"
+        "Captains: 0 / 6"
+    )
+    assert "every team must have" not in shown
+
+
 def _board_adapter():
     """Real adapter + ControlRuntime, capturing the RPC the 039 route emits."""
     adapter = StandardCoreV2Adapter.__new__(StandardCoreV2Adapter)

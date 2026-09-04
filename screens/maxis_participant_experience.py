@@ -29,6 +29,7 @@ from screens.theme_park_race import (
     _workspace,
 )
 from services.personal_key_credentials import derive_personal_key_credential
+from services.maxis_team_formation_gate import country_roster_is_available
 
 
 _ASSISTANT_MODEL = "gpt-5.6-luna"
@@ -388,18 +389,19 @@ def _render_mission_ai_assistant(workspace: dict) -> None:
         st.info(st.session_state["mx_ai_last_answer"])
 
 
-def render_maxis_theme_park_participant(db, enrollment_credential="", device_id=""):
+def render_maxis_theme_park_participant(db, enrollment_credential="", device_id="", workspace=None):
     """Shared participant view with Captain authority layered on top."""
     _inject_mission_theme()
-    session_token = st.session_state.get("participant_session_token", "")
-    try:
-        workspace = _workspace(db, session_token)
-    except RuntimeDatabaseError as error:
-        st.warning("Mission AI is reconnecting.")
-        st.caption(str(error))
-        if st.button("Retry", width="stretch", key="theme_race_workspace_retry"):
-            st.rerun()
-        return
+    if workspace is None:
+        session_token = st.session_state.get("participant_session_token", "")
+        try:
+            workspace = _workspace(db, session_token)
+        except RuntimeDatabaseError:
+            st.warning("Mission AI is reconnecting.")
+            st.caption("Your team state could not be refreshed yet. Please retry.")
+            if st.button("Retry", width="stretch", key="theme_race_workspace_retry"):
+                st.rerun()
+            return
 
     lifecycle = workspace.get("Lifecycle", "REGISTRATION")
     strategy_mode = str(workspace.get("StrategyMode", "CONFIGURED_TEAM_ROUTE")).upper()
@@ -421,7 +423,7 @@ def render_maxis_theme_park_participant(db, enrollment_credential="", device_id=
     # roster, Captain and mission-board disclosure.
     _render_individual_pass(workspace)
 
-    if lifecycle != "TEAM_FORMATION" and (workspace.get("TeamID") or workspace.get("TeamIdentity")):
+    if country_roster_is_available(workspace) and (workspace.get("TeamID") or workspace.get("TeamIdentity")):
         _render_team_experience(workspace)
 
     if lifecycle == "READY":
