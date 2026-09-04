@@ -14,6 +14,7 @@ import streamlit as st
 from data.runtime_database import RuntimeDatabaseError
 from data.standard_core_v2_adapter import get_standard_database
 from screens.participant import participant_device_id, restore_participant_identity
+from services.personal_key_credentials import derive_personal_key_credential
 
 
 EVENT_ID = "MAXIS-UAT-PREASSIGNED"
@@ -48,10 +49,11 @@ def is_maxis_personal_key_request(params: Mapping) -> bool:
 
 
 def claim_personal_key(runtime, personal_key: str, device_id: str):
-    """Claim only a pre-provisioned canonical participant."""
+    """Derive an opaque event credential, then claim the canonical participant."""
+    derived_credential = derive_personal_key_credential(EVENT_ID, personal_key)
     return runtime.claim_preassigned_team_formation_participant(
         JOIN_CODE,
-        personal_key,
+        derived_credential,
         device_id,
     )
 

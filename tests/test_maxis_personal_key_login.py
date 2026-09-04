@@ -8,6 +8,7 @@ from screens.maxis_personal_key import (
     claim_personal_key,
     is_maxis_personal_key_request,
 )
+from services.personal_key_credentials import derive_personal_key_credential
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,9 +70,14 @@ def test_claim_uses_existing_preassigned_rpc_as_anon():
     assert "admin=False" in method
 
     runtime = _ClaimRuntime()
-    player = claim_personal_key(runtime, "exact-personal-key", "device-1")
+    player = claim_personal_key(runtime, " tmBhMb ", "device-1")
     assert player["Name"] == "Canonical Person"
-    assert runtime.calls == [(JOIN_CODE, "exact-personal-key", "device-1")]
+    assert runtime.calls == [(
+        JOIN_CODE,
+        derive_personal_key_credential(EVENT_ID, "TMBHMB"),
+        "device-1",
+    )]
+    assert runtime.calls[0][1] != "TMBHMB"
 
 
 def test_identity_fields_are_canonical_and_read_only():
