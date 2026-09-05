@@ -11,10 +11,12 @@ import json
 import os
 import urllib.error
 import urllib.request
+from base64 import b64encode
 
 import streamlit as st
 
 from data.runtime_database import RuntimeDatabaseError
+from data.upload_safety import validate_image_content, validate_upload
 from screens.participant import restore_participant_identity
 from screens.theme_park_race import (
     _LIFECYCLE_COPY,
@@ -351,7 +353,12 @@ def _deterministic_assistant_answer(question: str, context: dict) -> str:
     return "I can explain any visible mission, tell you what evidence is required, compare points, or suggest what your team could attempt next."
 
 
-def _call_mission_ai(question: str, context: dict) -> str:
+def _call_mission_ai(
+    question: str,
+    context: dict,
+    image_bytes: bytes | None = None,
+    image_content_type: str = "",
+) -> str:
     api_key = str(os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         return _deterministic_assistant_answer(question, context)
@@ -363,10 +370,15 @@ def _call_mission_ai(question: str, context: dict) -> str:
         "Use very simple action language suitable for someone walking around a theme park. Keep answers under 120 words. "
         "If the answer is not in the context, say: 'Check with your facilitator.'"
     )
+    prompt = f"EVENT CONTEXT:\n{json.dumps(context, ensure_ascii=False)}\n\nPARTICIPANT QUESTION:\n{question}"
+    content = [{"type": "input_text", "text": prompt}]
+    if image_bytes and image_content_type in {"image/jpeg", "image/png", "image/webp"}:
+        data_url = "data:" + image_content_type + ";base64," + b64encode(image_bytes).decode("ascii")
+        content.append({"type": "input_image", "image_url": data_url})
     payload = json.dumps({
         "model": _ASSISTANT_MODEL,
         "instructions": instructions,
-        "input": f"EVENT CONTEXT:\n{json.dumps(context, ensure_ascii=False)}\n\nPARTICIPANT QUESTION:\n{question}",
+        "input": [{"role": "user", "content": content}],
         "max_output_tokens": 250,
     }).encode("utf-8")
     request = urllib.request.Request(
@@ -421,12 +433,38 @@ def _render_mission_ai_assistant(workspace: dict) -> None:
         placeholder="e.g. Explain Acorn Adventure simply",
         label_visibility="collapsed",
     )
+    advisory_image = st.file_uploader(
+        "📷 Add screenshot / photo (optional)",
+        type=["jpg", "jpeg", "png", "webp"],
+        key="mx_ai_advisory_image",
+        help="Used only for this Mission AI answer. It is not evidence and is never stored, submitted or shared with your team.",
+    )
     if st.button("Ask ✨", type="primary", width="stretch", key="mx_ai_ask"):
-        pending_question = typed.strip()
+        pending_question = typed.strip() or (
+            "What does this image mean for our visible missions?" if advisory_image else ""
+        )
 
     if pending_question:
+        image_bytes = None
+        image_content_type = ""
+        if advisory_image is not None:
+            try:
+                image_bytes = validate_upload(
+                    advisory_image,
+                    {"jpg", "jpeg", "png", "webp"},
+                    {"image/jpeg", "image/png", "image/webp"},
+                    10 * 1024 * 1024,
+                    "Mission AI screenshot or photo",
+                )
+                validate_image_content(image_bytes, "Mission AI screenshot or photo")
+                image_content_type = str(advisory_image.type or "").lower()
+            except ValueError:
+                st.error("That screenshot or photo could not be used. Choose a valid image up to 10 MB and try again.")
+                return
         with st.spinner("Mission AI is checking your event…"):
-            answer = _call_mission_ai(pending_question, _assistant_context(workspace))
+            answer = _call_mission_ai(
+                pending_question, _assistant_context(workspace), image_bytes, image_content_type,
+            )
         st.session_state["mx_ai_last_question"] = pending_question
         st.session_state["mx_ai_last_answer"] = answer
 

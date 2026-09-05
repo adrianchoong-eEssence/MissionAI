@@ -1,4 +1,5 @@
 import io
+import os
 import re
 import uuid
 from datetime import datetime
@@ -12,6 +13,22 @@ from data.upload_safety import validate_upload
 
 SUBMISSION_BUCKET = "exos-submissions"
 STORAGE_REFERENCE_PREFIX = f"supabase://{SUBMISSION_BUCKET}/"
+DEFAULT_VIDEO_EVIDENCE_MAX_BYTES = 50 * 1024 * 1024
+
+
+def video_evidence_max_bytes() -> int:
+    """Return the bounded per-file video limit for the Theme Park UAT.
+
+    An operator may lower the limit with ``EXOS_THEME_PARK_VIDEO_MAX_BYTES``
+    for a constrained event connection.  It can never be raised above the
+    conservative 50 MB UAT ceiling without a deliberate source change.
+    """
+    value = os.getenv("EXOS_THEME_PARK_VIDEO_MAX_BYTES", "")
+    try:
+        configured = int(value) if value else DEFAULT_VIDEO_EVIDENCE_MAX_BYTES
+    except ValueError:
+        configured = DEFAULT_VIDEO_EVIDENCE_MAX_BYTES
+    return max(1 * 1024 * 1024, min(configured, DEFAULT_VIDEO_EVIDENCE_MAX_BYTES))
 
 
 def _safe_path_part(value, fallback):
@@ -83,6 +100,7 @@ def upload_photo(
         "file_id": storage_path,
         "url": f"{STORAGE_REFERENCE_PREFIX}{storage_path}",
         "filename": filename,
+        "content_type": "image/jpeg",
     }
 
 
@@ -93,6 +111,7 @@ def upload_evidence_file(
     participant_name,
     uploaded_file,
     evidence_type,
+    maximum_bytes=None,
 ):
     """Store participant video/audio evidence in the existing private bucket."""
     runtime = get_runtime_database()
@@ -103,7 +122,14 @@ def upload_evidence_file(
         )
 
     kind = str(evidence_type or "file").strip().lower()
-    maximum = 200 * 1024 * 1024 if kind == "video" else 25 * 1024 * 1024
+    maximum = (
+        video_evidence_max_bytes() if kind == "video" else 25 * 1024 * 1024
+    )
+    if maximum_bytes is not None:
+        try:
+            maximum = min(maximum, max(int(maximum_bytes), 1))
+        except (TypeError, ValueError):
+            pass
     formats = {
         "video": (
             {"mp4", "mov", "m4v", "webm"},
@@ -138,6 +164,7 @@ def upload_evidence_file(
         "file_id": storage_path,
         "url": f"{STORAGE_REFERENCE_PREFIX}{storage_path}",
         "filename": filename,
+        "content_type": content_type,
     }
 
 
@@ -149,8 +176,31 @@ def delete_evidence_file(storage_path):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _private_photo_bytes(storage_path):
+def _private_submission_bytes(storage_path):
     return get_runtime_database().download_submission_image(storage_path)
+
+
+# Compatibility seam for existing photo callers/tests.  New callers should
+# use ``get_private_evidence_bytes`` because a private submission object can
+# be an image or a video.
+def _private_photo_bytes(storage_path):
+    return _private_submission_bytes(storage_path)
+
+
+def get_private_evidence_bytes(image_url="", file_id=""):
+    """Read a private submission object server-side without creating a URL."""
+    reference = str(image_url or "").strip()
+    storage_path = ""
+    if reference.startswith(STORAGE_REFERENCE_PREFIX):
+        storage_path = reference[len(STORAGE_REFERENCE_PREFIX):]
+    elif file_id and not str(file_id).startswith("TEMP-"):
+        storage_path = str(file_id).strip().lstrip("/")
+    if not storage_path:
+        return b""
+    try:
+        return _private_submission_bytes(storage_path)
+    except RuntimeDatabaseError:
+        return b""
 
 
 def get_photo_url(image_url="", file_id=""):
@@ -163,10 +213,8 @@ def get_photo_url(image_url="", file_id=""):
         storage_path = reference[len(STORAGE_REFERENCE_PREFIX):]
     elif file_id and not str(file_id).startswith("TEMP-"):
         storage_path = str(file_id).strip().lstrip("/")
-
     if not storage_path:
         return ""
-
     try:
         return _private_photo_bytes(storage_path)
     except RuntimeDatabaseError:

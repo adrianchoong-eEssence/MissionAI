@@ -1,0 +1,53 @@
+{
+  "PackageKind": "THEME_PARK_RACE_CONTENT_DELTA",
+  "SchemaVersion": 1,
+  "EventID": "MAXIS-UAT-PREASSIGNED",
+  "EngineKind": "THEME_PARK_RACE",
+  "StrategyMode": "OPEN_MISSION_BOARD",
+  "ApplyPolicy": "NEW_OR_UNSTARTED_BOARD_ONLY",
+  "Purpose": "Final Maxis strategic missions. Do not apply to a board with authoritative runtime or submissions.",
+  "Missions": [
+    {
+      "ActivityID": "MAXIS-UAT-PREASSIGNED-TPR-12-BOOT-CAMP-TRAINING",
+      "DisplayName": "Boot Camp Training",
+      "MissionClass": "STANDARD",
+      "MissionClassNote": "TASK / CHALLENGE",
+      "Zone": "Andromeda Base",
+      "LocationDescription": "Andromeda Base attraction area",
+      "ParticipantInstruction": "Take on the obstacle challenge at Andromeda Base. This mission can take considerably longer than many other missions. Decide whether the points are worth the time — you do not need to complete this mission to finish Mission AI. Check the current Genting SkyWorlds app and attraction instructions for access or Virtual Queue requirements. Capture only safe before or after evidence; never hold or use a phone while completing an obstacle.",
+      "FacilitatorInstruction": "Approve up to 150 points for safe before/after evidence that supports a genuine Boot Camp attempt or completion. Do not infer live attraction availability; use only the current canonical operational status and participant-safe evidence.",
+      "EvidenceType": "PHOTO_OR_VIDEO",
+      "Evidence": {
+        "Text": {"Required": false, "Label": "Optional team note"},
+        "Photo": {"Required": true, "Label": "Private before or after team photo"},
+        "Video": {"Required": true, "Label": "Private short before or after video", "MaximumBytes": 52428800},
+        "NumericResult": {"Required": false, "Label": "Not used", "Minimum": null, "Maximum": null}
+      },
+      "Scoring": {"Enabled": true, "Maximum": 150},
+      "SafetyNote": "Do not hold or use a phone during an obstacle. Record evidence only before or after in a safe public area. Follow all park, attraction and facilitator instructions.",
+      "CompletionState": {"OnSubmit": "SUBMITTED", "OnApprove": "APPROVED", "OnReject": "REJECTED"},
+      "Resubmission": {"AllowedAfter": "REJECTED", "Mechanism": "EXISTING_SUBMISSION_REVISION"}
+    },
+    {
+      "ActivityID": "MAXIS-UAT-PREASSIGNED-TPR-13-MANNEQUIN-CHALLENGE",
+      "DisplayName": "Mannequin Challenge",
+      "MissionClass": "STANDARD",
+      "MissionClassNote": "TASK",
+      "Zone": "Studio Plaza",
+      "LocationDescription": "Studio Plaza public area",
+      "ParticipantInstruction": "Turn your whole team into a living movie scene. Choose a safe spot at Studio Plaza, create one dramatic team scene, then freeze when your Captain gives the signal. Hold the pose while your evidence is captured. Use a 5–15 second video where safe, or a private photo. Make the scene creative, convincing and fun.",
+      "FacilitatorInstruction": "Award up to 140 points for whole-team participation, a convincing freeze, creativity, storytelling/composition and safe execution.",
+      "EvidenceType": "PHOTO_OR_VIDEO",
+      "Evidence": {
+        "Text": {"Required": false, "Label": "Optional scene caption"},
+        "Photo": {"Required": true, "Label": "Private team scene photo"},
+        "Video": {"Required": true, "Label": "Private short mannequin video", "MaximumBytes": 52428800},
+        "NumericResult": {"Required": false, "Label": "Not used", "Minimum": null, "Maximum": null}
+      },
+      "Scoring": {"Enabled": true, "Maximum": 140},
+      "SafetyNote": "Do not block walkways, attraction entrances, shops, queues or other guests. Follow all park and facilitator instructions.",
+      "CompletionState": {"OnSubmit": "SUBMITTED", "OnApprove": "APPROVED", "OnReject": "REJECTED"},
+      "Resubmission": {"AllowedAfter": "REJECTED", "Mechanism": "EXISTING_SUBMISSION_REVISION"}
+    }
+  ]
+}

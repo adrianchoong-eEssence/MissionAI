@@ -12,7 +12,12 @@ from datetime import datetime
 import streamlit as st
 
 from branding import COMPANY_NAME, PLATFORM_EXPANSION, PLATFORM_NAME
-from data.google_drive import get_photo_url, upload_photo
+from data.google_drive import (
+    get_photo_url,
+    get_private_evidence_bytes,
+    upload_evidence_file,
+    upload_photo,
+)
 from data.runtime_database import RuntimeDatabaseError
 from engines.theme_park_race import projector_projection
 from data.upload_safety import upload_error_message
@@ -571,7 +576,14 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
     evidence = mission.get("Evidence", {}) or {}
     text_config = evidence.get("Text", {}) or {}
     photo_config = evidence.get("Photo", {}) or {}
+    video_config = evidence.get("Video", {}) or {}
     numeric_config = evidence.get("NumericResult", {}) or {}
+    evidence_type = str(
+        mission.get("EvidenceType") or evidence.get("EvidenceType") or
+        ("PHOTO" if photo_config.get("Required") else "TEXT")
+    ).upper()
+    supports_photo = evidence_type in {"PHOTO", "PHOTO_OR_VIDEO"}
+    supports_video = evidence_type in {"VIDEO", "PHOTO_OR_VIDEO"}
     activity_id = mission["ActivityID"]
     submitting_key = f"theme_race_submitting_{activity_id}"
     if show_title:
@@ -584,17 +596,34 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
     text = ""
     if text_config.get("Required"):
         text = st.text_area(text_config.get("Label") or "Team response", key=f"theme_race_text_{activity_id}")
-    elif photo_config.get("Required") or numeric_config.get("Required"):
+    elif photo_config.get("Required") or video_config.get("Required") or numeric_config.get("Required"):
         text = st.text_area("Optional team note", key=f"theme_race_text_{activity_id}")
 
     uploaded_photo = None
-    if photo_config.get("Required"):
+    uploaded_video = None
+    selected_media_type = evidence_type
+    if supports_photo and supports_video:
+        selected_media_type = st.radio(
+            "Evidence type", ("PHOTO", "VIDEO"), horizontal=True,
+            format_func=lambda value: "📷 PHOTO" if value == "PHOTO" else "🎥 VIDEO",
+            key=f"theme_race_media_type_{activity_id}",
+        )
+    if supports_photo and selected_media_type == "PHOTO":
         uploaded_photo = st.file_uploader(
             photo_config.get("Label") or "Private team photo", type=["jpg", "jpeg", "png"],
             key=f"theme_race_photo_{activity_id}",
         )
         if uploaded_photo is not None:
             st.image(uploaded_photo, width="stretch")
+    if supports_video and selected_media_type == "VIDEO":
+        uploaded_video = st.file_uploader(
+            video_config.get("Label") or "Private short video",
+            type=["mp4", "mov", "m4v", "webm"],
+            key=f"theme_race_video_{activity_id}",
+            help="Keep video evidence short — approximately 5–15 seconds.",
+        )
+        if uploaded_video is not None:
+            st.video(uploaded_video)
 
     numeric = ""
     if numeric_config.get("Required"):
@@ -618,6 +647,7 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
             activity_id, CLICK_RECEIVED=True, MISSION_STATE=mission.get("MissionState", ""),
             STRATEGY_MODE=workspace.get("StrategyMode", ""),
             HAS_TEXT=bool(text.strip()), HAS_PHOTO=uploaded_photo is not None,
+            HAS_VIDEO=uploaded_video is not None, EVIDENCE_TYPE=selected_media_type,
         )
         # The disabled state above should already prevent this, but a stale
         # rerun must never be able to fire a second RPC while one is in flight,
@@ -627,8 +657,14 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
         if text_config.get("Required") and not text.strip():
             st.warning("Enter the required text evidence.")
             return
-        if photo_config.get("Required") and uploaded_photo is None:
+        if supports_photo and supports_video and uploaded_photo is None and uploaded_video is None:
+            st.warning("Upload either the required private photo or short video evidence.")
+            return
+        if evidence_type == "PHOTO" and photo_config.get("Required") and uploaded_photo is None:
             st.warning("Upload the required private photo evidence.")
+            return
+        if evidence_type == "VIDEO" and video_config.get("Required") and uploaded_video is None:
+            st.warning("Upload the required private short video evidence.")
             return
         if numeric_config.get("Required"):
             try:
@@ -651,6 +687,7 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
         try:
             with st.spinner("Submitting mission evidence…"):
                 uploaded = {}
+                uploaded_evidence_type = ""
                 if uploaded_photo is not None:
                     _submit_trace(activity_id, UPLOAD_STARTED=True)
                     try:
@@ -670,10 +707,36 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
                         _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
                         st.error(f"Photo upload failed unexpectedly. You can try again: {error}")
                         return
+                    uploaded_evidence_type = "PHOTO"
+                elif uploaded_video is not None:
+                    _submit_trace(activity_id, UPLOAD_STARTED=True, EVIDENCE_TYPE="VIDEO")
+                    try:
+                        uploaded = upload_evidence_file(
+                            event_id=workspace["EventID"], mission_id=activity_id,
+                            team_name=st.session_state.get("participant_team", workspace["TeamID"]),
+                            participant_name=st.session_state.get("participant_name", ""),
+                            uploaded_file=uploaded_video, evidence_type="VIDEO",
+                            maximum_bytes=video_config.get("MaximumBytes"),
+                        )
+                        _submit_trace(activity_id, UPLOAD_COMPLETED=True, EVIDENCE_TYPE="VIDEO")
+                    except (RuntimeDatabaseError, ValueError) as error:
+                        _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
+                        if "exceeds" in str(error).casefold() and "mb limit" in str(error).casefold():
+                            st.error("Video is too large.\nPlease record a shorter clip and try again.")
+                        else:
+                            st.error(upload_error_message("Video upload", saved=False, retry=True, error=error))
+                        return
+                    except Exception as error:
+                        _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
+                        st.error(upload_error_message("Video upload", saved=False, retry=True, error=error))
+                        return
+                    uploaded_evidence_type = "VIDEO"
                 payload = {
                     "TeamName": st.session_state.get("participant_team", workspace["TeamID"]),
                     "ParticipantName": st.session_state.get("participant_name", ""),
                     "SubmissionType": "THEME_PARK_RACE",
+                    "EvidenceType": uploaded_evidence_type or evidence_type,
+                    "EvidenceMimeType": uploaded.get("content_type", ""),
                     "Remarks": text.strip(),
                     "Metric1": numeric.strip(),
                     "ImageURL": uploaded.get("url", ""),
@@ -932,6 +995,17 @@ def _render_mission_card(db, workspace, mission, captain_active, interactive=Tru
             badge_html += f' <span class="tp-points">⚡ UP TO {points} PTS</span>'
         st.markdown(badge_html, unsafe_allow_html=True)
 
+        evidence_type = str(
+            mission.get("EvidenceType") or (mission.get("Evidence") or {}).get("EvidenceType") or ""
+        ).upper()
+        evidence_label = {
+            "PHOTO": "📷 PHOTO EVIDENCE",
+            "VIDEO": "🎥 VIDEO EVIDENCE",
+            "PHOTO_OR_VIDEO": "📷 / 🎥 PHOTO OR VIDEO",
+        }.get(evidence_type)
+        if evidence_label:
+            st.caption(evidence_label)
+
         meta = " · ".join(
             part for part in (
                 str(mission.get("Zone", "") or "").strip(),
@@ -1012,7 +1086,7 @@ def _render_mission_card(db, workspace, mission, captain_active, interactive=Tru
         elif state == "SUBMITTED":
             st.caption("Sent to EXOS. Awaiting facilitator review.")
         elif state == "APPROVED":
-            st.caption("Mission locked in.")
+            st.caption("✅ COMPLETED · Mission locked in.")
 
 
 def _render_open_mission_board(db, workspace, captain_active, interactive=True):
@@ -1570,9 +1644,22 @@ def render_theme_park_race_facilitator(db, control, event_id):
             if submission.get("Remarks"):
                 st.markdown("**Text evidence**")
                 st.write(submission["Remarks"])
-            photo = get_photo_url(submission.get("ImageURL", ""), submission.get("DriveFileID", ""))
-            if photo:
-                st.image(photo, width="stretch")
+            evidence_type = str(submission.get("EvidenceType") or "").upper()
+            if evidence_type == "VIDEO":
+                video = get_private_evidence_bytes(
+                    submission.get("ImageURL", ""), submission.get("DriveFileID", "")
+                )
+                if video:
+                    try:
+                        st.video(video, format=str(submission.get("EvidenceMimeType") or "video/mp4"))
+                    except Exception:
+                        st.info("Private video evidence is available but could not be played in this browser. Review it with the authorised event device.")
+                else:
+                    st.info("Private video evidence could not be loaded. Refresh and try again; no public link has been created.")
+            else:
+                photo = get_photo_url(submission.get("ImageURL", ""), submission.get("DriveFileID", ""))
+                if photo:
+                    st.image(photo, width="stretch")
             if submission.get("RideAttemptStatus"):
                 pathway = submission.get("RideEvidencePathway") or ""
                 attempt = submission.get("RideAttemptStatus") or ""

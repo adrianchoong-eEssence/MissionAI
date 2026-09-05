@@ -926,6 +926,8 @@ class StandardCoreV2Adapter:
             "TeamName": payload.get("TeamName", row.get("team_id", "")),
             "ParticipantName": payload.get("ParticipantName", ""),
             "SubmissionType": payload.get("SubmissionType", ""), "Metric1": payload.get("Metric1", ""),
+            "EvidenceType": payload.get("EvidenceType", ""),
+            "EvidenceMimeType": payload.get("EvidenceMimeType", ""),
             "Metric2": payload.get("Metric2", ""), "Metric3": payload.get("Metric3", ""),
             "Remarks": payload.get("Remarks", ""), "ImageURL": payload.get("ImageURL", ""),
             "DriveFileID": payload.get("DriveFileID", ""), "Status": row.get("submission_status", "SUBMITTED"),

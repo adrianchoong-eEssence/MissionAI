@@ -4,7 +4,13 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from data.google_drive import get_photo_url, upload_evidence_file, upload_photo
+from data.google_drive import (
+    DEFAULT_VIDEO_EVIDENCE_MAX_BYTES,
+    get_photo_url,
+    get_private_evidence_bytes,
+    upload_evidence_file,
+    upload_photo,
+)
 from data.upload_safety import upload_error_message
 
 
@@ -101,6 +107,40 @@ class SubmissionStorageTests(unittest.TestCase):
                     uploaded, "VIDEO",
                 )
         self.assertEqual(runtime.uploads, [])
+
+    def test_video_keeps_original_bytes_in_private_submission_storage(self):
+        runtime = FakeRuntime()
+        original = b"original-mp4-bytes"
+        uploaded = io.BytesIO(original)
+        uploaded.name, uploaded.type = "mannequin.mp4", "video/mp4"
+        with patch("data.google_drive.get_runtime_database", return_value=runtime):
+            result = upload_evidence_file(
+                "MAXIS-UAT-PREASSIGNED", "M13", "Japan", "Captain",
+                uploaded, "VIDEO",
+            )
+        self.assertEqual(runtime.uploads[0]["Bytes"], original)
+        self.assertEqual(runtime.uploads[0]["ContentType"], "video/mp4")
+        self.assertTrue(result["url"].startswith("supabase://exos-submissions/"))
+        self.assertNotIn("http", result["url"])
+
+    def test_video_over_the_configured_limit_is_rejected_before_storage(self):
+        runtime = FakeRuntime()
+        uploaded = io.BytesIO(b"x" * 2049)
+        uploaded.name, uploaded.type = "too-large.mp4", "video/mp4"
+        with patch("data.google_drive.video_evidence_max_bytes", return_value=2048), patch(
+            "data.google_drive.get_runtime_database", return_value=runtime,
+        ):
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                upload_evidence_file("EVT", "M", "Team", "Captain", uploaded, "VIDEO")
+        self.assertEqual(runtime.uploads, [])
+
+    def test_default_video_limit_is_conservative_50_mb(self):
+        self.assertEqual(DEFAULT_VIDEO_EVIDENCE_MAX_BYTES, 50 * 1024 * 1024)
+
+    def test_private_evidence_reader_never_creates_a_public_url(self):
+        with patch("data.google_drive._private_submission_bytes", return_value=b"private-video"):
+            value = get_private_evidence_bytes("supabase://exos-submissions/EVT/M/video.mp4")
+        self.assertEqual(value, b"private-video")
 
     def test_public_failure_message_has_reference_and_no_backend_detail(self):
         message = upload_error_message(

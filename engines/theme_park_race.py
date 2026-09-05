@@ -29,7 +29,7 @@ PARTICIPANT_LIFECYCLE_STATES = (
     "HELD",
     "ENDED",
 )
-EVIDENCE_KINDS = ("TEXT", "PHOTO", "NUMERIC_RESULT")
+EVIDENCE_KINDS = ("TEXT", "PHOTO", "VIDEO", "PHOTO_OR_VIDEO", "NUMERIC_RESULT")
 MISSION_CLASSES = ("STANDARD", "RIDE", "BONUS", "SECRET")
 MISSION_STATES = (
     "LOCKED", "AVAILABLE", "SELECTED", "SUBMITTED", "APPROVED", "REJECTED",
@@ -166,9 +166,15 @@ def configuration_contract() -> dict[str, Any]:
             "DisplayName": "<Mission title>",
             "ParticipantInstruction": "<Participant-visible instruction>",
             "FacilitatorInstruction": "<Facilitator guidance>",
+            "EvidenceType": "PHOTO | VIDEO | PHOTO_OR_VIDEO",
             "Evidence": {
                 "Text": {"Required": False, "Label": "Team response"},
                 "Photo": {"Required": False, "Label": "Private team photo"},
+                "Video": {
+                    "Required": False,
+                    "Label": "Private short video",
+                    "MaximumBytes": 52428800,
+                },
                 "NumericResult": {
                     "Required": False,
                     "Label": "Result",
@@ -213,6 +219,7 @@ def normalise_station(activity: dict[str, Any], fallback_order: int = 1) -> dict
     evidence = _dict(raw.get("Evidence"))
     text = _dict(evidence.get("Text"))
     photo = _dict(evidence.get("Photo"))
+    video = _dict(evidence.get("Video"))
     numeric = _dict(evidence.get("NumericResult"))
     scoring = _dict(raw.get("Scoring"))
     ride = _dict(raw.get("RideParticipation"))
@@ -226,6 +233,12 @@ def normalise_station(activity: dict[str, Any], fallback_order: int = 1) -> dict
         "LocationDescription": _text(raw.get("LocationDescription")),
         "ParticipantInstruction": _text(raw.get("ParticipantInstruction", raw.get("Instructions", activity.get("ParticipantTask", activity.get("ParticipantMessage", ""))))),
         "FacilitatorInstruction": _text(raw.get("FacilitatorInstruction", activity.get("FacilitatorNotes", activity.get("FacilitatorInstruction", "")))),
+        "EvidenceType": _upper(
+            raw.get("EvidenceType") or evidence.get("EvidenceType"),
+            "PHOTO" if _bool(photo.get("Required"), False) else (
+                "VIDEO" if _bool(video.get("Required"), False) else "TEXT"
+            ),
+        ),
         "Evidence": {
             "Text": {
                 "Required": _bool(text.get("Required"), False),
@@ -234,6 +247,11 @@ def normalise_station(activity: dict[str, Any], fallback_order: int = 1) -> dict
             "Photo": {
                 "Required": _bool(photo.get("Required"), False),
                 "Label": _text(photo.get("Label", "Private team photo")) or "Private team photo",
+            },
+            "Video": {
+                "Required": _bool(video.get("Required"), False),
+                "Label": _text(video.get("Label", "Private short video")) or "Private short video",
+                "MaximumBytes": int(_number(video.get("MaximumBytes")) or 0) or None,
             },
             "NumericResult": {
                 "Required": _bool(numeric.get("Required"), False),
@@ -305,6 +323,17 @@ def validate_configuration(
         minimum, maximum = _number(numeric.get("Minimum")), _number(numeric.get("Maximum"))
         if minimum is not None and maximum is not None and minimum > maximum:
             errors.append(f"{label}: numeric result minimum exceeds maximum.")
+        evidence_type = _upper(station.get("EvidenceType"), "TEXT")
+        if evidence_type not in EVIDENCE_KINDS:
+            errors.append(f"{label}: EvidenceType is invalid.")
+        photo = _dict(_dict(station.get("Evidence")).get("Photo"))
+        video = _dict(_dict(station.get("Evidence")).get("Video"))
+        if evidence_type in {"PHOTO", "PHOTO_OR_VIDEO"} and not photo.get("Required"):
+            errors.append(f"{label}: photo evidence configuration is required.")
+        if evidence_type in {"VIDEO", "PHOTO_OR_VIDEO"} and not video.get("Required"):
+            errors.append(f"{label}: video evidence configuration is required.")
+        if video.get("MaximumBytes") is not None and (_number(video.get("MaximumBytes")) or 0) <= 0:
+            errors.append(f"{label}: video MaximumBytes must be positive.")
         mission_class = _upper(station.get("MissionClass"), "STANDARD")
         if mission_class not in MISSION_CLASSES:
             errors.append(f"{label}: MissionClass is invalid.")

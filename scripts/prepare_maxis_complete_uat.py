@@ -84,6 +84,7 @@ def station_payload(mission: dict, display_order: int) -> dict:
             "LocationDescription": mission["LocationDescription"],
             "ParticipantInstruction": mission["ParticipantInstruction"],
             "FacilitatorInstruction": mission["FacilitatorInstruction"],
+            "EvidenceType": mission.get("EvidenceType", "PHOTO" if mission["Evidence"].get("Photo", {}).get("Required") else "TEXT"),
             "Evidence": mission["Evidence"],
             "RideParticipation": mission.get("RideParticipation", {}),
             "PrivateReferenceImage": {"Required": False, "Visibility": "FACILITATOR_ONLY", "StorageReference": "", "Status": "NOT_REQUIRED"},
