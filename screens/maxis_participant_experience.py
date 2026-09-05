@@ -15,6 +15,7 @@ import urllib.request
 import streamlit as st
 
 from data.runtime_database import RuntimeDatabaseError
+from screens.participant import restore_participant_identity
 from screens.theme_park_race import (
     _LIFECYCLE_COPY,
     _inject_mission_theme,
@@ -268,6 +269,10 @@ def _render_maxis_captain_authority(db, workspace: dict, device_id: str) -> bool
     if not identity or str(identity.get("ParticipantID", "")) != str(workspace.get("ParticipantID", "")):
         st.error("Mission Captain access could not be restored on this device. Please contact the facilitator.")
         return False
+    # Captain recovery also revives the canonical participant session on this
+    # device.  Persist its returned token before rerunning, otherwise the next
+    # workspace read would use the deliberately invalidated older session.
+    restore_participant_identity(identity)
     st.success("Mission Captain access restored.")
     st.rerun()
 

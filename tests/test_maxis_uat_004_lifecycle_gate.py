@@ -71,3 +71,11 @@ def test_workspace_read_failure_never_silently_falls_back_to_country_only_reveal
         st.button.return_value = False
         assert personal_key._render_post_reveal_experience(Runtime(), _player(), "same-device") is True
     st.warning.assert_called_once_with("Mission AI is reconnecting.")
+
+
+def test_captain_recovery_preserves_the_canonical_session_returned_by_the_rpc():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "screens/maxis_participant_experience.py").read_text(encoding="utf-8")
+    assert "recover_team_formation_captain" in source
+    assert "restore_participant_identity(identity)" in source
