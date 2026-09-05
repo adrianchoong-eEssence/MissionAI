@@ -76,3 +76,12 @@ def test_maxis_personal_key_screen_uses_canonical_phase_for_country_only_gate():
     assert "🎯 TASKS" in experience
     assert "🕵️ SECRET MISSIONS" in experience
     assert "Mission briefing" in experience
+
+
+def test_live_board_keeps_the_choose_wisely_rule_visible():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    experience = (root / "screens/maxis_participant_experience.py").read_text(encoding="utf-8")
+    assert 'if lifecycle in {"READY", "ACTIVE", "HELD"}:' in experience
+    assert "Not every mission is required. Choose the missions that best fit your team" in experience

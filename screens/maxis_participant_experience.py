@@ -426,7 +426,10 @@ def render_maxis_theme_park_participant(db, enrollment_credential="", device_id=
     if country_roster_is_available(workspace) and (workspace.get("TeamID") or workspace.get("TeamIdentity")):
         _render_team_experience(workspace)
 
-    if lifecycle == "READY":
+    # The strategic rule is a live-game rule, not only a pre-launch briefing.
+    # Keep it visible when the board is ACTIVE (and while it is HELD) so teams
+    # can make informed choices without relying on a facilitator reminder.
+    if lifecycle in {"READY", "ACTIVE", "HELD"}:
         _render_briefing()
 
     if strategy_mode != "OPEN_MISSION_BOARD":
