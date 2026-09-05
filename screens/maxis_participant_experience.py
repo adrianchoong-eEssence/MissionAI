@@ -39,6 +39,10 @@ _ASSISTANT_QUICK_PROMPTS = (
     "Which missions are worth most?",
     "What should our team do next?",
 )
+_COUNTRY_FLAGS = {
+    "Japan": "🇯🇵", "South Korea": "🇰🇷", "France": "🇫🇷",
+    "Italy": "🇮🇹", "Brazil": "🇧🇷", "Thailand": "🇹🇭",
+}
 
 
 def _safe(value) -> str:
@@ -175,6 +179,40 @@ def _render_briefing() -> None:
     st.caption("Everyone can follow the board and progress. Only the Mission Captain can accept missions and submit evidence.")
 
 
+def _render_canonical_team_progress(db, workspace: dict) -> None:
+    """Show score and completed missions from the canonical ledger/progress views."""
+    team_id = str(workspace.get("TeamID") or "")
+    score = 0.0
+    try:
+        leaderboard = db.runtime.get_canonical_leaderboard(workspace.get("EventID", ""))
+        score = next((float(row.get("Score", 0) or 0) for row in leaderboard
+                      if str(row.get("TeamID") or "") == team_id), 0.0)
+    except (AttributeError, RuntimeDatabaseError):
+        # Board availability must not depend on the optional display read.
+        score = 0.0
+    progress = dict(workspace.get("Progress") or {})
+    completed = int(progress.get("Completed", 0) or 0)
+    total = int(progress.get("Total", 0) or 0)
+    country = str(workspace.get("TeamIdentity") or workspace.get("TeamID") or "Your country")
+    score_copy = str(int(score)) if score.is_integer() else f"{score:.1f}"
+    st.markdown(
+        """
+        <style>
+        .mx-progress{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:.65rem;align-items:center;margin:.6rem 0 1rem;padding:.75rem .85rem;border-radius:15px;background:linear-gradient(115deg,rgba(45,212,191,.13),rgba(11,27,44,.95));border:1px solid rgba(45,212,191,.42)}
+        .mx-progress-flag{font-size:2rem}.mx-progress-country{font:900 .68rem Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#fff}.mx-progress-copy{font:800 .61rem Inter,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#9fb6c8;margin-top:.18rem}.mx-progress-score{text-align:right;font:900 1.85rem/.9 'Barlow Condensed',Impact,sans-serif;color:#ffe07a}.mx-progress-score span{display:block;font:800 .54rem Inter,sans-serif;letter-spacing:.12em;color:#d6deea;margin-top:.2rem}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="mx-progress">'
+        f'<div class="mx-progress-flag">{_safe(_COUNTRY_FLAGS.get(country, "🏳️"))}</div>'
+        f'<div><div class="mx-progress-country">{_safe(country)}</div><div class="mx-progress-copy">{completed} / {total} missions completed</div></div>'
+        f'<div class="mx-progress-score">{_safe(score_copy)}<span>TOTAL SCORE</span></div></div>',
+        unsafe_allow_html=True,
+    )
+
+
 def _render_maxis_open_board(db, workspace: dict, captain_active: bool, *, interactive: bool = True) -> None:
     """Group the existing canonical board without changing its authority rules."""
     board = list(workspace.get("MissionBoard") or [])
@@ -188,6 +226,9 @@ def _render_maxis_open_board(db, workspace: dict, captain_active: bool, *, inter
     )
     for title, classes in categories:
         missions = [mission for mission in board if str(mission.get("MissionClass", "STANDARD")).upper() in classes]
+        # Approved missions remain visible as a shared team record, but never
+        # compete with active choices for attention or look actionable again.
+        missions.sort(key=lambda mission: str(mission.get("MissionState", "")).upper() == "APPROVED")
         if not missions:
             continue
         st.markdown(f"### {title}")
@@ -412,6 +453,7 @@ def render_maxis_theme_park_participant(db, enrollment_credential="", device_id=
 
     if lifecycle in {"ACTIVE", "HELD"}:
         _render_mission_header(workspace)
+        _render_canonical_team_progress(db, workspace)
     else:
         title, message = _LIFECYCLE_COPY.get(lifecycle, ("Mission AI", "Waiting for your facilitator."))
         st.markdown('<div class="mh-kicker">MISSION AI · TEAM EXPERIENCE</div>', unsafe_allow_html=True)

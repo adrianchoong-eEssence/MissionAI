@@ -15,6 +15,7 @@ from screens.projector_broadcast import (
 )
 from screens.team_identity import resolve_leaderboard_rows
 from screens.theme_park_race import render_theme_park_race_projector
+from screens.maxis_uat_projector import MAXIS_UAT_EVENT_ID, render_maxis_uat_projector
 from engines.canonical_performance import load_performance_snapshot
 from screens.projector_presentation import (
     PROJECTOR_STANDALONE_STYLES,
@@ -751,6 +752,9 @@ def show_leaderboard_display(db=None, event_id="", standalone=False):
             a,b=st.columns(2);a.metric("Pending Reviews",pending);b.metric("Current Leader",rows[0]["Team"] if rows else "—")
             return
     if db.is_theme_park_race_event(event):
+        if str(event_id) == MAXIS_UAT_EVENT_ID:
+            render_maxis_uat_projector(db, event_id)
+            return
         render_theme_park_race_projector(db, event_id)
         return
     programme = CanonicalProgrammeAdapter.load(db, event_id)

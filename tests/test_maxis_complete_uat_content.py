@@ -85,3 +85,37 @@ def test_live_board_keeps_the_choose_wisely_rule_visible():
     experience = (root / "screens/maxis_participant_experience.py").read_text(encoding="utf-8")
     assert 'if lifecycle in {"READY", "ACTIVE", "HELD"}:' in experience
     assert "Not every mission is required. Choose the missions that best fit your team" in experience
+
+
+def test_maxis_presentation_uses_canonical_progress_and_an_event_scoped_projector():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    experience = (root / "screens/maxis_participant_experience.py").read_text(encoding="utf-8")
+    display = (root / "screens/leaderboard_display.py").read_text(encoding="utf-8")
+    projector = (root / "screens/maxis_uat_projector.py").read_text(encoding="utf-8")
+    assert "get_canonical_leaderboard" in experience
+    assert "TOTAL SCORE" in experience
+    assert "MAXIS_UAT_EVENT_ID" in display
+    assert "render_maxis_uat_projector" in display
+    assert "MAXIS MISSION AI" in projector
+    assert "LIVE LEADERBOARD" in projector
+    assert "Secret mission released" not in projector
+
+
+def test_maxis_projector_rows_join_only_canonical_public_progress_and_scores():
+    from screens.maxis_uat_projector import maxis_projector_rows
+
+    rows = maxis_projector_rows({
+        "Teams": [
+            {"TeamID": "T1", "TeamIdentity": "Japan", "Completed": 2, "Total": 11},
+            {"TeamID": "T6", "TeamIdentity": "Thailand", "Completed": 1, "Total": 11},
+        ],
+        "Leaderboard": [
+            {"TeamID": "T6", "TeamName": "Thailand", "Score": 55},
+            {"TeamID": "T1", "TeamName": "Japan", "Score": 0},
+        ],
+    })
+    assert [(row["Rank"], row["Country"], row["Score"], row["Completed"]) for row in rows] == [
+        (1, "Thailand", 55, 1), (2, "Japan", 0, 2),
+    ]
