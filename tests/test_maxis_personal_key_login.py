@@ -5,8 +5,10 @@ from screens.maxis_personal_key import (
     EVENT_ID,
     JOIN_CODE,
     _country_reveal,
+    authenticate_personal_key,
     claim_personal_key,
     is_maxis_personal_key_request,
+    recover_personal_key,
 )
 from services.personal_key_credentials import derive_personal_key_credential
 
@@ -33,6 +35,25 @@ class _ClaimRuntime:
             "Name": "Canonical Person",
             "SessionToken": "S-1",
         }
+
+
+class _RecoveryRuntime(_ClaimRuntime):
+    def recover_team_formation_participant(self, *args):
+        self.calls.append(args)
+        return {
+            "EventID": EVENT_ID,
+            "ParticipantID": "P-1",
+            "TeamID": "T-1",
+            "Team": "Japan",
+            "Country": "Japan",
+            "Flag": "🇯🇵",
+            "Name": "Canonical Person",
+            "SessionToken": "S-1",
+        }
+
+
+def _event(phase):
+    return {"EventID": EVENT_ID, "_EventPayload": {"TeamFormation": {"Phase": phase}}}
 
 
 def test_dedicated_url_routes_to_personal_key_screen_first():
@@ -78,6 +99,42 @@ def test_claim_uses_existing_preassigned_rpc_as_anon():
         "device-1",
     )]
     assert runtime.calls[0][1] != "TMBHMB"
+
+
+def test_closed_registration_uses_existing_participant_recovery_rpc_not_claim():
+    method = ADAPTER.split("def recover_team_formation_participant", 1)[1]
+    method = method.split("def claim_team_formation_captain", 1)[0]
+    assert '"exos_v2_recover_team_formation_participant"' in method
+    assert "admin=False" in method
+
+    runtime = _RecoveryRuntime()
+    player = recover_personal_key(runtime, " tmBhMb ", "device-1")
+    assert player["ParticipantID"] == "P-1"
+    assert runtime.calls == [(
+        JOIN_CODE,
+        derive_personal_key_credential(EVENT_ID, "TMBHMB"),
+        "device-1",
+    )]
+
+    runtime.calls.clear()
+    player = authenticate_personal_key(runtime, _event("CAPTAIN_SELECTION"), "tmBhMb", "device-1")
+    assert player["ParticipantID"] == "P-1"
+    assert runtime.calls == [(
+        JOIN_CODE,
+        derive_personal_key_credential(EVENT_ID, "TMBHMB"),
+        "device-1",
+    )]
+
+
+def test_registration_still_uses_the_approved_preassigned_claim_rpc():
+    runtime = _ClaimRuntime()
+    player = authenticate_personal_key(runtime, _event("REGISTRATION_OPEN"), "tmBhMb", "device-1")
+    assert player["ParticipantID"] == "P-1"
+    assert runtime.calls == [(
+        JOIN_CODE,
+        derive_personal_key_credential(EVENT_ID, "TMBHMB"),
+        "device-1",
+    )]
 
 
 def test_identity_fields_are_canonical_and_read_only():

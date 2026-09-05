@@ -59,6 +59,35 @@ def claim_personal_key(runtime, personal_key: str, device_id: str):
     )
 
 
+def recover_personal_key(runtime, personal_key: str, device_id: str):
+    """Restore an existing PREASSIGNED participant after registration closes."""
+    derived_credential = derive_personal_key_credential(EVENT_ID, personal_key)
+    return runtime.recover_team_formation_participant(
+        JOIN_CODE,
+        derived_credential,
+        device_id,
+    )
+
+
+def _event_team_formation_phase(event: dict | None) -> str:
+    payload = dict((event or {}).get("_EventPayload") or {})
+    formation = dict(payload.get("TeamFormation") or {})
+    return str(formation.get("Phase") or "").strip().upper()
+
+
+def authenticate_personal_key(runtime, event: dict, personal_key: str, device_id: str):
+    """Use claim only during registration; recovery preserves existing identity later.
+
+    Team Formation V1 intentionally refuses a PREASSIGNED claim after
+    registration closes.  The companion recovery RPC is the canonical,
+    credential-bound route for FORMATION_LOCKED, CAPTAIN_SELECTION and ACTIVE.
+    """
+    phase = _event_team_formation_phase(event)
+    if phase in {"FORMATION_LOCKED", "CAPTAIN_SELECTION", "ACTIVE"}:
+        return recover_personal_key(runtime, personal_key, device_id)
+    return claim_personal_key(runtime, personal_key, device_id)
+
+
 def _valid_identity(player: dict | None) -> bool:
     return bool(
         player
@@ -246,7 +275,7 @@ def render_maxis_personal_key_login() -> None:
         return
 
     try:
-        player = claim_personal_key(runtime, personal_key, device_id)
+        player = authenticate_personal_key(runtime, event, personal_key, device_id)
     except (RuntimeDatabaseError, ValueError):
         player = None
 
