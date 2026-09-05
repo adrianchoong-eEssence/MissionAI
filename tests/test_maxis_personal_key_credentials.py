@@ -64,10 +64,11 @@ def test_authoritative_68_person_workbook_and_generated_package_contract():
 def test_login_and_reveal_sources_never_log_or_query_raw_or_derived_credentials():
     root = Path(__file__).resolve().parents[1]
     screen = (root / "screens" / "maxis_personal_key.py").read_text(encoding="utf-8")
-    assert "derive_personal_key_credential(EVENT_ID, personal_key)" in screen
+    assert "derive_personal_key_credential(event_id, personal_key)" in screen
     assert "p_enrollment_credential" not in screen
     assert "st.write(personal_key" not in screen
     assert "st.write(derived_credential" not in screen
     assert '"personal_key": "1"' in screen  # URL mode flag, never the entered key.
+    assert "maxis_personal_key_event" in screen
     assert "get_team_roster" not in screen
     assert "TeamMembers" not in screen

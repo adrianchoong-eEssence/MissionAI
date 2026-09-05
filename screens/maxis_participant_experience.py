@@ -32,6 +32,7 @@ from screens.theme_park_race import (
     _workspace,
 )
 from services.personal_key_credentials import derive_personal_key_credential
+from services.maxis_personal_key_event import maxis_personal_key_event
 from services.maxis_team_formation_gate import country_roster_is_available
 
 
@@ -259,8 +260,9 @@ def _render_maxis_captain_authority(db, workspace: dict, device_id: str) -> bool
     if not submitted:
         return False
     try:
-        credential = derive_personal_key_credential("MAXIS-UAT-PREASSIGNED", key)
-        identity = db.runtime.recover_team_formation_captain("MXKEY7", credential, device_id)
+        event_id, join_code = maxis_personal_key_event()
+        credential = derive_personal_key_credential(event_id, key)
+        identity = db.runtime.recover_team_formation_captain(join_code, credential, device_id)
     except (RuntimeDatabaseError, ValueError):
         st.error("That Personal Key was not recognised. Check the code beside your name and try again.")
         return False

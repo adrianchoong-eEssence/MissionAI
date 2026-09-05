@@ -7,6 +7,7 @@ from data.standard_core_v2_adapter import get_standard_database
 from engines.theme_park_race import is_theme_park_race
 import screens.participant as participant_screen
 from screens.participant import show_participant
+from services.maxis_personal_key_event import is_maxis_personal_key_request
 
 configure_page(layout="centered")
 apply_branding(participant_pwa=True)
@@ -55,14 +56,6 @@ def _is_theme_park_race_request() -> bool:
     except Exception:
         return False
     return is_theme_park_race(event)
-
-
-def is_maxis_personal_key_request(params) -> bool:
-    """Recognise only the one approved Personal Key UAT URL."""
-    return (
-        str(params.get("personal_key", "") or "").strip() == "1"
-        and str(params.get("join_code", "") or "").strip().upper() == "MXKEY7"
-    )
 
 
 _race_captain_requested = str(st.query_params.get("race", "")).strip() == "1"

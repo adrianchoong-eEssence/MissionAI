@@ -77,8 +77,8 @@ def test_login_accepts_only_personal_key_and_fixed_join_code():
     assert "First / Given Name" not in form
     assert "Last / Family Name" not in form
     assert 'st.text_input("Join Code"' not in form
-    assert 'JOIN_CODE = "MXKEY7"' in SCREEN
-    assert 'EVENT_ID = "MAXIS-UAT-PREASSIGNED"' in SCREEN
+    assert "maxis_personal_key_event" in SCREEN
+    assert "MAXIS_PERSONAL_KEY_EVENT_ID" in (ROOT / "services" / "maxis_personal_key_event.py").read_text(encoding="utf-8")
 
 
 def test_claim_uses_existing_preassigned_rpc_as_anon():
@@ -200,4 +200,4 @@ def test_invalid_key_has_exact_safe_message_and_no_fallback_join():
     assert "Check the code beside your name and try again." in SCREEN
     assert "join_player" not in SCREEN
     assert "register_team_formation_participant" not in SCREEN
-    assert "claim_personal_key(runtime, personal_key, device_id)" in SCREEN
+    assert "claim_personal_key(runtime, personal_key, device_id, event_id=event_id, join_code=join_code)" in SCREEN

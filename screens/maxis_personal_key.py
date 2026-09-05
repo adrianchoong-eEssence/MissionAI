@@ -15,11 +15,14 @@ from data.runtime_database import RuntimeDatabaseError
 from data.standard_core_v2_adapter import get_standard_database
 from screens.participant import participant_device_id, restore_participant_identity
 from services.personal_key_credentials import derive_personal_key_credential
+from services.maxis_personal_key_event import (
+    DEFAULT_EVENT_ID as EVENT_ID,
+    DEFAULT_JOIN_CODE as JOIN_CODE,
+    maxis_personal_key_event,
+)
 from services.maxis_team_formation_gate import country_reveal_is_active, team_formation_phase
 
 
-EVENT_ID = "MAXIS-UAT-PREASSIGNED"
-JOIN_CODE = "MXKEY7"
 INVALID_KEY_MESSAGE = (
     "That Personal Key was not recognised.\n"
     "Check the code beside your name and try again."
@@ -43,27 +46,28 @@ def _query_value(params: Mapping, key: str) -> str:
 
 def is_maxis_personal_key_request(params: Mapping) -> bool:
     """Enable this screen only for the single approved Maxis event URL."""
+    _, join_code = maxis_personal_key_event()
     return (
         _query_value(params, "personal_key") == "1"
-        and _query_value(params, "join_code").upper() == JOIN_CODE
+        and _query_value(params, "join_code").upper() == join_code
     )
 
 
-def claim_personal_key(runtime, personal_key: str, device_id: str):
+def claim_personal_key(runtime, personal_key: str, device_id: str, *, event_id: str = EVENT_ID, join_code: str = JOIN_CODE):
     """Derive an opaque event credential, then claim the canonical participant."""
-    derived_credential = derive_personal_key_credential(EVENT_ID, personal_key)
+    derived_credential = derive_personal_key_credential(event_id, personal_key)
     return runtime.claim_preassigned_team_formation_participant(
-        JOIN_CODE,
+        join_code,
         derived_credential,
         device_id,
     )
 
 
-def recover_personal_key(runtime, personal_key: str, device_id: str):
+def recover_personal_key(runtime, personal_key: str, device_id: str, *, event_id: str = EVENT_ID, join_code: str = JOIN_CODE):
     """Restore an existing PREASSIGNED participant after registration closes."""
-    derived_credential = derive_personal_key_credential(EVENT_ID, personal_key)
+    derived_credential = derive_personal_key_credential(event_id, personal_key)
     return runtime.recover_team_formation_participant(
-        JOIN_CODE,
+        join_code,
         derived_credential,
         device_id,
     )
@@ -75,7 +79,7 @@ def _event_team_formation_phase(event: dict | None) -> str:
     return str(formation.get("Phase") or "").strip().upper()
 
 
-def authenticate_personal_key(runtime, event: dict, personal_key: str, device_id: str):
+def authenticate_personal_key(runtime, event: dict, personal_key: str, device_id: str, *, event_id: str = EVENT_ID, join_code: str = JOIN_CODE):
     """Use claim only during registration; recovery preserves existing identity later.
 
     Team Formation V1 intentionally refuses a PREASSIGNED claim after
@@ -84,25 +88,25 @@ def authenticate_personal_key(runtime, event: dict, personal_key: str, device_id
     """
     phase = _event_team_formation_phase(event)
     if phase in {"FORMATION_LOCKED", "CAPTAIN_SELECTION", "ACTIVE"}:
-        return recover_personal_key(runtime, personal_key, device_id)
-    return claim_personal_key(runtime, personal_key, device_id)
+        return recover_personal_key(runtime, personal_key, device_id, event_id=event_id, join_code=join_code)
+    return claim_personal_key(runtime, personal_key, device_id, event_id=event_id, join_code=join_code)
 
 
-def _valid_identity(player: dict | None) -> bool:
+def _valid_identity(player: dict | None, event_id: str) -> bool:
     return bool(
         player
-        and str(player.get("EventID", "")) == EVENT_ID
+        and str(player.get("EventID", "")) == event_id
         and player.get("ParticipantID")
         and player.get("TeamID")
         and player.get("SessionToken")
     )
 
 
-def _restore_session(runtime) -> dict | None:
+def _restore_session(runtime, event_id: str) -> dict | None:
     """Restore from the canonical session token; never from editable identity."""
-    if str(st.session_state.get("participant_event_id", "")) == EVENT_ID:
+    if str(st.session_state.get("participant_event_id", "")) == event_id:
         return {
-            "EventID": EVENT_ID,
+            "EventID": event_id,
             "ParticipantID": st.session_state.get("participant_id", ""),
             "TeamID": st.session_state.get("participant_team_id", ""),
             "Team": st.session_state.get("participant_team", ""),
@@ -119,18 +123,18 @@ def _restore_session(runtime) -> dict | None:
         player = runtime.get_player_by_token(session_token)
     except RuntimeDatabaseError:
         return None
-    if not _valid_identity(player):
+    if not _valid_identity(player, event_id):
         return None
     restore_participant_identity(player, fallback_token=session_token)
     return player
 
 
-def _persist_session(player: dict) -> None:
+def _persist_session(player: dict, event_id: str, join_code: str) -> None:
     """Persist only routing, device and canonical session references."""
     desired = {
-        "join_code": JOIN_CODE,
+        "join_code": join_code,
         "personal_key": "1",
-        "event_id": EVENT_ID,
+        "event_id": event_id,
         "device_id": st.session_state.get("participant_device_id", ""),
         "session_token": player.get("SessionToken", ""),
     }
@@ -239,21 +243,22 @@ def _render_post_reveal_experience(runtime, player: dict, device_id: str) -> boo
 
 def render_maxis_personal_key_login() -> None:
     runtime = get_standard_database()
+    event_id, join_code = maxis_personal_key_event()
     device_id = participant_device_id()
-    player = _restore_session(runtime)
+    player = _restore_session(runtime, event_id)
 
-    if _valid_identity(player):
-        _persist_session(player)
+    if _valid_identity(player, event_id):
+        _persist_session(player, event_id, join_code)
         if _render_post_reveal_experience(runtime, player, device_id):
             return
         _render_reveal(player)
         return
 
     try:
-        event = runtime.get_event_by_join_code(JOIN_CODE)
+        event = runtime.get_event_by_join_code(join_code)
     except RuntimeDatabaseError:
         event = None
-    if not event or str(event.get("EventID", "")) != EVENT_ID:
+    if not event or str(event.get("EventID", "")) != event_id:
         st.error("Maxis Mission AI is not available yet.")
         return
 
@@ -275,15 +280,15 @@ def render_maxis_personal_key_login() -> None:
         return
 
     try:
-        player = authenticate_personal_key(runtime, event, personal_key, device_id)
+        player = authenticate_personal_key(runtime, event, personal_key, device_id, event_id=event_id, join_code=join_code)
     except (RuntimeDatabaseError, ValueError):
         player = None
 
-    if not _valid_identity(player) or player.get("RecoveryRequired"):
+    if not _valid_identity(player, event_id) or player.get("RecoveryRequired"):
         st.error(INVALID_KEY_MESSAGE)
         return
 
     restore_participant_identity(player)
-    st.session_state["participant_join_code"] = JOIN_CODE
-    _persist_session(player)
+    st.session_state["participant_join_code"] = join_code
+    _persist_session(player, event_id, join_code)
     st.rerun()
