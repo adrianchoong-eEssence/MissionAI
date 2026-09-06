@@ -57,3 +57,13 @@ def test_dedicated_live_deployment_is_event_scoped_without_repointing_uat_by_url
     assert "MAXIS_PERSONAL_KEY_JOIN_CODE" in service
     assert "maxis_personal_key_event()" in screen
     assert "derive_personal_key_credential(event_id, personal_key)" in screen
+
+
+def test_dedicated_live_streamlit_entrypoint_reuses_participant_runtime():
+    root = Path(__file__).resolve().parents[1]
+    entrypoint = (root / "Participant_Maxis_Live.py").read_text(encoding="utf-8")
+    service = (root / "services/maxis_personal_key_event.py").read_text(encoding="utf-8")
+    assert "runpy.run_path" in entrypoint
+    assert 'with_name("Participant.py")' in entrypoint
+    assert "MAXIS_PERSONAL_KEY_EVENT_ID" in service
+    assert "MAXIS_PERSONAL_KEY_JOIN_CODE" in service
