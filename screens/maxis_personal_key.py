@@ -20,6 +20,7 @@ from services.maxis_personal_key_event import (
     DEFAULT_JOIN_CODE as JOIN_CODE,
     maxis_personal_key_event,
 )
+from services.maxis_live_state import watch_maxis_live_state
 from services.maxis_team_formation_gate import country_reveal_is_active, team_formation_phase
 
 
@@ -249,6 +250,10 @@ def render_maxis_personal_key_login() -> None:
 
     if _valid_identity(player, event_id):
         _persist_session(player, event_id, join_code)
+        # The Personal Key shell does not traverse screens.participant's
+        # generic watcher.  This fragment reads the same canonical workspace
+        # and reloads this page only after a live state transition.
+        watch_maxis_live_state(runtime, player["SessionToken"])
         if _render_post_reveal_experience(runtime, player, device_id):
             return
         _render_reveal(player)
