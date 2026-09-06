@@ -320,7 +320,11 @@ def test_board_review_never_moves_service_role_work_into_participant_code():
 
 
 def test_039_review_integration_does_not_modify_its_frozen_migration_contract():
-    # 040 is a separately scoped terminal-lifecycle migration.  This 039
-    # integration must neither depend on nor rewrite the review migration.
+    # Later additive migrations are permitted, but they must never replace or
+    # depend on the frozen 039 review/reopen contract.
     assert (ROOT / "supabase/039_theme_park_race_review_reopen_contract.sql").is_file()
-    assert not list((ROOT / "supabase").glob("041*.sql"))
+    later_sources = list((ROOT / "supabase").glob("041*.sql"))
+    assert all(
+        "exos_v2_theme_park_race_board_review" not in source.read_text(encoding="utf-8")
+        for source in later_sources
+    )
