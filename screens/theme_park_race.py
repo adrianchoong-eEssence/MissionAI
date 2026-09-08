@@ -1700,6 +1700,11 @@ def render_theme_park_race_facilitator(db, control, event_id):
         return
     _inject_facilitator_theme()
 
+    # Keep the disposable AIA UAT grouping unmistakable in the normal,
+    # canonical Mission Control surface without changing any other event's UI.
+    if str(event_id).upper() == "AIA-TECH-20261023-UAT":
+        st.warning("AIA TECH UAT — SYNTHETIC ROSTER: 25 Quest teams × 10 participants. This is disposable UAT data, not the final AIA grouping.")
+
     phase = str(workspace.get("TeamFormationPhase", "")).upper()
     runtime_phase = str(workspace.get("RuntimePhase", "READY")).upper()
     lifecycle = str(workspace.get("Lifecycle", "")).upper()

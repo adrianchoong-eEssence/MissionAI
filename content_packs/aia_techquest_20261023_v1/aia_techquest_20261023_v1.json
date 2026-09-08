@@ -1,0 +1,70 @@
+{
+  "PackageSchemaVersion": 1,
+  "PackageKind": "EXOS_AIA_TECHQUEST_CONTENT",
+  "PackageID": "AIA_TECHQUEST_20261023_V1",
+  "PackageVersion": "1.1.0-disposable-uat-candidate",
+  "LocalOnly": true,
+  "ActivationStatus": "DISPOSABLE_UAT_CONTENT_PENDING_ADRIAN_APPROVAL",
+  "Notes": [
+    "This package is configuration only. It never creates an event, sends traffic, or deploys an app.",
+    "The synthetic 250-person roster is disposable certification data. Replace it with the authoritative roster before the event is created.",
+    "Ride references are limited to attractions already verified in the proven Genting mission library; UAT availability remains an operator control.",
+    "The announced return deadline is an EventState/operator value; it is not hard-coded into participant content."
+  ],
+  "VenueReference": {
+    "VenueName": "Genting SkyWorlds / GICC",
+    "SiteRecceGate": "Every ride remains subject to operator status, safe evidence practice, accessibility, and placement confirmation before live use.",
+    "AttractionNames": "Verified mission-library references only; UAT candidates, not final programme approval."
+  },
+  "EventBlueprint": {
+    "EventID": "{{EVENT_ID}}",
+    "Client": "AIA Tech",
+    "EventName": "TechQuest: Thrills without Frills",
+    "EventDate": "2026-10-23",
+    "ExpectedParticipants": 250,
+    "TeamStructure": {
+      "FormationMode": "PREASSIGNED",
+      "TeamCount": "CONFIGURABLE_BEFORE_ROSTER_FREEZE",
+      "CertificationDistribution": {"TeamCount": 25, "CapacityPerTeam": 10},
+      "IdentityKind": "CONFIGURED_GENERIC_TEAM_IDENTITY"
+    },
+    "TeamFormationConfiguration": {
+      "SchemaVersion": 1,
+      "Mode": "PREASSIGNED",
+      "RosterAuthority": "AUTHORITATIVE_ROSTER_ONLY",
+      "AttendanceStates": ["PREASSIGNED", "PRESENT", "ABSENT"],
+      "CaptainLifecycle": ["CLAIM", "TRANSFER", "RECOVER", "CLEAR"],
+      "ActivationRequirement": "EXACTLY_ONE_EFFECTIVE_CAPTAIN_PER_ACTIVE_TEAM"
+    },
+    "RaceConfiguration": {
+      "SchemaVersion": 1,
+      "EngineKind": "THEME_PARK_RACE",
+      "StrategyMode": "OPEN_MISSION_BOARD",
+      "RuntimePhase": "READY",
+      "MissionBoard": {"MaximumConcurrentSelections": 1},
+      "ParticipantInstruction": "YOU DO NOT NEED TO COMPLETE EVERY MISSION. CHOOSE WISELY. MAXIMISE YOUR SCORE. RETURN BY THE ANNOUNCED DEADLINE.",
+      "Projector": {"DefaultView": "TEAM_PROGRESS", "ShowEvidence": false, "ShowTeamStrategy": false, "PollSeconds": 5}
+    },
+    "ScoringPolicy": {
+      "Ledger": "EXISTING_SCORE_LEDGER_ONLY",
+      "Participation": "PARTICIPATION_PRORATED_FROM_CANONICAL_PRESENT_ROSTER",
+      "Rubric": "FACILITATOR_RUBRIC",
+      "Adjustment": "CANONICAL_P0_C_AUDITED_OPERATION",
+      "WalletCredits": {"Enabled": false}
+    }
+  },
+  "MissionBlueprints": [
+    {"Code":"RIDE-SAMBA","Category":"RIDES","MissionClass":"RIDE","DisplayName":"Samba Gliders","Maximum":80,"EvidenceType":"PHOTO","ParticipationProrated":true,"ScoringMode":"PARTICIPATION_PRORATED","Status":"CONFIGURABLE_UAT_CANDIDATE"},
+    {"Code":"RIDE-APES","Category":"RIDES","MissionClass":"RIDE","DisplayName":"Invasion Planet Apes","Maximum":100,"EvidenceType":"PHOTO_OR_VIDEO","ParticipationProrated":true,"ScoringMode":"PARTICIPATION_PRORATED","Status":"CONFIGURABLE_UAT_CANDIDATE"},
+    {"Code":"RIDE-INDEPENDENCE","Category":"RIDES","MissionClass":"RIDE","DisplayName":"Independence Day Defiance","Maximum":120,"EvidenceType":"PHOTO_OR_VIDEO","ParticipationProrated":true,"ScoringMode":"PARTICIPATION_PRORATED","Status":"CONFIGURABLE_UAT_CANDIDATE"},
+    {"Code":"RIDE-ACORN","Category":"RIDES","MissionClass":"RIDE","DisplayName":"Acorn Adventure","Maximum":140,"EvidenceType":"PHOTO","ParticipationProrated":true,"ScoringMode":"PARTICIPATION_PRORATED","Status":"CONFIGURABLE_UAT_CANDIDATE"},
+    {"Code":"BOOT-CAMP","Category":"TASKS","MissionClass":"STANDARD","DisplayName":"Boot Camp Training","Maximum":150,"EvidenceType":"PHOTO_OR_VIDEO","ParticipationProrated":true,"ScoringMode":"PARTICIPATION_PRORATED","Status":"CONFIGURABLE_UAT_CANDIDATE"},
+    {"Code":"MANNEQUIN","Category":"TASKS","MissionClass":"BONUS","DisplayName":"Mannequin Challenge","Maximum":140,"EvidenceType":"PHOTO_OR_VIDEO","ParticipationProrated":false,"ScoringMode":"FACILITATOR_RUBRIC","Rubric":true,"Status":"CONFIGURABLE_UAT_CANDIDATE"},
+    {"Code":"AI-LAB","Category":"TASKS","MissionClass":"STANDARD","DisplayName":"Human × AI Field Lab","Maximum":120,"EvidenceType":"PHOTO","ParticipationProrated":false,"ScoringMode":"FACILITATOR_RUBRIC","Rubric":true,"Status":"CONFIGURABLE_UAT_CANDIDATE"},
+    {"Code":"INSIGHT","Category":"TASKS","MissionClass":"STANDARD","DisplayName":"Observation & Exploration Sprint","Maximum":100,"EvidenceType":"PHOTO","ParticipationProrated":false,"ScoringMode":"TEAM_FULL","Status":"CONFIGURABLE_UAT_CANDIDATE"},
+    {"Code":"SECRET-MOMENTUM","Category":"SECRET MISSIONS","MissionClass":"SECRET","DisplayName":"Mission Momentum","Maximum":90,"EvidenceType":"PHOTO_OR_VIDEO","ParticipationProrated":false,"ScoringMode":"TEAM_FULL","SecretState":"RELEASED","Status":"CONFIGURABLE_UAT_CANDIDATE"},
+    {"Code":"SECRET-SIGNAL","Category":"SECRET MISSIONS","MissionClass":"SECRET","DisplayName":"Secret Team Signal","Maximum":100,"EvidenceType":"VIDEO","ParticipationProrated":false,"ScoringMode":"FACILITATOR_RUBRIC","Rubric":true,"SecretState":"RELEASED","Status":"CONFIGURABLE_UAT_CANDIDATE"}
+  ],
+  "EvidencePolicy": {"PHOTO": "PRIVATE_STORAGE", "VIDEO": {"PrivateStorage": true, "RecommendedSeconds": "5-10", "HardLimitMB": 50, "Fallback": "PHOTO_WHEN_CONFIGURED"}},
+  "AskMissionAI": {"Enabled": true, "Scope": "ADVISORY_ONLY", "MayUse": ["text question", "optional screenshot/photo", "current mission context", "team progress", "mission rules"], "MayNotUse": ["scoring", "submission", "review", "Captain mutation", "runtime mutation"]}
+}
