@@ -696,6 +696,23 @@ class StandardCoreV2Adapter:
             "p_submission_payload": dict(submission_payload or {}),
         }, admin=False)
 
+    def get_theme_park_race_participation_preview(self, session_token, activity_id):
+        """Return the server-canonical PRESENT roster for this Captain only."""
+        return self._rpc("exos_v2_theme_park_race_participation_preview", {
+            "p_session_token": str(session_token or ""),
+            "p_activity_id": str(activity_id or ""),
+        }, admin=False)
+
+    def submit_theme_park_race_participation(self, session_token, activity_id,
+                                              submission_payload, completing_participant_ids):
+        """Submit attendance-backed participation through the canonical RPC."""
+        return self._rpc("exos_v2_theme_park_race_submit_participation", {
+            "p_session_token": str(session_token or ""),
+            "p_activity_id": str(activity_id or ""),
+            "p_submission_payload": dict(submission_payload or {}),
+            "p_completing_participant_ids": list(completing_participant_ids or []),
+        }, admin=False)
+
     def record_theme_park_race_ride_outcome(self, session_token, activity_id, attempt_status, payload=None):
         return self._rpc("exos_v2_theme_park_race_board_record_ride_outcome", {
             "p_session_token": session_token,
@@ -730,6 +747,28 @@ class StandardCoreV2Adapter:
             "p_reason": str(reason or ""),
             "p_idempotency_key": str(idempotency_key or "").strip()
             or f"theme-park-race-board-review|{submission}|{revision}|{mapped}",
+        })
+
+    def review_theme_park_race_scored_submission(self, submission_id, expected_submitted_at, decision,
+                                                  rubric_scores=None, actor="", reason="", idempotency_key=""):
+        """Review an opt-in participation/rubric revision without client score authority."""
+        submission = str(submission_id or "").strip()
+        revision = str(expected_submitted_at or "").strip()
+        reviewer = str(actor or "").strip()
+        if not submission or not revision or not reviewer:
+            raise RuntimeDatabaseError(
+                "Theme Park Race scored review requires a submission, its submitted-at revision, and a facilitator identity."
+            )
+        mapped = "APPROVE" if str(decision).upper() in {"APPROVE", "APPROVED"} else "REJECT"
+        return self._rpc("exos_v2_theme_park_race_review_scored_submission", {
+            "p_submission_id": submission,
+            "p_expected_submitted_at": revision,
+            "p_decision": mapped,
+            "p_rubric_scores": dict(rubric_scores or {}),
+            "p_actor": reviewer,
+            "p_reason": str(reason or ""),
+            "p_idempotency_key": str(idempotency_key or "").strip()
+            or f"theme-park-race-scored-review|{submission}|{revision}|{mapped}",
         })
 
     def set_theme_park_race_mission_operation(self, event_id, activity_id, operational_status, secret_state, actor):
@@ -970,6 +1009,7 @@ class StandardCoreV2Adapter:
             "FacilitatorVerificationRequest": payload.get("FacilitatorVerificationRequest", ""),
             "CanonicalTeamMemberCount": payload.get("CanonicalTeamMemberCount", ""),
             "RequiredRideParticipants": payload.get("RequiredRideParticipants", ""),
+            "Participation": _dict(payload.get("Participation")),
         }
 
     def get_submissions(self, event_id):

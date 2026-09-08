@@ -221,7 +221,15 @@ def configuration_contract() -> dict[str, Any]:
                 },
             },
             "ReviewRequired": True,
-            "Scoring": {"Enabled": True, "Maximum": None},
+            "Scoring": {
+                "Enabled": True,
+                "Maximum": None,
+                "Mode": "TEAM_FULL | PARTICIPATION_PRORATED | FACILITATOR_RUBRIC",
+                "Rounding": "HALF_UP",
+                "Rubric": {
+                    "Criteria": [{"ID": "<criterion-id>", "Label": "<criterion>", "Weight": 1}],
+                },
+            },
         },
         "OpenMissionBoard": {
             "StrategyMode": OPEN_MISSION_BOARD,
@@ -302,6 +310,22 @@ def normalise_station(activity: dict[str, Any], fallback_order: int = 1) -> dict
         "Scoring": {
             "Enabled": _bool(scoring.get("Enabled"), True),
             "Maximum": _number(scoring.get("Maximum")),
+            "Mode": _upper(scoring.get("Mode"), "TEAM_FULL"),
+            # All eligible score calculations use positive numeric half-up
+            # rounding. This immutable label travels to client projections
+            # and snapshots; other configured values are rejected below.
+            "Rounding": _upper(scoring.get("Rounding"), "HALF_UP"),
+            "Rubric": {
+                "Criteria": [
+                    {
+                        "ID": _text(_dict(item).get("ID")),
+                        "Label": _text(_dict(item).get("Label")),
+                        "Weight": _number(_dict(item).get("Weight")),
+                    }
+                    for item in _list(_dict(scoring.get("Rubric")).get("Criteria"))
+                    if _text(_dict(item).get("ID"))
+                ],
+            },
         },
         "MissionClass": _upper(raw.get("MissionClass"), "STANDARD"),
         "PrivateReferenceImage": deepcopy(_dict(raw.get("PrivateReferenceImage"))),
@@ -387,6 +411,30 @@ def validate_configuration(
                 errors.append(f"{label}: ride evidence pathways are invalid.")
             if float(_number(ride.get("FullParticipationBonus")) or 0) != 0:
                 errors.append(f"{label}: full participation must not create a score bonus.")
+        scoring = _dict(station.get("Scoring"))
+        scoring_mode = _upper(scoring.get("Mode"), "TEAM_FULL")
+        if scoring_mode not in SCORING_MODES:
+            errors.append(f"{label}: scoring Mode is invalid.")
+        if scoring_mode in {"PARTICIPATION_PRORATED", "FACILITATOR_RUBRIC"}:
+            maximum = _number(scoring.get("Maximum"))
+            if maximum is None or maximum < 0:
+                errors.append(f"{label}: opt-in scoring requires a non-negative maximum.")
+            if _upper(scoring.get("Rounding"), "HALF_UP") != "HALF_UP":
+                errors.append(f"{label}: opt-in scoring rounding must be HALF_UP.")
+        if scoring_mode == "FACILITATOR_RUBRIC":
+            criteria = _list(_dict(scoring.get("Rubric")).get("Criteria"))
+            seen_criteria = set()
+            if not criteria:
+                errors.append(f"{label}: facilitator rubric requires at least one criterion.")
+            for criterion in criteria:
+                item = _dict(criterion)
+                criterion_id = _text(item.get("ID"))
+                weight = _number(item.get("Weight"))
+                if not criterion_id or criterion_id in seen_criteria:
+                    errors.append(f"{label}: facilitator rubric criterion IDs must be unique.")
+                if weight is not None and weight <= 0:
+                    errors.append(f"{label}: facilitator rubric criterion weights must be positive.")
+                seen_criteria.add(criterion_id)
     if config["StrategyMode"] == ROUTE_STRATEGY:
         routes = config["TeamRoutes"]
         for team_id in sorted(expected_teams):
@@ -800,6 +848,7 @@ def facilitator_projection(
                 "ActivityID": station.get("ActivityID"),
                 "DisplayName": station.get("DisplayName"),
                 "MissionClass": station.get("MissionClass", "STANDARD"),
+                "Scoring": deepcopy(_dict(station.get("Scoring"))),
                 "OperationalStatus": _dict(config["MissionBoard"]["MissionOperations"].get(_text(station.get("ActivityID")))).get("OperationalStatus", "AVAILABLE"),
                 "SecretState": _dict(config["MissionBoard"]["MissionOperations"].get(_text(station.get("ActivityID")))).get("SecretState", "RELEASED"),
             }

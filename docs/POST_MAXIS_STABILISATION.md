@@ -46,6 +46,9 @@ outside all fixtures.
 | `042_post_maxis_p0_attendance.sql` | additive, event-opt-in canonical attendance contract | installed/certified on authorised dedicated project (2026-09-08) |
 | `042_post_maxis_p0_attendance_rollback.sql` | guarded, data-preserving rollback for an unused attendance contract | certified guard source |
 | `042_post_maxis_p0_attendance` verifier/certification package | read-only catalogue verification plus exact `CERT-P0A-*` disposable fixture | PASS; zero fixture residue |
+| `043_post_maxis_p0_participation_rubric_scoring.sql` | additive, explicit Theme Park Race participation/rubric scoring | installed/certified on authorised dedicated project (2026-09-08) |
+| `043a_post_maxis_p0_participation_rubric_guard_consumption.sql` | single-use canonical-write permit correction | installed/certified; no data or configuration change |
+| `043` verifier/certification package | read-only ACL/definition verification plus exact `CERT-P0B-*` and separate-connection `CERT-P0B-CONC-*` fixtures | PASS; zero fixture residue |
 | `043_post_maxis_public_projector.sql` | additive reusable public projection | planned |
 | Standard participant/facilitator refresh, evidence and review UX | application-only | planned |
 | Post-event reporting projection | read-only application/RPC projection | planned |

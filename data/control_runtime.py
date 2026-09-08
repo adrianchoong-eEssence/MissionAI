@@ -156,6 +156,15 @@ class ControlRuntime:
             submission_id, expected_submitted_at, decision, score, actor, reason, idempotency_key,
         )
 
+    def review_theme_park_race_scored_submission(self, submission_id, expected_submitted_at, decision,
+                                                  rubric_scores=None, actor="", reason="", idempotency_key=""):
+        """Facilitator-only canonical P0-B score review facade."""
+        return self._run(
+            self.runtime.review_theme_park_race_scored_submission,
+            submission_id, expected_submitted_at, decision, rubric_scores,
+            actor, reason, idempotency_key,
+        )
+
     def set_theme_park_race_mission_operation(self, event_id, activity_id, operational_status, secret_state, actor):
         return self._run(
             self.runtime.set_theme_park_race_mission_operation,

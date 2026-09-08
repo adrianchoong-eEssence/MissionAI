@@ -19,7 +19,7 @@ from data.google_drive import (
     upload_photo,
 )
 from data.runtime_database import RuntimeDatabaseError
-from engines.theme_park_race import projector_projection
+from engines.theme_park_race import participation_prorated_score, projector_projection
 from data.upload_safety import upload_error_message
 
 
@@ -359,7 +359,8 @@ def _workspace(db, session_token):
     return db.runtime.theme_park_race_participant_workspace(session_token)
 
 
-def submit_theme_park_race_review(control, strategy_mode, submission, *, decision, score, actor, notes):
+def submit_theme_park_race_review(control, strategy_mode, submission, *, decision, score, actor, notes,
+                                  scoring=None, rubric_scores=None):
     """Route one facilitator decision to the canonical contract for this mode.
 
     OPEN_MISSION_BOARD reviews go to the installed 039 board contract carrying
@@ -379,12 +380,20 @@ def submit_theme_park_race_review(control, strategy_mode, submission, *, decisio
     if not submitted_at:
         return {"Reviewed": False, "Level": "warning", "Message": _STALE_REVISION_NOTICE}
     mapped = "APPROVE" if approved else "REJECT"
+    scoring_mode = str((scoring or {}).get("Mode", "TEAM_FULL")).upper()
     try:
-        control.review_theme_park_race_board_submission(
-            submission_id, submitted_at, mapped,
-            score=score if approved else 0, actor=actor, reason=notes,
-            idempotency_key=f"theme-park-race-board-review|{submission_id}|{submitted_at}|{mapped}",
-        )
+        if scoring_mode in {"PARTICIPATION_PRORATED", "FACILITATOR_RUBRIC"}:
+            control.review_theme_park_race_scored_submission(
+                submission_id, submitted_at, mapped,
+                rubric_scores=rubric_scores or {}, actor=actor, reason=notes,
+                idempotency_key=f"theme-park-race-scored-review|{submission_id}|{submitted_at}|{mapped}",
+            )
+        else:
+            control.review_theme_park_race_board_submission(
+                submission_id, submitted_at, mapped,
+                score=score if approved else 0, actor=actor, reason=notes,
+                idempotency_key=f"theme-park-race-board-review|{submission_id}|{submitted_at}|{mapped}",
+            )
     except RuntimeDatabaseError as error:
         if "revision is stale" in str(error).casefold():
             return {"Reviewed": False, "Level": "warning", "Message": _STALE_REVISION_NOTICE}
@@ -585,6 +594,10 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
     supports_photo = evidence_type in {"PHOTO", "PHOTO_OR_VIDEO"}
     supports_video = evidence_type in {"VIDEO", "PHOTO_OR_VIDEO"}
     activity_id = mission["ActivityID"]
+    scoring = mission.get("Scoring", {}) or {}
+    scoring_mode = str(scoring.get("Mode", "TEAM_FULL")).upper()
+    participation_preview = {}
+    completing_ids = []
     submitting_key = f"theme_race_submitting_{activity_id}"
     if show_title:
         st.subheader(mission.get("DisplayName") or "Current mission")
@@ -592,6 +605,43 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
         st.write(mission["ParticipantInstruction"])
     if mission.get("SafetyNote"):
         st.warning(f"⚠️ {mission['SafetyNote']}")
+
+    # P0-B: the Captain sees only the canonical PRESENT roster from the
+    # server.  A browser never supplies a denominator or an arbitrary count.
+    # The RPC repeats Captain/session checks when the form is submitted.
+    if scoring_mode == "PARTICIPATION_PRORATED":
+        if captain_active:
+            try:
+                participation_preview = db.runtime.get_theme_park_race_participation_preview(
+                    st.session_state.get("participant_session_token", ""), activity_id,
+                ) or {}
+            except RuntimeDatabaseError as error:
+                st.warning(_participant_runtime_error(error))
+        present = participation_preview.get("PresentParticipants", []) if isinstance(participation_preview, dict) else []
+        present_ids = [str(row.get("ParticipantID", "")) for row in present if row.get("ParticipantID")]
+        present_labels = {
+            str(row.get("ParticipantID", "")): str(row.get("DisplayName") or row.get("ParticipantID", ""))
+            for row in present if row.get("ParticipantID")
+        }
+        denominator = int(participation_preview.get("PresentTeamSize", len(present_ids)) or 0)
+        maximum = participation_preview.get("MissionMaximum", scoring.get("Maximum", 0))
+        if present_ids:
+            completing_ids = st.multiselect(
+                "Who completed this mission?", present_ids,
+                format_func=lambda participant_id: present_labels.get(participant_id, participant_id),
+                key=f"theme_race_participation_{activity_id}",
+                disabled=not captain_active,
+            )
+            eligible = participation_prorated_score(
+                maximum, participants_completing=len(completing_ids), present_team_size=denominator,
+            )
+            percent = (100 * len(completing_ids) / denominator) if denominator else 0
+            st.caption(
+                f"Canonical PRESENT roster: {len(completing_ids)}/{denominator} · "
+                f"{percent:.0f}% · eligible score {eligible}/{maximum}"
+            )
+        elif captain_active:
+            st.warning("No PRESENT participants are available for this team. Ask a facilitator to record attendance first.")
 
     text = ""
     if text_config.get("Required"):
@@ -745,10 +795,16 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
                 }
                 try:
                     _submit_trace(activity_id, RPC_STARTED=True)
-                    db.runtime.save_theme_park_race_submission(
-                        st.session_state.get("participant_session_token", ""), activity_id, payload,
-                        strategy_mode=workspace.get("StrategyMode", ""),
-                    )
+                    if scoring_mode == "PARTICIPATION_PRORATED":
+                        db.runtime.submit_theme_park_race_participation(
+                            st.session_state.get("participant_session_token", ""), activity_id,
+                            payload, completing_ids,
+                        )
+                    else:
+                        db.runtime.save_theme_park_race_submission(
+                            st.session_state.get("participant_session_token", ""), activity_id, payload,
+                            strategy_mode=workspace.get("StrategyMode", ""),
+                        )
                     _submit_trace(activity_id, RPC_COMPLETED=True)
                 except RuntimeDatabaseError as error:
                     _submit_trace(activity_id, RPC_COMPLETED=False, ERROR_CLASS=type(error).__name__)
@@ -807,6 +863,8 @@ def _participant_runtime_error(error: Exception) -> str:
         return "Only your Mission Captain on their active device can do this. Ask them to restore Mission Captain access if needed."
     if "evidence" in text or "numeric result" in text or "ride completion requires" in text:
         return "Your evidence is incomplete or does not match this mission. Check the mission card and try again."
+    if "participation" in text or "present participants" in text:
+        return "The present roster or completion selection changed. Check the canonical roster and try again."
     if "not active" in text:
         return "The mission is not active yet. Please wait for your facilitator."
     return f"Mission AI could not complete that action. Please try again or check with your facilitator. ({error})"
@@ -1721,6 +1779,10 @@ def render_theme_park_race_facilitator(db, control, event_id):
         str(row.get("ActivityID", "")): str(row.get("MissionClass") or "STANDARD").upper()
         for row in workspace.get("MissionOperations", [])
     }
+    mission_scoring = {
+        str(row.get("ActivityID", "")): dict(row.get("Scoring") or {})
+        for row in workspace.get("MissionOperations", [])
+    }
     for submission in queue:
         submission_id = submission.get("SubmissionID", "")
         team_id = str(submission.get("TeamID", ""))
@@ -1728,6 +1790,8 @@ def render_theme_park_race_facilitator(db, control, event_id):
         team_label = team_names.get(team_id) or str(submission.get("TeamName") or team_id or "Team")
         mission_label = mission_names.get(activity_id) or activity_id or "Mission"
         mission_class = mission_classes.get(activity_id, "STANDARD")
+        scoring = mission_scoring.get(activity_id, {})
+        scoring_mode = str(scoring.get("Mode", "TEAM_FULL")).upper()
         # A pending review is the facilitator's work: never hide it behind a
         # collapsed panel they have to discover -- expanded=True, and the
         # first thing inside is the structured REVIEW REQUIRED summary.
@@ -1779,11 +1843,36 @@ def render_theme_park_race_facilitator(db, control, event_id):
                     st.image(post_ride_photo, caption="Private post-ride verification", width="stretch")
                 if submission.get("FacilitatorVerificationRequest"):
                     st.write(submission["FacilitatorVerificationRequest"])
-            score = st.number_input(
-                "Score (applied on approve only)",
-                value=float(submission.get("Score") or 0),
-                key=f"theme_race_score_{submission_id}",
-            )
+            rubric_scores = {}
+            if scoring_mode == "PARTICIPATION_PRORATED":
+                participation = submission.get("Participation", {}) or {}
+                completing = int(participation.get("ParticipantsCompleting", 0) or 0)
+                denominator = int(participation.get("PresentTeamSize", 0) or 0)
+                eligible = participation.get("EligibleScore", 0)
+                maximum = participation.get("MissionMaximum", scoring.get("Maximum", 0))
+                st.info(
+                    f"Canonical participation snapshot: {completing}/{denominator} PRESENT participants · "
+                    f"eligible ceiling {eligible}/{maximum}. This is fixed for this submitted revision."
+                )
+                score = float(eligible or 0)
+            elif scoring_mode == "FACILITATOR_RUBRIC":
+                st.markdown("**Facilitator rubric**")
+                for criterion in ((scoring.get("Rubric") or {}).get("Criteria") or []):
+                    criterion_id = str(criterion.get("ID", "")).strip()
+                    label = str(criterion.get("Label") or criterion_id)
+                    if criterion_id:
+                        rubric_scores[criterion_id] = st.number_input(
+                            f"{label} (0–100)", min_value=0.0, max_value=100.0,
+                            value=0.0, key=f"theme_race_rubric_{submission_id}_{criterion_id}",
+                        )
+                st.caption(f"Configured maximum: {scoring.get('Maximum', 0)}. EXOS calculates the final weighted score.")
+                score = 0.0
+            else:
+                score = st.number_input(
+                    "Score (applied on approve only)",
+                    value=float(submission.get("Score") or 0),
+                    key=f"theme_race_score_{submission_id}",
+                )
             notes = st.text_input("Facilitator reason / notes", key=f"theme_race_notes_{submission_id}")
             if strategy_mode == OPEN_MISSION_BOARD:
                 st.caption(f"Reviewing revision submitted at {submission.get('SubmittedAt') or 'unknown'}.")
@@ -1795,7 +1884,11 @@ def render_theme_park_race_facilitator(db, control, event_id):
 
             approve, reject = st.columns(2)
             with approve:
-                st.caption("Approve and award the score above.")
+                st.caption(
+                    "Approve and record the canonical score."
+                    if scoring_mode in {"PARTICIPATION_PRORATED", "FACILITATOR_RUBRIC"}
+                    else "Approve and award the score above."
+                )
                 if st.button(
                     "✓ Approve", type="primary", width="stretch",
                     disabled=not actor, key=f"theme_race_approve_{submission_id}",
@@ -1803,6 +1896,7 @@ def render_theme_park_race_facilitator(db, control, event_id):
                     _queue_review_notice(event_id, submit_theme_park_race_review(
                         control, strategy_mode, submission,
                         decision="APPROVE", score=score, actor=actor, notes=notes,
+                        scoring=scoring, rubric_scores=rubric_scores,
                     ))
                     st.rerun()
             with reject:
@@ -1820,6 +1914,7 @@ def render_theme_park_race_facilitator(db, control, event_id):
                         _queue_review_notice(event_id, submit_theme_park_race_review(
                             control, strategy_mode, submission,
                             decision="REJECT", score=0, actor=actor, notes=notes,
+                            scoring=scoring, rubric_scores={},
                         ))
                         st.rerun()
 
