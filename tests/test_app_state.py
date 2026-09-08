@@ -56,6 +56,28 @@ st.write(event["EventID"])
         self.assertEqual(app.markdown[-1].value, "E2")
         self.assertEqual(app.exception, [])
 
+    def test_control_event_selection_replaces_a_stale_event_id_on_refresh(self):
+        app = AppTest.from_string(
+            """
+import streamlit as st
+from screens.app_state import ACTIVE_EVENT_KEY, select_active_event
+
+events = [{"EventID": "UAT", "EventName": "UAT"}, {"EventID": "LIVE", "EventName": "Live"}]
+if "event_id" not in st.query_params:
+    st.query_params["event_id"] = "UAT"
+if "loaded" not in st.session_state:
+    st.session_state.loaded = True
+    st.session_state[ACTIVE_EVENT_KEY] = st.query_params["event_id"]
+event = select_active_event(events, key="control_event")
+st.write(f"{event['EventID']}|{st.query_params['event_id']}")
+"""
+        )
+        app.run()
+        app.selectbox[0].select("LIVE").run()
+        self.assertEqual(app.markdown[-1].value, "LIVE|LIVE")
+        app.run()
+        self.assertEqual(app.markdown[-1].value, "LIVE|LIVE")
+
 
 if __name__ == "__main__":
     unittest.main()

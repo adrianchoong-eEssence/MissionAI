@@ -9,6 +9,7 @@ participant, submission, review and score records.
 from __future__ import annotations
 
 from copy import deepcopy
+from decimal import Decimal, ROUND_HALF_UP
 from math import ceil
 from typing import Any
 
@@ -37,6 +38,43 @@ MISSION_STATES = (
 )
 RIDE_ATTEMPT_STATES = ("ATTEMPTED", "COMPLETED", "ABORTED_BY_ATTRACTION", "TEAM_WITHDREW")
 RIDE_EVIDENCE_PATHWAYS = ("GROUND_CONTROL", "FULL_TEAM", "FACILITATOR_VERIFIED")
+SCORING_MODES = ("TEAM_FULL", "PARTICIPATION_PRORATED", "FACILITATOR_RUBRIC")
+
+
+def participation_prorated_score(maximum_score: int | float | str, *, participants_completing: int,
+                                 present_team_size: int) -> int:
+    """Return the immutable attendance-snapshot ceiling using half-up points.
+
+    The caller must provide canonical participant IDs, not a typed headcount.
+    Invalid denominators and selections are rejected rather than silently
+    changing a historical score after attendance correction.
+    """
+    maximum = Decimal(str(_number(maximum_score) or 0))
+    if maximum < 0 or present_team_size <= 0:
+        raise ValueError("A positive present team size and non-negative mission maximum are required.")
+    if participants_completing < 0 or participants_completing > present_team_size:
+        raise ValueError("Participants completing must be between zero and the present team size.")
+    return int((maximum * Decimal(participants_completing) / Decimal(present_team_size)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def facilitator_rubric_score(maximum_score: int | float | str, criteria: list[dict], scores: dict) -> int:
+    """Calculate a configured weighted 0–100 rubric without exceeding its cap."""
+    maximum = Decimal(str(_number(maximum_score) or 0))
+    if maximum < 0 or not criteria:
+        raise ValueError("A non-negative maximum and at least one rubric criterion are required.")
+    weighted = Decimal("0")
+    total_weight = Decimal("0")
+    for criterion in criteria:
+        key = _text(_dict(criterion).get("ID"))
+        weight = Decimal(str(_number(_dict(criterion).get("Weight")) or 0))
+        value = Decimal(str(_number(_dict(scores).get(key)) or 0))
+        if not key or weight <= 0 or value < 0 or value > 100:
+            raise ValueError("Rubric criteria and scores are invalid.")
+        weighted += weight * value
+        total_weight += weight
+    if total_weight <= 0:
+        raise ValueError("Rubric weights must be positive.")
+    return min(int(maximum), int((maximum * weighted / total_weight / Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)))
 
 
 def _text(value: Any) -> str:

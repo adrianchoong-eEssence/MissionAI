@@ -29,7 +29,12 @@ def _remember_widget_event(key):
     selected_id = str(st.session_state.get(key, "")).strip()
     if selected_id:
         st.session_state[ACTIVE_EVENT_KEY] = selected_id
-        if key == "control_event" and "facilitator_mode" in st.session_state:
+        # Control Centre runs a dedicated staging shell that intentionally has
+        # no generic ``facilitator_mode`` widget.  The old conditional left a
+        # stale URL event_id in place; the next rerun then overwrote the newly
+        # selected canonical event.  Selection is the authority here, so write
+        # the event-scoped resume parameter unconditionally for this control.
+        if key == "control_event":
             st.query_params["event_id"] = selected_id
 
 
