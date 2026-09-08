@@ -79,12 +79,30 @@ def test_disposable_certification_checks_bonus_clear_authority_and_maxis_sentine
     assert "CERT-P0C-20260908" in sql
     assert "MAXIS-20260907-MISSION-AI" in sql
     assert "conflicting adjustment retry mutated canonical score" in sql
+    assert "Outstanding collaboration" in sql
+    assert "Safety initiative" in sql
+    assert ") <> 205" in sql
     assert "cleared Captain retained submission authority" in sql
     assert "ABSENT participant claimed Captain authority" in sql
     assert "replacement Captain claim created invalid authority" in sql
     assert "historical Maxis sentinel changed" in sql
     assert "TRUNCATE" not in sql
     assert "DELETE FROM public.events_v2 WHERE event_id = 'CERT-P0C-20260908'" in sql
+
+
+def test_separate_connection_certification_covers_bonus_and_captain_races():
+    setup = (ROOT / "supabase" / "certification" /
+             "exos_v2_post_maxis_live_operations_concurrency_setup.sql").read_text(encoding="utf-8")
+    cleanup = (ROOT / "supabase" / "certification" /
+               "exos_v2_post_maxis_live_operations_concurrency_verify_cleanup.sql").read_text(encoding="utf-8")
+    assert "CERT-P0C-CONC-DUP" in setup
+    assert "CERT-P0C-CONC-DISTINCT-A" in setup
+    assert "clear/submission race" in setup
+    assert "captain_a_session_token" in setup
+    assert "duplicate adjustment request created more than one canonical ledger transaction" in cleanup
+    assert "concurrent clear/claim created dual Captain authority" in cleanup
+    assert "cleared Captain wrote a stale post-clear submission" in cleanup
+    assert "max(a.created_at)" in cleanup
 
 
 def test_control_and_adapter_route_only_to_canonical_operations():

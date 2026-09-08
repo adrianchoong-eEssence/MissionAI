@@ -22,17 +22,41 @@ BEGIN
              AND is_active AND team_formation_captain_participant_id IS NOT NULL) > 1 THEN
         RAISE EXCEPTION 'concurrent clear/claim created dual Captain authority';
     END IF;
+    IF (SELECT count(*) FROM public.submissions_v2
+         WHERE event_id='CERT-P0C-CONC-20260908'
+           AND activity_id='CERT-P0C-CONC-20260908-MISSION') > 1 THEN
+        RAISE EXCEPTION 'clear/submission race created duplicate canonical submission';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+          FROM public.submissions_v2 s
+         WHERE s.event_id='CERT-P0C-CONC-20260908'
+           AND s.submitted_at > (
+               SELECT max(a.created_at)
+                 FROM public.audit_log_v2 a
+                WHERE a.event_id=s.event_id
+                  AND a.action='TEAM_FORMATION_CAPTAIN_CLEARED'
+           )
+    ) THEN
+        RAISE EXCEPTION 'cleared Captain wrote a stale post-clear submission';
+    END IF;
 END;
 $$;
 
 SELECT set_config('exos.attendance_mutation','v1',true);
 SELECT set_config('exos.team_formation_write','CERT-P0C-CONC-20260908',true);
 DELETE FROM public.score_transactions_v2 WHERE event_id='CERT-P0C-CONC-20260908';
+DELETE FROM public.reviews_v2 WHERE event_id='CERT-P0C-CONC-20260908';
+DELETE FROM public.submissions_v2 WHERE event_id='CERT-P0C-CONC-20260908';
+DELETE FROM public.activity_runtime_v2 WHERE event_id='CERT-P0C-CONC-20260908';
 DELETE FROM public.participant_attendance_v2 WHERE event_id='CERT-P0C-CONC-20260908';
 DELETE FROM public.team_access_sessions_v2 WHERE event_id='CERT-P0C-CONC-20260908';
 DELETE FROM public.team_access_credentials_v2 WHERE event_id='CERT-P0C-CONC-20260908';
 DELETE FROM public.participant_sessions_v2 WHERE event_id='CERT-P0C-CONC-20260908';
 DELETE FROM public.participants_v2 WHERE event_id='CERT-P0C-CONC-20260908';
+DELETE FROM public.activities_v2 WHERE programme_id='CERT-P0C-CONC-20260908-PROGRAMME';
+DELETE FROM public.modules_v2 WHERE programme_id='CERT-P0C-CONC-20260908-PROGRAMME';
+DELETE FROM public.programmes_v2 WHERE programme_id='CERT-P0C-CONC-20260908-PROGRAMME';
 DELETE FROM public.teams_v2 WHERE event_id='CERT-P0C-CONC-20260908';
 DELETE FROM public.audit_log_v2 WHERE event_id='CERT-P0C-CONC-20260908';
 DELETE FROM public.events_v2 WHERE event_id='CERT-P0C-CONC-20260908';

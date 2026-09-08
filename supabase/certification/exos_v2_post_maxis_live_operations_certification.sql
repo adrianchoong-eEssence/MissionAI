@@ -112,13 +112,19 @@ SELECT public.exos_v2_theme_park_race_adjust_team_score(
     'CERT-P0C-20260908', 'CERT-P0C-20260908-A', 50, 'AI usage', 'CERT-P0C-FACILITATOR', 'CERT-P0C-BONUS-1'
 );
 SELECT public.exos_v2_theme_park_race_adjust_team_score(
+    'CERT-P0C-20260908', 'CERT-P0C-20260908-A', 150, 'Outstanding collaboration', 'CERT-P0C-FACILITATOR', 'CERT-P0C-BONUS-2'
+);
+SELECT public.exos_v2_theme_park_race_adjust_team_score(
+    'CERT-P0C-20260908', 'CERT-P0C-20260908-A', 25, 'Safety initiative', 'CERT-P0C-FACILITATOR', 'CERT-P0C-BONUS-3'
+);
+SELECT public.exos_v2_theme_park_race_adjust_team_score(
     'CERT-P0C-20260908', 'CERT-P0C-20260908-A', 50, 'AI usage', 'CERT-P0C-FACILITATOR', 'CERT-P0C-BONUS-1'
 );
 DO $$
 BEGIN
     BEGIN
         PERFORM public.exos_v2_theme_park_race_adjust_team_score(
-            'CERT-P0C-20260908', 'CERT-P0C-20260908-A', 150, 'conflicting change', 'CERT-P0C-FACILITATOR', 'CERT-P0C-BONUS-1'
+            'CERT-P0C-20260908', 'CERT-P0C-20260908-A', 151, 'conflicting change', 'CERT-P0C-FACILITATOR', 'CERT-P0C-BONUS-2'
         );
         RAISE EXCEPTION 'conflicting adjustment retry mutated canonical score';
     EXCEPTION WHEN OTHERS THEN
@@ -135,11 +141,11 @@ BEGIN
     SELECT public.exos_v2_theme_park_race_operator_status('CERT-P0C-20260908') INTO v_status;
     IF (SELECT count(*) FROM public.score_transactions_v2
          WHERE event_id = 'CERT-P0C-20260908'
-           AND source_reference ->> 'Operation' = 'TEAM_SCORE_ADJUSTMENT') <> 2
+           AND source_reference ->> 'Operation' = 'TEAM_SCORE_ADJUSTMENT') <> 4
        OR (SELECT sum(score_delta) FROM public.score_transactions_v2
            WHERE event_id = 'CERT-P0C-20260908'
-             AND source_reference ->> 'Operation' = 'TEAM_SCORE_ADJUSTMENT') <> 30
-       OR jsonb_array_length(v_status -> 'RecentScoreAdjustments') <> 2 THEN
+             AND source_reference ->> 'Operation' = 'TEAM_SCORE_ADJUSTMENT') <> 205
+       OR jsonb_array_length(v_status -> 'RecentScoreAdjustments') <> 4 THEN
         RAISE EXCEPTION 'canonical immutable adjustment ledger or operator projection is invalid';
     END IF;
 END;

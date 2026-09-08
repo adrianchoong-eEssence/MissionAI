@@ -49,8 +49,8 @@ outside all fixtures.
 | `043_post_maxis_p0_participation_rubric_scoring.sql` | additive, explicit Theme Park Race participation/rubric scoring | installed/certified on authorised dedicated project (2026-09-08) |
 | `043a_post_maxis_p0_participation_rubric_guard_consumption.sql` | single-use canonical-write permit correction | installed/certified; no data or configuration change |
 | `043` verifier/certification package | read-only ACL/definition verification plus exact `CERT-P0B-*` and separate-connection `CERT-P0B-CONC-*` fixtures | PASS; zero fixture residue |
-| `044_post_maxis_p0_live_operations.sql` | additive Theme Park Race score-adjustment, Captain-clear/reopen, PRESENT-Captain eligibility and operator projection contract | source-tested; awaiting explicit dedicated-project installation authorisation |
-| `044` verifier/certification package | read-only definition/ACL verification plus exact `CERT-P0C-*` and separate-connection `CERT-P0C-CONC-*` fixtures | source-tested; not yet executed against a database |
+| `044_post_maxis_p0_live_operations.sql` | additive Theme Park Race score-adjustment, Captain-clear/reopen, PRESENT-Captain eligibility and operator projection contract | installed/certified on authorised dedicated project (2026-09-08) |
+| `044` verifier/certification package | read-only definition/ACL verification plus exact `CERT-P0C-*` and separate-connection `CERT-P0C-CONC-*` fixtures | PASS; bonus idempotency/distinct adjustments, Captain clear/claim and clear/submit races verified; zero fixture residue |
 | `043_post_maxis_public_projector.sql` | additive reusable public projection | planned |
 | Standard participant/facilitator refresh, evidence and review UX | application-only | planned |
 | Post-event reporting projection | read-only application/RPC projection | planned |
