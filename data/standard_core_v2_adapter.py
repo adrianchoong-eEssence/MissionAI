@@ -550,6 +550,34 @@ class StandardCoreV2Adapter:
             "p_actor": actor, "p_reason": reason,
         })
 
+    # Post-Maxis P0-A attendance is deliberately event-opt-in. These
+    # service-only RPCs retain immutable participant/team identity and expose
+    # the canonical present-team denominator to future scoring only.
+    def configure_attendance(self, event_id, actor):
+        return self._rpc("exos_v2_configure_attendance", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_actor": str(actor or "").strip(),
+        })
+
+    def set_participant_attendance(self, event_id, participant_id, attendance_state, actor, reason=""):
+        return self._rpc("exos_v2_set_participant_attendance", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_participant_id": str(participant_id or "").strip(),
+            "p_attendance_state": str(attendance_state or "").strip().upper(),
+            "p_actor": str(actor or "").strip(),
+            "p_reason": str(reason or ""),
+        })
+
+    def get_attendance_summary(self, event_id):
+        return self._rpc("exos_v2_attendance_summary", {
+            "p_event_id": str(event_id or "").strip(),
+        })
+
+    def get_attendance_roster(self, event_id):
+        return self._rpc("exos_v2_attendance_roster", {
+            "p_event_id": str(event_id or "").strip(),
+        })
+
     def get_theme_park_race_stations(self, event_id):
         return project_theme_park_race_stations(self.get_programme_stages(event_id))
 

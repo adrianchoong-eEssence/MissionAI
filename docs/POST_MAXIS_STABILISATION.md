@@ -43,7 +43,9 @@ outside all fixtures.
 
 | Item | Category | Status |
 | --- | --- | --- |
-| `042_post_maxis_attendance_and_scoring.sql` | additive attendance/scoring/Captain/adjustment contract | planned |
+| `042_post_maxis_p0_attendance.sql` | additive, event-opt-in canonical attendance contract | installed/certified on authorised dedicated project (2026-09-08) |
+| `042_post_maxis_p0_attendance_rollback.sql` | guarded, data-preserving rollback for an unused attendance contract | certified guard source |
+| `042_post_maxis_p0_attendance` verifier/certification package | read-only catalogue verification plus exact `CERT-P0A-*` disposable fixture | PASS; zero fixture residue |
 | `043_post_maxis_public_projector.sql` | additive reusable public projection | planned |
 | Standard participant/facilitator refresh, evidence and review UX | application-only | planned |
 | Post-event reporting projection | read-only application/RPC projection | planned |

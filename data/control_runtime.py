@@ -133,6 +133,15 @@ class ControlRuntime:
             event_id, team_id, participant_id, actor, reason,
         )
 
+    def configure_attendance(self, event_id, actor):
+        return self._run(self.runtime.configure_attendance, event_id, actor)
+
+    def set_participant_attendance(self, event_id, participant_id, attendance_state, actor, reason=""):
+        return self._run(
+            self.runtime.set_participant_attendance,
+            event_id, participant_id, attendance_state, actor, reason,
+        )
+
     def set_theme_park_race_runtime_phase(self, event_id, runtime_phase, actor):
         return self._run(
             self.runtime.set_theme_park_race_runtime_phase,

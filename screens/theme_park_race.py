@@ -1383,6 +1383,103 @@ def _render_facilitator_team_card(row) -> None:
     )
 
 
+def _render_attendance_control(db, control, event_id: str, actor: str, workspace: dict) -> None:
+    """Facilitator-only, opt-in P0-A attendance surface.
+
+    The screen never stores attendance in Streamlit state: every number and
+    participant state is re-read from the service-only canonical RPC after a
+    rerun. Team and participant identifiers are display-only here and cannot
+    be edited by a facilitator attendance correction.
+    """
+    # Small test/degraded adapters used by historical projections do not own
+    # P0-A yet. Their established Mission Control surface must remain intact.
+    get_event = getattr(db, "get_event", None)
+    if not callable(get_event):
+        return
+    event = get_event(event_id) or {}
+    metadata = event.get("_EventPayload", {}) if isinstance(event, dict) else {}
+    attendance = metadata.get("Attendance", {}) if isinstance(metadata, dict) else {}
+    enabled = str(attendance.get("SchemaVersion", "")) == "1"
+
+    with st.expander("Attendance", expanded=False):
+        if not enabled:
+            st.caption(
+                "Attendance is not enabled for this event. Enabling it preserves the roster "
+                "and starts every current participant as PREASSIGNED until marked PRESENT or ABSENT."
+            )
+            if st.button(
+                "Enable canonical attendance", type="primary", disabled=not actor.strip(),
+                key=f"attendance_configure_{event_id}",
+            ):
+                control.configure_attendance(event_id, actor)
+                st.success("Canonical attendance is enabled. No participant or team assignment changed.")
+                st.rerun()
+            return
+
+        try:
+            summary = db.runtime.get_attendance_summary(event_id)
+            roster = db.runtime.get_attendance_roster(event_id).get("Participants", [])
+        except RuntimeDatabaseError as error:
+            st.error(f"Attendance could not be read. {error}")
+            return
+
+        metrics = st.columns(4)
+        metrics[0].metric("Registered", int(summary.get("Registered", 0) or 0))
+        metrics[1].metric("Present", int(summary.get("Present", 0) or 0))
+        metrics[2].metric("Absent", int(summary.get("Absent", 0) or 0))
+        metrics[3].metric("Preassigned", int(summary.get("Preassigned", 0) or 0))
+
+        team_names = {
+            str(row.get("TeamID", "")): str(row.get("TeamIdentity") or row.get("TeamID") or "Team")
+            for row in workspace.get("Teams", [])
+        }
+        if not roster:
+            st.caption("No registered participants yet.")
+            return
+
+        st.dataframe([
+            {
+                "Team": team_names.get(str(row.get("TeamID", "")), str(row.get("TeamID", ""))),
+                "Participant": row.get("DisplayName", ""),
+                "Attendance": row.get("AttendanceState", "PREASSIGNED"),
+                "Last changed by": row.get("ChangedBy") or "—",
+            }
+            for row in roster
+        ], width="stretch", hide_index=True)
+
+        people = {str(row.get("ParticipantID", "")): row for row in roster}
+        selected_id = st.selectbox(
+            "Participant attendance",
+            list(people),
+            format_func=lambda value: (
+                f"{team_names.get(str(people[value].get('TeamID', '')), people[value].get('TeamID', 'Team'))} "
+                f"· {people[value].get('DisplayName', 'Participant')} "
+                f"({people[value].get('AttendanceState', 'PREASSIGNED')})"
+            ),
+            key=f"attendance_participant_{event_id}",
+        )
+        selected = people[selected_id]
+        current_state = str(selected.get("AttendanceState", "PREASSIGNED")).upper()
+        state_options = ["PREASSIGNED", "PRESENT", "ABSENT"]
+        desired_state = st.selectbox(
+            "Attendance state", state_options,
+            index=state_options.index(current_state) if current_state in state_options else 0,
+            key=f"attendance_state_{event_id}_{selected_id}",
+        )
+        reason = st.text_input(
+            "Attendance reason / notes", key=f"attendance_reason_{event_id}_{selected_id}",
+        )
+        if st.button(
+            "Record attendance", type="primary", disabled=not actor.strip(),
+            key=f"attendance_record_{event_id}_{selected_id}",
+        ):
+            control.set_participant_attendance(
+                event_id, selected_id, desired_state, actor, reason,
+            )
+            st.success("Attendance recorded. Participant identity and team assignment are unchanged.")
+            st.rerun()
+
+
 def render_theme_park_race_facilitator(db, control, event_id):
     """Facilitator lifecycle, Captain, review, progress, scoring and controls."""
     try:
@@ -1452,6 +1549,8 @@ def render_theme_park_race_facilitator(db, control, event_id):
             '<div class="mc-workload-card mc-workload-clear"><div class="mc-workload-line">✓ No reviews pending</div></div>',
             unsafe_allow_html=True,
         )
+
+    _render_attendance_control(db, control, event_id, actor, workspace)
 
     lifecycle_col, mission_col = st.columns(2)
     with lifecycle_col:
