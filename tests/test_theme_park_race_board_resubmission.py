@@ -76,7 +76,10 @@ def _render_evidence_form(*, state="REJECTED", click=True, save_raises=None,
             fake.session_state[f"theme_race_submitting_{ACTIVITY_ID}"] = True
         fake.text_area.return_value = "Retaken photo, mission signage visible."
         fake.file_uploader.return_value = _UploadedPhoto()
-        fake.button.return_value = click
+        def button_for_upload(*_args, **kwargs):
+            return bool(click and kwargs.get("key") == f"theme_race_prepare_upload_{ACTIVITY_ID}")
+
+        fake.button.side_effect = button_for_upload
         if upload_raises:
             fake_upload.side_effect = upload_raises
         else:
@@ -84,6 +87,14 @@ def _render_evidence_form(*, state="REJECTED", click=True, save_raises=None,
                 "url": "core-v2-storage://exos-submissions/x.jpg", "file_id": "exos-submissions/x.jpg",
             }
         TPR._render_evidence_form(db, _workspace(), _mission(state))
+        # P0-C deliberately separates private upload from submission.  A
+        # successful first render leaves only safe storage metadata in device
+        # state; the second render presses Submit Mission.
+        if click and fake.session_state.get(f"theme_race_prepared_evidence_{ACTIVITY_ID}"):
+            fake.button.side_effect = lambda *_args, **kwargs: (
+                kwargs.get("key") == f"theme_race_submit_{ACTIVITY_ID}"
+            )
+            TPR._render_evidence_form(db, _workspace(), _mission(state))
     return fake, calls, fake_upload
 
 
@@ -217,7 +228,7 @@ def test_an_unexpected_upload_failure_is_caught_and_never_reaches_the_rpc():
     fake, calls, fake_upload = _render_evidence_form(state="REJECTED", upload_raises=OSError("disk full"))
     assert calls == []
     assert fake.error.called
-    assert "unexpectedly" in str(fake.error.call_args.args[0]).casefold()
+    assert "mission has not been submitted" in str(fake.error.call_args.args[0]).casefold()
 
 
 # F. Successful resubmit changes client state to awaiting review.
@@ -242,16 +253,16 @@ def test_a_known_rpc_error_clears_pending_state_and_surfaces_the_real_message():
         save_raises=RuntimeDatabaseError("Only the current submitted board revision may be reviewed"),
     )
     assert fake.error.called
-    assert "current submitted board revision" in str(fake.error.call_args.args[0])
-    assert not fake.success.called
-    assert not fake.rerun.called
+    assert "prepared evidence is still ready" in str(fake.error.call_args.args[0]).casefold()
+    assert not any("facilitator review" in str(call.args[0]).casefold() for call in fake.success.call_args_list)
+    assert fake.session_state.get(f"theme_race_prepared_evidence_{ACTIVITY_ID}")
     assert fake.session_state.get(f"theme_race_submitting_{ACTIVITY_ID}") is False
 
 
 def test_an_unexpected_rpc_exception_is_caught_not_left_as_a_silent_hang():
     fake, calls, _ = _render_evidence_form(state="REJECTED", save_raises=ConnectionError("timed out"))
     assert fake.error.called
-    assert "unexpectedly" in str(fake.error.call_args.args[0]).casefold()
+    assert "prepared evidence is still ready" in str(fake.error.call_args.args[0]).casefold()
     assert fake.session_state.get(f"theme_race_submitting_{ACTIVITY_ID}") is False
 
 
@@ -283,13 +294,13 @@ def test_the_submit_button_is_disabled_while_a_submission_is_in_flight():
     assert submit_call.kwargs.get("disabled") is True
 
 
-def test_the_submit_button_is_enabled_when_nothing_is_in_flight():
+def test_the_submit_button_waits_for_the_separate_private_upload_when_nothing_is_in_flight():
     fake, calls, _ = _render_evidence_form(state="REJECTED", click=False)
     submit_call = next(
         call for call in fake.button.call_args_list
         if call.kwargs.get("key") == f"theme_race_submit_{ACTIVITY_ID}"
     )
-    assert submit_call.kwargs.get("disabled") is False
+    assert submit_call.kwargs.get("disabled") is True
 
 
 # I. SELECTED first submission still works (non-regression).

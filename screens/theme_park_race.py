@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import html
 import os
+import uuid
 from datetime import datetime
 
 import streamlit as st
@@ -359,6 +360,22 @@ def _workspace(db, session_token):
     return db.runtime.theme_park_race_participant_workspace(session_token)
 
 
+def _facilitator_review_error(error: Exception) -> str:
+    """Translate expected review rejections without exposing database internals."""
+    text = str(error or "").casefold()
+    if "revision is stale" in text:
+        return _STALE_REVISION_NOTICE
+    if "facilitator identity" in text:
+        return "Enter the facilitator identity before recording a review."
+    if "only the current submitted" in text or "not submitted" in text:
+        return "This mission is no longer awaiting review. Refresh the queue and review its current state."
+    if "rubric" in text:
+        return "The rubric scores are incomplete or outside the configured range. Check the mission rubric and try again."
+    if "participation" in text or "present" in text:
+        return "The canonical participation snapshot changed or is unavailable. Refresh the review and try again."
+    return "Mission AI could not record that review. Refresh the queue and try again, or ask an event operator for help."
+
+
 def submit_theme_park_race_review(control, strategy_mode, submission, *, decision, score, actor, notes,
                                   scoring=None, rubric_scores=None):
     """Route one facilitator decision to the canonical contract for this mode.
@@ -375,7 +392,12 @@ def submit_theme_park_race_review(control, strategy_mode, submission, *, decisio
             submission_id, score if approved else 0, notes,
             status="APPROVED" if approved else "REJECTED",
         )
-        return {"Reviewed": True}
+        return {
+            "Reviewed": True,
+            "Level": "success",
+            "Message": "Review approved." if approved else "Mission returned for resubmission.",
+            "Score": score if approved else 0,
+        }
     submitted_at = str(submission.get("SubmittedAt", "") or "")
     if not submitted_at:
         return {"Reviewed": False, "Level": "warning", "Message": _STALE_REVISION_NOTICE}
@@ -383,22 +405,37 @@ def submit_theme_park_race_review(control, strategy_mode, submission, *, decisio
     scoring_mode = str((scoring or {}).get("Mode", "TEAM_FULL")).upper()
     try:
         if scoring_mode in {"PARTICIPATION_PRORATED", "FACILITATOR_RUBRIC"}:
-            control.review_theme_park_race_scored_submission(
+            result = control.review_theme_park_race_scored_submission(
                 submission_id, submitted_at, mapped,
                 rubric_scores=rubric_scores or {}, actor=actor, reason=notes,
                 idempotency_key=f"theme-park-race-scored-review|{submission_id}|{submitted_at}|{mapped}",
             )
         else:
-            control.review_theme_park_race_board_submission(
+            result = control.review_theme_park_race_board_submission(
                 submission_id, submitted_at, mapped,
                 score=score if approved else 0, actor=actor, reason=notes,
                 idempotency_key=f"theme-park-race-board-review|{submission_id}|{submitted_at}|{mapped}",
             )
     except RuntimeDatabaseError as error:
-        if "revision is stale" in str(error).casefold():
-            return {"Reviewed": False, "Level": "warning", "Message": _STALE_REVISION_NOTICE}
-        return {"Reviewed": False, "Level": "error", "Message": str(error)}
-    return {"Reviewed": True}
+        message = _facilitator_review_error(error)
+        return {
+            "Reviewed": False,
+            "Level": "warning" if "revision is stale" in str(error).casefold() else "error",
+            "Message": message,
+        }
+    result = dict(result or {})
+    final_score = result.get("Score", score if approved else 0)
+    if approved:
+        message = f"Approved. Final awarded score: {final_score}."
+    else:
+        message = "Returned for resubmission. The Captain can now see the reason and submit a corrected revision."
+    return {
+        "Reviewed": True,
+        "Level": "success",
+        "Message": message,
+        "Score": final_score,
+        "Idempotent": bool(result.get("Idempotent", False)),
+    }
 
 
 def _queue_review_notice(event_id, outcome):
@@ -410,8 +447,11 @@ def _render_review_notice(event_id):
     outcome = st.session_state.pop(f"theme_race_review_notice_{event_id}", None) or {}
     if not outcome.get("Message"):
         return
-    if str(outcome.get("Level", "warning")) == "error":
+    level = str(outcome.get("Level", "warning"))
+    if level == "error":
         st.error(outcome["Message"])
+    elif level == "success":
+        st.success(outcome["Message"])
     else:
         st.warning(outcome["Message"])
 
@@ -652,6 +692,8 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
     uploaded_photo = None
     uploaded_video = None
     selected_media_type = evidence_type
+    prepared_evidence_key = f"theme_race_prepared_evidence_{activity_id}"
+    preparing_upload_key = f"theme_race_preparing_upload_{activity_id}"
     if supports_photo and supports_video:
         selected_media_type = st.radio(
             "Evidence type", ("PHOTO", "VIDEO"), horizontal=True,
@@ -666,11 +708,13 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
         if uploaded_photo is not None:
             st.image(uploaded_photo, width="stretch")
     if supports_video and selected_media_type == "VIDEO":
+        st.markdown("**SHORT VIDEO RECOMMENDED**")
+        st.caption("Keep your evidence approximately 5–10 seconds.")
         uploaded_video = st.file_uploader(
             video_config.get("Label") or "Private short video",
             type=["mp4", "mov", "m4v", "webm"],
             key=f"theme_race_video_{activity_id}",
-            help="Keep video evidence short — approximately 5–15 seconds.",
+            help="Keep your evidence approximately 5–10 seconds. The hard private-evidence ceiling is 50 MB.",
         )
         if uploaded_video is not None:
             st.video(uploaded_video)
@@ -681,17 +725,106 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
             numeric_config.get("Label") or "Result", key=f"theme_race_numeric_{activity_id}",
         )
 
+    # A private media object is prepared once, then reused by the separate
+    # submit operation.  It deliberately lives only in this device session;
+    # the database remains the source of truth for a submitted mission.
+    prepared_evidence = st.session_state.get(prepared_evidence_key, {}) or {}
+    if prepared_evidence and prepared_evidence.get("EvidenceType") != selected_media_type:
+        st.session_state.pop(prepared_evidence_key, None)
+        prepared_evidence = {}
+
     already_submitting = bool(st.session_state.get(submitting_key))
-    authorized = captain_active and not already_submitting
+    preparing_upload = bool(st.session_state.get(preparing_upload_key))
+    authorized = captain_active and not already_submitting and not preparing_upload
     is_resubmission = str(mission.get("MissionState", "")).upper() == "REJECTED"
-    submit_label = "🔁 Update & Resubmit" if is_resubmission else "✅ Submit Evidence"
+    submit_label = "🔁 Update & Resubmit Mission" if is_resubmission else "✅ Submit Mission"
+    media_required = (
+        (supports_photo and supports_video)
+        or (evidence_type == "PHOTO" and bool(photo_config.get("Required")))
+        or (evidence_type == "VIDEO" and bool(video_config.get("Required")))
+    )
     if not captain_active:
         st.caption("Only the Mission Captain can submit for this team.")
     elif already_submitting:
-        st.info("Submitting… please wait.")
+        st.info("Submitting mission… please wait.")
+    elif preparing_upload:
+        st.info("Preparing evidence… please wait.")
+
+    if (supports_photo or supports_video) and prepared_evidence:
+        filename = str(prepared_evidence.get("filename") or "private evidence")
+        kind = str(prepared_evidence.get("EvidenceType") or selected_media_type).upper()
+        st.success(f"✓ {kind} READY")
+        st.caption(f"Private evidence prepared: {filename}. It will be linked only when you submit this mission.")
+    elif supports_photo or supports_video:
+        upload_label = "Upload video" if selected_media_type == "VIDEO" else "Upload photo"
+        if st.button(
+            upload_label, width="stretch", disabled=not authorized,
+            key=f"theme_race_prepare_upload_{activity_id}",
+        ):
+            # Mirror the disabled widget condition defensively.  A stale
+            # Streamlit rerun must never turn an already-disabled upload into
+            # a second storage write.
+            if not authorized:
+                return
+            if text_config.get("Required") and not text.strip():
+                st.warning("Enter the required text evidence before preparing media.")
+                return
+            selected_file = uploaded_video if selected_media_type == "VIDEO" else uploaded_photo
+            if selected_file is None:
+                st.warning(f"Choose a {'short video' if selected_media_type == 'VIDEO' else 'photo'} before uploading.")
+                return
+            st.session_state[preparing_upload_key] = True
+            try:
+                if selected_media_type == "VIDEO":
+                    st.info("Preparing video…")
+                    _submit_trace(activity_id, UPLOAD_STARTED=True, EVIDENCE_TYPE="VIDEO")
+                    with st.spinner("Uploading video…"):
+                        prepared = upload_evidence_file(
+                            event_id=workspace["EventID"], mission_id=activity_id,
+                            team_name=st.session_state.get("participant_team", workspace["TeamID"]),
+                            participant_name=st.session_state.get("participant_name", ""),
+                            uploaded_file=selected_file, evidence_type="VIDEO",
+                            maximum_bytes=video_config.get("MaximumBytes"),
+                        )
+                    prepared["EvidenceType"] = "VIDEO"
+                    _submit_trace(activity_id, UPLOAD_COMPLETED=True, EVIDENCE_TYPE="VIDEO")
+                    st.session_state[prepared_evidence_key] = prepared
+                    st.success("Upload complete.")
+                else:
+                    st.info("Preparing photo…")
+                    _submit_trace(activity_id, UPLOAD_STARTED=True, EVIDENCE_TYPE="PHOTO")
+                    with st.spinner("Uploading photo…"):
+                        prepared = upload_photo(
+                            event_id=workspace["EventID"], mission_id=activity_id,
+                            team_name=st.session_state.get("participant_team", workspace["TeamID"]),
+                            participant_name=st.session_state.get("participant_name", ""),
+                            uploaded_file=selected_file,
+                        )
+                    prepared["EvidenceType"] = "PHOTO"
+                    _submit_trace(activity_id, UPLOAD_COMPLETED=True, EVIDENCE_TYPE="PHOTO")
+                    st.session_state[prepared_evidence_key] = prepared
+                    st.success("Upload complete.")
+            except (RuntimeDatabaseError, ValueError) as error:
+                _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
+                if selected_media_type == "VIDEO":
+                    fallback = " Please try again or use Photo if this mission allows it."
+                    st.error("Video upload failed. Your mission has not been submitted." + fallback)
+                else:
+                    st.error("Photo upload failed. Your mission has not been submitted. Please try again.")
+            except Exception as error:
+                _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
+                if selected_media_type == "VIDEO":
+                    st.error("Video upload failed. Your mission has not been submitted. Please try again or use Photo if this mission allows it.")
+                else:
+                    st.error("Photo upload failed. Your mission has not been submitted. Please try again.")
+            finally:
+                st.session_state[preparing_upload_key] = False
+            if st.session_state.get(prepared_evidence_key):
+                st.rerun()
+
     if st.button(
         submit_label, type="primary", width="stretch",
-        key=f"theme_race_submit_{activity_id}", disabled=not authorized,
+        key=f"theme_race_submit_{activity_id}", disabled=not authorized or (media_required and not prepared_evidence),
     ):
         _submit_trace(
             activity_id, CLICK_RECEIVED=True, MISSION_STATE=mission.get("MissionState", ""),
@@ -707,14 +840,8 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
         if text_config.get("Required") and not text.strip():
             st.warning("Enter the required text evidence.")
             return
-        if supports_photo and supports_video and uploaded_photo is None and uploaded_video is None:
-            st.warning("Upload either the required private photo or short video evidence.")
-            return
-        if evidence_type == "PHOTO" and photo_config.get("Required") and uploaded_photo is None:
-            st.warning("Upload the required private photo evidence.")
-            return
-        if evidence_type == "VIDEO" and video_config.get("Required") and uploaded_video is None:
-            st.warning("Upload the required private short video evidence.")
+        if media_required and not prepared_evidence:
+            st.warning("Upload and prepare the required private evidence before submitting this mission.")
             return
         if numeric_config.get("Required"):
             try:
@@ -736,51 +863,8 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
         st.session_state[submitting_key] = True
         try:
             with st.spinner("Submitting mission evidence…"):
-                uploaded = {}
-                uploaded_evidence_type = ""
-                if uploaded_photo is not None:
-                    _submit_trace(activity_id, UPLOAD_STARTED=True)
-                    try:
-                        uploaded = upload_photo(
-                            event_id=workspace["EventID"], mission_id=activity_id,
-                            team_name=st.session_state.get("participant_team", workspace["TeamID"]),
-                            participant_name=st.session_state.get("participant_name", ""),
-                            uploaded_file=uploaded_photo,
-                        )
-                        _submit_trace(activity_id, UPLOAD_COMPLETED=True)
-                    except (RuntimeDatabaseError, ValueError) as error:
-                        _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
-                        st.error(upload_error_message("Photo upload", saved=False, retry=True, error=error))
-                        return
-                    except Exception as error:
-                        # Never let an unexpected upload failure look like a hang.
-                        _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
-                        st.error(f"Photo upload failed unexpectedly. You can try again: {error}")
-                        return
-                    uploaded_evidence_type = "PHOTO"
-                elif uploaded_video is not None:
-                    _submit_trace(activity_id, UPLOAD_STARTED=True, EVIDENCE_TYPE="VIDEO")
-                    try:
-                        uploaded = upload_evidence_file(
-                            event_id=workspace["EventID"], mission_id=activity_id,
-                            team_name=st.session_state.get("participant_team", workspace["TeamID"]),
-                            participant_name=st.session_state.get("participant_name", ""),
-                            uploaded_file=uploaded_video, evidence_type="VIDEO",
-                            maximum_bytes=video_config.get("MaximumBytes"),
-                        )
-                        _submit_trace(activity_id, UPLOAD_COMPLETED=True, EVIDENCE_TYPE="VIDEO")
-                    except (RuntimeDatabaseError, ValueError) as error:
-                        _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
-                        if "exceeds" in str(error).casefold() and "mb limit" in str(error).casefold():
-                            st.error("Video is too large.\nPlease record a shorter clip and try again.")
-                        else:
-                            st.error(upload_error_message("Video upload", saved=False, retry=True, error=error))
-                        return
-                    except Exception as error:
-                        _submit_trace(activity_id, UPLOAD_COMPLETED=False, ERROR_CLASS=type(error).__name__)
-                        st.error(upload_error_message("Video upload", saved=False, retry=True, error=error))
-                        return
-                    uploaded_evidence_type = "VIDEO"
+                uploaded = dict(st.session_state.get(prepared_evidence_key, {}) or {})
+                uploaded_evidence_type = str(uploaded.get("EvidenceType") or "")
                 payload = {
                     "TeamName": st.session_state.get("participant_team", workspace["TeamID"]),
                     "ParticipantName": st.session_state.get("participant_name", ""),
@@ -812,10 +896,11 @@ def _render_evidence_form(db, workspace, mission, captain_active=True, show_titl
                     return
                 except Exception as error:
                     _submit_trace(activity_id, RPC_COMPLETED=False, ERROR_CLASS=type(error).__name__)
-                    st.error(f"Submission failed unexpectedly. You can try again: {error}")
+                    st.error("Mission submission could not be completed. Your prepared evidence is still ready; please try again.")
                     return
         finally:
             st.session_state[submitting_key] = False
+        st.session_state.pop(prepared_evidence_key, None)
         if str(workspace.get("StrategyMode", "")).upper() == "OPEN_MISSION_BOARD":
             st.success(f"📨 Evidence received. Sent to {PLATFORM_NAME} — awaiting facilitator review.")
         else:
@@ -865,9 +950,11 @@ def _participant_runtime_error(error: Exception) -> str:
         return "Your evidence is incomplete or does not match this mission. Check the mission card and try again."
     if "participation" in text or "present participants" in text:
         return "The present roster or completion selection changed. Check the canonical roster and try again."
+    if "current submitted board revision" in text or "mission must be selected" in text:
+        return "This mission changed while it was being submitted. Your prepared evidence is still ready; refresh the mission and try again."
     if "not active" in text:
         return "The mission is not active yet. Please wait for your facilitator."
-    return f"Mission AI could not complete that action. Please try again or check with your facilitator. ({error})"
+    return "Mission AI could not complete that action. Your prepared evidence is still ready; please try again or check with your facilitator."
 
 
 def _render_ride_evidence_form(db, workspace, mission, captain_active=True, show_title=True):
@@ -1538,6 +1625,72 @@ def _render_attendance_control(db, control, event_id: str, actor: str, workspace
             st.rerun()
 
 
+def _score_adjustment_request_key(event_id: str, team_id: str) -> str:
+    """Keep a request identity stable across an uncertain facilitator retry."""
+    state_key = f"theme_race_score_adjustment_request_{event_id}_{team_id}"
+    if not st.session_state.get(state_key):
+        st.session_state[state_key] = f"tpr-adjustment-{uuid.uuid4()}"
+    return st.session_state[state_key]
+
+
+def _render_score_adjustment_control(db, control, event_id: str, actor: str, workspace: dict) -> None:
+    """Service-only P0-C adjustment UI over the immutable score ledger."""
+    reader = getattr(db.runtime, "get_theme_park_race_score_adjustments", None)
+    if not callable(reader):
+        return
+    teams = {str(row.get("TeamID", "")): row for row in workspace.get("Teams", []) if row.get("TeamID")}
+    if not teams:
+        return
+    with st.expander("Bonus / Adjustment", expanded=False):
+        team_id = st.selectbox(
+            "Team", list(teams),
+            format_func=lambda value: str(teams[value].get("TeamIdentity") or value),
+            key=f"theme_race_adjustment_team_{event_id}",
+        )
+        points = st.number_input(
+            "Points", min_value=-1000.0, max_value=1000.0, value=0.0, step=1.0,
+            help="Use a positive bonus or a negative penalty. Correct a mistake with a separate counter-adjustment.",
+            key=f"theme_race_adjustment_points_{event_id}_{team_id}",
+        )
+        reason = st.text_input("Reason", key=f"theme_race_adjustment_reason_{event_id}_{team_id}")
+        st.caption(f"Facilitator: {actor.strip() or 'Enter facilitator identity above'}")
+        if st.button(
+            "Apply Adjustment", type="primary", width="stretch",
+            disabled=not actor.strip() or not reason.strip() or not points,
+            key=f"theme_race_adjustment_apply_{event_id}_{team_id}",
+        ):
+            request_key = _score_adjustment_request_key(event_id, team_id)
+            try:
+                result = control.adjust_theme_park_race_team_score(
+                    event_id, team_id, points, reason, actor, request_key,
+                ) or {}
+            except RuntimeDatabaseError:
+                st.error("The adjustment was not recorded. Check the team, points, reason and facilitator identity, then retry.")
+            else:
+                st.session_state.pop(f"theme_race_score_adjustment_request_{event_id}_{team_id}", None)
+                qualifier = "already recorded" if result.get("Idempotent") else "recorded"
+                st.success(f"{points:+g} points {qualifier} in the canonical team score ledger.")
+                st.rerun()
+        try:
+            adjustments = (reader(event_id, 20) or {}).get("Adjustments", [])
+        except RuntimeDatabaseError:
+            st.info("Recent canonical adjustments will appear here after the operations contract is available.")
+            return
+        if adjustments:
+            st.dataframe([
+                {
+                    "Team": teams.get(str(row.get("TeamID", "")), {}).get("TeamIdentity", row.get("TeamID", "")),
+                    "Points": row.get("ScoreDelta", 0),
+                    "Reason": row.get("Reason", ""),
+                    "Facilitator": row.get("Actor", ""),
+                    "Recorded": row.get("CreatedAt", ""),
+                }
+                for row in adjustments
+            ], width="stretch", hide_index=True)
+        else:
+            st.caption("No score adjustments have been recorded for this event.")
+
+
 def render_theme_park_race_facilitator(db, control, event_id):
     """Facilitator lifecycle, Captain, review, progress, scoring and controls."""
     try:
@@ -1609,6 +1762,7 @@ def render_theme_park_race_facilitator(db, control, event_id):
         )
 
     _render_attendance_control(db, control, event_id, actor, workspace)
+    _render_score_adjustment_control(db, control, event_id, actor, workspace)
 
     lifecycle_col, mission_col = st.columns(2)
     with lifecycle_col:
@@ -1760,6 +1914,40 @@ def render_theme_park_race_facilitator(db, control, event_id):
                         st.success("Captain transfer recorded. The new Captain must recover Captain authority on their device.")
                         st.rerun()
 
+        with st.expander("Clear Captain / reopen selection"):
+            clear_teams = {row.get("TeamID", ""): row for row in workspace.get("Teams", []) if row.get("TeamID")}
+            if clear_teams:
+                clear_team_id = st.selectbox(
+                    "Team to clear", list(clear_teams),
+                    format_func=lambda key: clear_teams[key].get("TeamIdentity", key),
+                    key=f"theme_race_clear_captain_team_{event_id}",
+                )
+                current_captain = clear_teams[clear_team_id].get("CaptainName") or "No Captain"
+                st.caption(
+                    f"Current Captain: {current_captain}. This revokes Captain submission authority and preserves all participant and team identity."
+                )
+                clear_reason = st.text_input("Clear reason", key=f"theme_race_clear_captain_reason_{event_id}_{clear_team_id}")
+                confirmed = st.checkbox(
+                    "I understand this clears the Captain and reopens Captain selection for this event.",
+                    key=f"theme_race_clear_captain_confirm_{event_id}_{clear_team_id}",
+                )
+                if st.button(
+                    "Clear Captain", width="stretch", disabled=not actor.strip() or not clear_reason.strip() or not confirmed,
+                    key=f"theme_race_clear_captain_apply_{event_id}_{clear_team_id}",
+                ):
+                    try:
+                        result = control.clear_team_formation_captain(
+                            event_id, clear_team_id, actor, clear_reason,
+                        ) or {}
+                    except RuntimeDatabaseError:
+                        st.error("Captain clear was not recorded. Check the team, facilitator identity and reason, then retry.")
+                    else:
+                        if result.get("Cleared"):
+                            st.success("Captain cleared. The prior Captain session is revoked; select a PRESENT replacement Captain, then reactivate teams.")
+                        else:
+                            st.info("This team already has no effective Captain.")
+                        st.rerun()
+
     st.markdown("#### Review Queue")
     _render_review_notice(event_id)
     queue = workspace.get("ReviewQueue", [])
@@ -1854,6 +2042,17 @@ def render_theme_park_race_facilitator(db, control, event_id):
                     f"Canonical participation snapshot: {completing}/{denominator} PRESENT participants · "
                     f"eligible ceiling {eligible}/{maximum}. This is fixed for this submitted revision."
                 )
+                completing_ids = [str(value) for value in participation.get("CompletingParticipantIDs", [])]
+                player_reader = getattr(db.runtime, "get_theme_park_race_players", None)
+                player_names = {
+                    str(row.get("ParticipantID", "")): str(row.get("Name") or row.get("ParticipantID", ""))
+                    for row in (player_reader(event_id) if callable(player_reader) else [])
+                }
+                if completing_ids:
+                    st.caption("Completing participants: " + ", ".join(
+                        player_names.get(participant_id, "Canonical participant")
+                        for participant_id in completing_ids
+                    ))
                 score = float(eligible or 0)
             elif scoring_mode == "FACILITATOR_RUBRIC":
                 st.markdown("**Facilitator rubric**")

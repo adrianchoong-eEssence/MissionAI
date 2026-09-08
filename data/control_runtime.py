@@ -133,6 +133,19 @@ class ControlRuntime:
             event_id, team_id, participant_id, actor, reason,
         )
 
+    def clear_team_formation_captain(self, event_id, team_id, actor, reason):
+        return self._run(
+            self.runtime.clear_team_formation_captain,
+            event_id, team_id, actor, reason,
+        )
+
+    def adjust_theme_park_race_team_score(self, event_id, team_id, amount, reason, actor, idempotency_key):
+        """Apply an immutable, auditable team score adjustment through P0-C."""
+        return self._run(
+            self.runtime.adjust_theme_park_race_team_score,
+            event_id, team_id, amount, reason, actor, idempotency_key,
+        )
+
     def configure_attendance(self, event_id, actor):
         return self._run(self.runtime.configure_attendance, event_id, actor)
 

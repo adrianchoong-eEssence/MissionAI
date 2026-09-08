@@ -69,7 +69,8 @@ def test_open_board_team_full_review_remains_on_frozen_039_path():
         control, "OPEN_MISSION_BOARD", _submission(), decision="APPROVE", score=12, actor="Kai", notes="ok",
         scoring={"Mode": "TEAM_FULL"},
     )
-    assert outcome == {"Reviewed": True}
+    assert outcome["Reviewed"] is True
+    assert outcome["Score"] == 12
     assert len(calls) == 1 and calls[0][1]["score"] == 12
 
 
@@ -87,7 +88,10 @@ def test_opt_in_scoring_review_has_no_client_final_score_authority(mode, rubric)
         control, "OPEN_MISSION_BOARD", _submission(), decision="APPROVE", score=999999,
         actor="Kai", notes="verified", scoring={"Mode": mode}, rubric_scores=rubric,
     )
-    assert outcome == {"Reviewed": True}
+    assert outcome["Reviewed"] is True
+    # The server, not this client helper, remains authoritative for the final
+    # PPR/rubric value.  The lightweight source fake echoes the supplied score.
+    assert outcome["Score"] == 999999
     assert len(calls) == 1
     assert calls[0][1]["rubric_scores"] == rubric
 

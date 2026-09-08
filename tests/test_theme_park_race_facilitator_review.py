@@ -336,7 +336,8 @@ def test_configured_team_route_keeps_its_existing_review_contract():
             control, "CONFIGURED_TEAM_ROUTE", dict(SUBMISSION),
             decision=decision, score=8, actor="Ruth", notes="note",
         )
-        assert outcome == {"Reviewed": True}
+        assert outcome["Reviewed"] is True
+        assert outcome["Level"] == "success"
         control.review_theme_park_race_board_submission.assert_not_called()
         control.review_submission.assert_called_once()
         assert control.review_submission.call_args.kwargs["status"] == expected

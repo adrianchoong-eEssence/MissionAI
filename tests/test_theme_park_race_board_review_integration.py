@@ -70,7 +70,9 @@ def test_open_mission_board_approve_routes_to_board_review():
         control, "OPEN_MISSION_BOARD", SUBMISSION,
         decision="APPROVE", score=40, actor="Kai", notes="Verified queue evidence",
     )
-    assert outcome == {"Reviewed": True}
+    assert outcome["Reviewed"] is True
+    assert outcome["Score"] == 40
+    assert "Final awarded score" in outcome["Message"]
     assert [name for name, _ in control.calls] == ["board_review"]
     assert control.calls[0][1]["Decision"] == "APPROVE"
 
@@ -81,7 +83,9 @@ def test_open_mission_board_reject_routes_to_board_review():
         control, "OPEN_MISSION_BOARD", SUBMISSION,
         decision="REJECT", score=0, actor="Kai", notes="Exterior photo is not queue entry",
     )
-    assert outcome == {"Reviewed": True}
+    assert outcome["Reviewed"] is True
+    assert outcome["Score"] == 0
+    assert "resubmission" in outcome["Message"].casefold()
     assert [name for name, _ in control.calls] == ["board_review"]
     assert control.calls[0][1]["Decision"] == "REJECT"
     assert control.calls[0][1]["Score"] == 0

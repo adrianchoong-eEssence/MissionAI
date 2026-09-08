@@ -550,6 +550,38 @@ class StandardCoreV2Adapter:
             "p_actor": actor, "p_reason": reason,
         })
 
+    # Post-Maxis P0-C service-only live operations.  These thin adapters do
+    # not calculate points or manipulate Captain state locally: PostgreSQL is
+    # the canonical ledger/lifecycle authority for Mission Control and Kai.
+    def clear_team_formation_captain(self, event_id, team_id, actor, reason):
+        return self._rpc("exos_v2_clear_team_formation_captain", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_team_id": str(team_id or "").strip(),
+            "p_actor": str(actor or "").strip(),
+            "p_reason": str(reason or "").strip(),
+        })
+
+    def adjust_theme_park_race_team_score(self, event_id, team_id, amount, reason, actor, idempotency_key):
+        return self._rpc("exos_v2_theme_park_race_adjust_team_score", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_team_id": str(team_id or "").strip(),
+            "p_amount": float(amount),
+            "p_reason": str(reason or "").strip(),
+            "p_actor": str(actor or "").strip(),
+            "p_idempotency_key": str(idempotency_key or "").strip(),
+        })
+
+    def get_theme_park_race_score_adjustments(self, event_id, limit=20):
+        return self._rpc("exos_v2_theme_park_race_score_adjustments", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_limit": int(limit),
+        })
+
+    def get_theme_park_race_operator_status(self, event_id):
+        return self._rpc("exos_v2_theme_park_race_operator_status", {
+            "p_event_id": str(event_id or "").strip(),
+        })
+
     # Post-Maxis P0-A attendance is deliberately event-opt-in. These
     # service-only RPCs retain immutable participant/team identity and expose
     # the canonical present-team denominator to future scoring only.
