@@ -491,6 +491,14 @@ class StandardCoreV2Adapter:
             raise RuntimeDatabaseError("Team Formation is not open for this event.")
         return self._identity(self._rpc(rpc, payload, admin=False))
 
+    def register_aia_random_participant(self, display_name, device_id, enrollment_credential):
+        """AIA's fixed-event wrapper: Core RANDOM_ASSIGN plus first-arrival P0-A."""
+        return self._identity(self._rpc("exos_v2_aia_tech_register_random", {
+            "p_display_name": display_name,
+            "p_device_id": device_id,
+            "p_enrollment_credential": enrollment_credential,
+        }, admin=False))
+
     def claim_preassigned_team_formation_participant(
         self, join_code, enrollment_credential, device_id,
     ):

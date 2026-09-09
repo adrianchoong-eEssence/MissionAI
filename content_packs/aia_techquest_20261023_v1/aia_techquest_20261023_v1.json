@@ -23,15 +23,15 @@
     "EventDate": "2026-10-23",
     "ExpectedParticipants": 250,
     "TeamStructure": {
-      "FormationMode": "PREASSIGNED",
+      "FormationMode": "RANDOM_ASSIGN",
       "TeamCount": "CONFIGURABLE_BEFORE_ROSTER_FREEZE",
       "CertificationDistribution": {"TeamCount": 25, "CapacityPerTeam": 10},
       "IdentityKind": "CONFIGURED_GENERIC_TEAM_IDENTITY"
     },
     "TeamFormationConfiguration": {
       "SchemaVersion": 1,
-      "Mode": "PREASSIGNED",
-      "RosterAuthority": "AUTHORITATIVE_ROSTER_ONLY",
+      "Mode": "RANDOM_ASSIGN",
+      "RosterAuthority": "SELF_REGISTRATION_DEVICE_BOUND",
       "AttendanceStates": ["PREASSIGNED", "PRESENT", "ABSENT"],
       "CaptainLifecycle": ["CLAIM", "TRANSFER", "RECOVER", "CLEAR"],
       "ActivationRequirement": "EXACTLY_ONE_EFFECTIVE_CAPTAIN_PER_ACTIVE_TEAM"

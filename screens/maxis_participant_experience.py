@@ -240,7 +240,7 @@ def _render_maxis_open_board(db, workspace: dict, captain_active: bool, *, inter
             _render_mission_card(db, workspace, mission, captain_active, interactive=interactive)
 
 
-def _render_maxis_captain_authority(db, workspace: dict, device_id: str) -> bool:
+def _render_maxis_captain_authority(db, workspace: dict, device_id: str, captain_recovery=None) -> bool:
     """Keep Captain ownership canonical while using a Personal Key for recovery."""
     if not workspace.get("IsCaptain"):
         if workspace.get("Lifecycle") == "CAPTAIN_SELECTION":
@@ -254,6 +254,19 @@ def _render_maxis_captain_authority(db, workspace: dict, device_id: str) -> bool
         return True
 
     st.warning("Mission Captain access needs to be restored on this device before you can submit.")
+    if captain_recovery is not None:
+        if not st.button("Restore Mission Captain Access", type="primary", width="stretch", key="configured_captain_recovery"):
+            return False
+        try:
+            identity = captain_recovery()
+        except (RuntimeDatabaseError, RuntimeError):
+            identity = None
+        if not identity or str(identity.get("ParticipantID", "")) != str(workspace.get("ParticipantID", "")):
+            st.error("Mission Captain access could not be restored on this device. Please contact the facilitator.")
+            return False
+        restore_participant_identity(identity)
+        st.success("Mission Captain access restored.")
+        st.rerun()
     with st.form("maxis_captain_recovery", clear_on_submit=True):
         key = st.text_input("PERSONAL KEY", type="password", autocomplete="off")
         submitted = st.form_submit_button("Restore Mission Captain Access", type="primary", width="stretch")
@@ -475,7 +488,7 @@ def _render_mission_ai_assistant(workspace: dict) -> None:
         st.info(st.session_state["mx_ai_last_answer"])
 
 
-def render_maxis_theme_park_participant(db, enrollment_credential="", device_id="", workspace=None):
+def render_maxis_theme_park_participant(db, enrollment_credential="", device_id="", workspace=None, captain_recovery=None):
     """Shared participant view with Captain authority layered on top."""
     _inject_mission_theme()
     if workspace is None:
@@ -529,7 +542,7 @@ def render_maxis_theme_park_participant(db, enrollment_credential="", device_id=
         _render_paused_banner()
 
     del enrollment_credential
-    captain_active = _render_maxis_captain_authority(db, workspace, device_id)
+    captain_active = _render_maxis_captain_authority(db, workspace, device_id, captain_recovery=captain_recovery)
 
     # The assistant is read-only and remains useful to every team member.
     # It is shown during READY/ACTIVE/HELD but not after terminal END.

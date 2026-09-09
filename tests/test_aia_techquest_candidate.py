@@ -15,11 +15,11 @@ def _materializer():
     return module
 
 
-def test_aia_candidate_is_preassigned_configurable_open_board_for_250_people():
+def test_aia_candidate_is_random_assign_configurable_open_board_for_250_people():
     content = _materializer().materialize_aia_techquest_content("AIA-TECH-20261023-UAT")
     package = content["Package"]
     assert package["LocalOnly"] is True
-    assert package["EventBlueprint"]["TeamFormationConfiguration"]["Mode"] == "PREASSIGNED"
+    assert package["EventBlueprint"]["TeamFormationConfiguration"]["Mode"] == "RANDOM_ASSIGN"
     assert content["RaceConfiguration"]["StrategyMode"] == "OPEN_MISSION_BOARD"
     assert len(content["TeamTemplates"]) == 25
     assert sum(content["TeamCapacities"].values()) == 250
@@ -31,18 +31,18 @@ def test_aia_candidate_is_preassigned_configurable_open_board_for_250_people():
     assert validate_configuration({"RaceConfiguration": content["RaceConfiguration"]}, [team["TeamID"] for team in content["TeamTemplates"]], project_stations(activities)) == []
 
 
-def test_aia_setup_sql_has_only_hashes_and_disposable_synthetic_roster():
-    from scripts.prepare_aia_techquest_candidate import build_setup_sql, owner_test_account
+def test_aia_setup_sql_is_an_empty_random_assign_fixture_without_credentials():
+    from scripts.prepare_aia_techquest_candidate import build_setup_sql
     sql = build_setup_sql()
     assert "AIA-TECH-20261023-UAT" in sql
     assert "exos_v2_configure_team_formation" in sql
     assert "exos_v2_configure_attendance" in sql
     assert '"AIHelpEnabled":true' in sql
-    assert "PREASSIGNED" in sql
+    assert "RANDOM_ASSIGN" in sql
     assert "250" in sql
-    assert "Q00001" not in sql
+    assert "EnrollmentCredentialHash" not in sql
     assert "Personal Key" not in sql
-    assert owner_test_account() == {"Name": "AIA Certification 001", "Team": "AIA-TECH-20261023-UAT-TEAM-01", "PersonalKey": "Q00001"}
+    assert "participants_v2 where event_id='AIA-TECH-20261023-UAT' and not is_archived)<>0" in sql
 
 
 def test_aia_projector_is_fixed_event_read_only_and_five_second_polled():
@@ -55,8 +55,8 @@ def test_aia_projector_is_fixed_event_read_only_and_five_second_polled():
     assert '@st.fragment(run_every=f"{POLL_INTERVAL_SECONDS}s")' in screen
 
 
-def test_aia_participant_experience_uses_aia_identity_and_read_only_advisory_layer():
+def test_aia_participant_experience_uses_random_identity_and_read_only_advisory_layer():
     source = (ROOT / "screens" / "aia_participant_experience.py").read_text()
-    assert "aia_personal_key_event" in source
+    assert "aia_random_registration_event" in source
     assert "render_maxis_theme_park_participant" in source
     assert "Ask Mission AI" in (ROOT / "screens" / "maxis_participant_experience.py").read_text()
