@@ -468,7 +468,7 @@ BEGIN
       LEFT JOIN public.participant_announcement_acknowledgements_v2 ack ON ack.announcement_id = a.announcement_id AND ack.participant_id = v_session.participant_id
      WHERE a.event_id = v_session.event_id AND (a.expires_at IS NULL OR a.expires_at > now())
        AND (a.target_type = 'ALL' OR (a.target_type = 'TEAM' AND EXISTS (SELECT 1 FROM public.event_announcement_targets_v2 t WHERE t.announcement_id = a.announcement_id AND t.event_id = v_session.event_id AND t.target_id = v_team))
-            OR (a.target_type = 'PARTICIPANT' AND EXISTS (SELECT 1 FROM public.event_announcement_targets_v2 t WHERE t.announcement_id = a.announcement_id AND t.event_id = v_session.event_id AND t.target_id = v_session.participant_id::text))), '[]'::jsonb);
+            OR (a.target_type = 'PARTICIPANT' AND EXISTS (SELECT 1 FROM public.event_announcement_targets_v2 t WHERE t.announcement_id = a.announcement_id AND t.event_id = v_session.event_id AND t.target_id = v_session.participant_id::text)))), '[]'::jsonb);
 END; $$;
 
 CREATE OR REPLACE FUNCTION public.exos_v2_acknowledge_event_announcement(p_session_token text, p_announcement_id uuid)
