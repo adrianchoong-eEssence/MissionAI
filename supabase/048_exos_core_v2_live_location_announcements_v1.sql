@@ -493,7 +493,7 @@ RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path = '' AS $$
       'TargetIDs', coalesce((SELECT jsonb_agg(t.target_id ORDER BY t.target_id) FROM public.event_announcement_targets_v2 t WHERE t.announcement_id = a.announcement_id), '[]'::jsonb),
       'Severity', a.severity, 'Title', a.title, 'Message', a.message, 'CreatedBy', a.created_by, 'CreatedAt', a.created_at,
       'ExpiresAt', a.expires_at, 'AcknowledgementRequired', a.acknowledgement_required,
-      'AcknowledgedCount', (SELECT count(*) FROM public.participant_announcement_acknowledgements_v2 ack WHERE ack.announcement_id = a.announcement_id)), '[]'::jsonb)
+      'AcknowledgedCount', (SELECT count(*) FROM public.participant_announcement_acknowledgements_v2 ack WHERE ack.announcement_id = a.announcement_id))), '[]'::jsonb)
     FROM public.event_announcements_v2 a WHERE a.event_id = trim(p_event_id);
 $$;
 
