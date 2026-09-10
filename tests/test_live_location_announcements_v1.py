@@ -49,6 +49,7 @@ def test_participant_and_mission_control_surfaces_use_only_the_adapter_and_in_ap
     watcher = (ROOT / "services" / "maxis_live_state.py").read_text()
     control = (ROOT / "screens" / "live_location_operations.py").read_text()
     adapter = (ROOT / "data" / "standard_core_v2_adapter.py").read_text()
+    kai = (ROOT / "services" / "kai_location_operations.py").read_text()
     assert "ENABLE LIVE LOCATION" in participant and "LOCATION UNAVAILABLE" in participant
     assert "ACKNOWLEDGE" in participant and "get_participant_announcements" in participant
     assert "background tracking is not guaranteed" in component
@@ -57,6 +58,7 @@ def test_participant_and_mission_control_surfaces_use_only_the_adapter_and_in_ap
     assert "ALL + URGENT announcement" in control and "get_live_location_operator_map" in control
     assert "exos_v2_submit_live_location" in adapter and "exos_v2_send_event_announcement" in adapter
     assert "idempotency_key" in adapter and "uuid.uuid4" in control
+    assert "runtime.send_event_announcement(event_id, **payload)" in kai
 
 
 def test_aia_integration_is_explicit_and_never_uses_gps_for_score():
@@ -89,3 +91,11 @@ def test_window_visibility_guard_keeps_retained_points_unavailable_outside_track
     assert "CREATE OR REPLACE FUNCTION public.exos_v2_live_location_operator_map" in guard
     assert "NOT v_config.enabled OR now() < v_config.tracking_starts_at" in guard
     assert "TO service_role" in guard and "FROM PUBLIC, anon, authenticated" in guard
+
+
+def test_location_history_is_bounded_and_checkpoint_path_has_no_score_mutation():
+    migration = (ROOT / "supabase" / "048_exos_core_v2_live_location_announcements_v1.sql").read_text()
+    assert "LIMIT greatest(1, least(coalesce(p_limit, 20), 100))" in migration
+    checkpoint = migration.split("CREATE OR REPLACE FUNCTION public.exos_v2_live_location_checkpoint_proximity", 1)[1]
+    checkpoint = checkpoint.split("CREATE OR REPLACE FUNCTION public.exos_v2_cleanup_live_location", 1)[0]
+    assert "score" not in checkpoint.casefold()
