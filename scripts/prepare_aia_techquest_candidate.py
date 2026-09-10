@@ -34,7 +34,8 @@ def build_setup_sql(event_id: str = DEFAULT_CERT_EVENT_ID, join_code: str = DEFA
     programme_id, module_id = f"{event_id}-PROGRAMME", f"{event_id}-MISSION-BOARD"
     for mission in missions:
         station = {"Enabled": True, "DisplayOrder": mission["DisplayOrder"], "DisplayName": mission["DisplayName"],
-                   "MissionClass": mission["MissionClass"], "Category": mission["Category"], "EvidenceType": mission["EvidenceType"],
+                   "MissionClass": mission["MissionClass"], "Category": mission["Category"], "Zone": mission["Zone"],
+                   "LocationDescription": mission["LocationDescription"], "ParticipantInstruction": mission["ParticipantInstruction"], "EvidenceType": mission["EvidenceType"],
                    "AIHelpEnabled": True,
                    "Evidence": mission["Evidence"],
                    "ParticipationProrated": mission["ParticipationProrated"], "ScoringMode": mission["ScoringMode"], "Rubric": mission["Rubric"], "Scoring": mission["Scoring"],

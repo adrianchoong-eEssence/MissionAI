@@ -46,6 +46,8 @@ def materialize_aia_techquest_content(event_id: str, *, team_count: int = 25, ca
         mission_rows.append({
             "ActivityID": activity_id, "DisplayOrder": order, "DisplayName": blueprint["DisplayName"],
             "MissionClass": blueprint["MissionClass"], "Category": blueprint["Category"],
+            "Zone": blueprint.get("Zone", ""), "LocationDescription": blueprint.get("LocationDescription", ""),
+            "ParticipantInstruction": blueprint.get("ParticipantInstruction", ""),
             "EvidenceType": evidence_type, "ParticipationProrated": bool(blueprint.get("ParticipationProrated")),
             "ScoringMode": blueprint.get("ScoringMode", "TEAM_FULL"), "Rubric": bool(blueprint.get("Rubric")),
             "Scoring": scoring,
