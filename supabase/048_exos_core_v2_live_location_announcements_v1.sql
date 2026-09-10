@@ -296,7 +296,8 @@ BEGIN
             ) SELECT jsonb_agg(jsonb_build_object(
                 'ParticipantID', p.participant_id::text, 'ParticipantName', p.display_name, 'TeamID', p.team_id,
                 'Latitude', l.latitude, 'Longitude', l.longitude, 'AccuracyMeters', l.accuracy_meters,
-                'LastUpdate', l.received_at, 'Status', CASE WHEN coalesce(c.consent_state, '') <> 'ENABLED' OR l.location_update_id IS NULL THEN 'UNAVAILABLE'
+                'LastUpdate', l.received_at, 'Status', CASE WHEN NOT v_config.enabled OR now() < v_config.tracking_starts_at OR now() >= v_config.tracking_ends_at THEN 'UNAVAILABLE'
+                    WHEN coalesce(c.consent_state, '') <> 'ENABLED' OR l.location_update_id IS NULL THEN 'UNAVAILABLE'
                     WHEN l.received_at >= now() - make_interval(secs => v_config.stale_after_seconds) THEN 'CURRENT' ELSE 'STALE' END
             ) ORDER BY p.team_id, p.display_name)
               FROM public.participants_v2 p

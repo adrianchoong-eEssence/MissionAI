@@ -36,6 +36,7 @@ def test_core_migration_is_additive_scoped_rls_protected_and_uses_canonical_oper
     assert "idempotency_key" in migration and "Idempotent" in migration
     assert "UNIQUE (event_id, idempotency_key)" in migration
     assert "Live location consent is required" in migration
+    assert "NOT v_config.enabled OR now() < v_config.tracking_starts_at" in migration
     assert "LIVE_LOCATION_UPDATED" in migration
     assert "AwardsMissionScore" not in migration
     assert "projector" not in migration.casefold()
@@ -81,3 +82,10 @@ def test_operational_documentation_sets_privacy_and_retention_contracts_without_
     assert "background tracking is not guaranteed" in doc
     assert "does not create a global current-event context" in doc
     assert "does not award a score" in doc
+
+
+def test_window_visibility_guard_keeps_retained_points_unavailable_outside_tracking_time():
+    guard = (ROOT / "supabase" / "050_exos_live_location_window_visibility_guard.sql").read_text()
+    assert "CREATE OR REPLACE FUNCTION public.exos_v2_live_location_operator_map" in guard
+    assert "NOT v_config.enabled OR now() < v_config.tracking_starts_at" in guard
+    assert "TO service_role" in guard and "FROM PUBLIC, anon, authenticated" in guard

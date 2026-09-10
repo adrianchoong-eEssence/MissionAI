@@ -8,7 +8,7 @@ The Core configuration accepts a cadence from 15 to 30 seconds. The default is 2
 
 Raw updates retain captured time, received time, accuracy (when the browser provides it), heading, speed, participant, team, and event. The default retention is 24 hours, configurable from 1 to 168 hours. `exos_v2_cleanup_live_location` performs audited event-scoped cleanup; an authorised scheduler/operator must run it. A stopped participant has no new updates; retained history remains event-scoped reporting data through the configured retention period.
 
-Mission Control receives an authorised event map with all-team, team, and individual views. Team location considers only `CURRENT` reporters. If current reporters are farther apart than the event separation threshold (250m by default), the team is marked `SEPARATED` and no misleading centroid is emitted. A trail is an operator-requested, bounded history read.
+Mission Control receives an authorised event map with all-team, team, and individual views. The map marks retained points `UNAVAILABLE` whenever tracking is disabled or outside its bounded window. Team location considers only `CURRENT` reporters. If current reporters are farther apart than the event separation threshold (250m by default), the team is marked `SEPARATED` and no misleading centroid is emitted. A trail is an operator-requested, bounded history read.
 
 The checkpoint foundation is deliberately non-scoring: `OUTSIDE`, `NEAR`, and `ARRIVED` are proximity facts only. Evidence/review remains the canonical mission-completion path.
 
