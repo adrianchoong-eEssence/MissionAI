@@ -681,13 +681,14 @@ class StandardCoreV2Adapter:
 
     def send_event_announcement(self, event_id, *, target_type, target_ids, severity,
                                 title, message, expires_at, acknowledgement_required,
-                                actor, confirm_all_urgent=False):
+                                actor, idempotency_key, confirm_all_urgent=False):
         return self._rpc("exos_v2_send_event_announcement", {
             "p_event_id": str(event_id or "").strip(), "p_target_type": str(target_type or "").upper(),
             "p_target_ids": list(target_ids or []), "p_severity": str(severity or "").upper(),
             "p_title": str(title or "").strip(), "p_message": str(message or "").strip(),
             "p_expires_at": expires_at, "p_acknowledgement_required": bool(acknowledgement_required),
-            "p_actor": str(actor or "").strip(), "p_confirm_all_urgent": bool(confirm_all_urgent),
+            "p_actor": str(actor or "").strip(), "p_idempotency_key": str(idempotency_key or "").strip(),
+            "p_confirm_all_urgent": bool(confirm_all_urgent),
         })
 
     def get_participant_announcements(self, session_token):

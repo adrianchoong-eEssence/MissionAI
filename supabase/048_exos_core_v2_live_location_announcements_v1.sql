@@ -90,12 +90,15 @@ CREATE TABLE IF NOT EXISTS public.event_announcements_v2 (
     message text NOT NULL,
     acknowledgement_required boolean NOT NULL DEFAULT false,
     created_by text NOT NULL,
+    idempotency_key text NOT NULL CHECK (length(trim(idempotency_key)) BETWEEN 1 AND 128),
+    idempotency_fingerprint text NOT NULL CHECK (length(idempotency_fingerprint) = 32),
     created_at timestamptz NOT NULL DEFAULT now(),
     expires_at timestamptz,
     CHECK (target_type IN ('ALL', 'TEAM', 'PARTICIPANT')),
     CHECK (severity IN ('INFO', 'IMPORTANT', 'URGENT')),
     CHECK (length(trim(message)) BETWEEN 1 AND 2000),
-    CHECK (expires_at IS NULL OR expires_at > created_at)
+    CHECK (expires_at IS NULL OR expires_at > created_at),
+    UNIQUE (event_id, idempotency_key)
 );
 
 CREATE INDEX IF NOT EXISTS event_announcements_event_created_idx
@@ -376,12 +379,22 @@ END; $$;
 CREATE OR REPLACE FUNCTION public.exos_v2_send_event_announcement(
     p_event_id text, p_target_type text, p_target_ids jsonb, p_severity text, p_title text,
     p_message text, p_expires_at timestamptz, p_acknowledgement_required boolean,
-    p_actor text, p_confirm_all_urgent boolean DEFAULT false
+    p_actor text, p_idempotency_key text, p_confirm_all_urgent boolean DEFAULT false
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
-DECLARE v_id uuid; v_target text; v_target_count integer := 0; v_type text := upper(trim(p_target_type)); v_severity text := upper(trim(p_severity));
+DECLARE
+    v_id uuid;
+    v_target text;
+    v_target_count integer := 0;
+    v_type text := upper(trim(p_target_type));
+    v_severity text := upper(trim(p_severity));
+    v_targets jsonb := '[]'::jsonb;
+    v_title text := nullif(trim(coalesce(p_title, '')), '');
+    v_fingerprint text;
+    v_stored_fingerprint text;
 BEGIN
     IF nullif(trim(p_event_id), '') IS NULL OR nullif(trim(p_actor), '') IS NULL OR length(trim(coalesce(p_message, ''))) NOT BETWEEN 1 AND 2000
        OR v_type NOT IN ('ALL', 'TEAM', 'PARTICIPANT') OR v_severity NOT IN ('INFO', 'IMPORTANT', 'URGENT')
+       OR nullif(trim(p_idempotency_key), '') IS NULL OR length(trim(p_idempotency_key)) > 128
        OR (p_expires_at IS NOT NULL AND p_expires_at <= now()) THEN RAISE EXCEPTION 'Announcement is invalid'; END IF;
     IF NOT EXISTS (SELECT 1 FROM public.events_v2 WHERE event_id = trim(p_event_id)) THEN RAISE EXCEPTION 'Event not found'; END IF;
     IF v_type = 'ALL' AND v_severity = 'URGENT' AND NOT coalesce(p_confirm_all_urgent, false) THEN
@@ -390,24 +403,54 @@ BEGIN
     IF v_type <> 'ALL' AND (p_target_ids IS NULL OR jsonb_typeof(p_target_ids) <> 'array' OR jsonb_array_length(p_target_ids) = 0) THEN
         RAISE EXCEPTION 'Targeted announcement requires target IDs';
     END IF;
-    INSERT INTO public.event_announcements_v2(event_id, target_type, severity, title, message, acknowledgement_required, created_by, expires_at)
-    VALUES (trim(p_event_id), v_type, v_severity, nullif(trim(coalesce(p_title, '')), ''), trim(p_message), coalesce(p_acknowledgement_required, false), trim(p_actor), p_expires_at)
-    RETURNING announcement_id INTO v_id;
     IF v_type <> 'ALL' THEN
-        FOR v_target IN SELECT DISTINCT trim(value) FROM jsonb_array_elements_text(p_target_ids) value LOOP
+        SELECT coalesce(jsonb_agg(target_id ORDER BY target_id), '[]'::jsonb)
+          INTO v_targets
+          FROM (SELECT DISTINCT trim(value) AS target_id
+                  FROM jsonb_array_elements_text(p_target_ids) value
+                 WHERE nullif(trim(value), '') IS NOT NULL) normalized_targets;
+        IF jsonb_array_length(v_targets) = 0 THEN RAISE EXCEPTION 'Targeted announcement requires target IDs'; END IF;
+        FOR v_target IN SELECT value FROM jsonb_array_elements_text(v_targets) value LOOP
             IF v_type = 'TEAM' AND NOT EXISTS (SELECT 1 FROM public.teams_v2 WHERE event_id = trim(p_event_id) AND team_id = v_target AND is_active) THEN
                 RAISE EXCEPTION 'Announcement target team is outside this event';
             ELSIF v_type = 'PARTICIPANT' AND NOT EXISTS (SELECT 1 FROM public.participants_v2 WHERE event_id = trim(p_event_id) AND participant_id::text = v_target AND NOT is_archived) THEN
                 RAISE EXCEPTION 'Announcement target participant is outside this event';
             END IF;
-            INSERT INTO public.event_announcement_targets_v2(announcement_id, event_id, target_id) VALUES (v_id, trim(p_event_id), v_target);
             v_target_count := v_target_count + 1;
+        END LOOP;
+    END IF;
+    v_fingerprint := md5(jsonb_build_object(
+        'TargetType', v_type, 'TargetIDs', v_targets, 'Severity', v_severity,
+        'Title', v_title, 'Message', trim(p_message), 'ExpiresAt', p_expires_at,
+        'AcknowledgementRequired', coalesce(p_acknowledgement_required, false), 'Actor', trim(p_actor)
+    )::text);
+    INSERT INTO public.event_announcements_v2(
+        event_id, target_type, severity, title, message, acknowledgement_required,
+        created_by, idempotency_key, idempotency_fingerprint, expires_at
+    ) VALUES (
+        trim(p_event_id), v_type, v_severity, v_title, trim(p_message), coalesce(p_acknowledgement_required, false),
+        trim(p_actor), trim(p_idempotency_key), v_fingerprint, p_expires_at
+    ) ON CONFLICT (event_id, idempotency_key) DO NOTHING
+    RETURNING announcement_id INTO v_id;
+    IF v_id IS NULL THEN
+        SELECT announcement_id, idempotency_fingerprint INTO v_id, v_stored_fingerprint
+          FROM public.event_announcements_v2
+         WHERE event_id = trim(p_event_id) AND idempotency_key = trim(p_idempotency_key);
+        IF v_stored_fingerprint IS DISTINCT FROM v_fingerprint THEN
+            RAISE EXCEPTION 'Announcement idempotency key was already used for a different payload';
+        END IF;
+        RETURN jsonb_build_object('AnnouncementID', v_id::text, 'EventID', trim(p_event_id), 'Sent', true, 'Idempotent', true);
+    END IF;
+    IF v_type <> 'ALL' THEN
+        FOR v_target IN SELECT value FROM jsonb_array_elements_text(v_targets) value LOOP
+            INSERT INTO public.event_announcement_targets_v2(announcement_id, event_id, target_id)
+            VALUES (v_id, trim(p_event_id), v_target);
         END LOOP;
     END IF;
     INSERT INTO public.audit_log_v2(event_id, actor, action, entity_type, entity_id, after_state)
     VALUES (trim(p_event_id), trim(p_actor), 'EVENT_ANNOUNCEMENT_SENT', 'event_announcements_v2', v_id::text,
         jsonb_build_object('TargetType', v_type, 'TargetCount', v_target_count, 'Severity', v_severity, 'AcknowledgementRequired', coalesce(p_acknowledgement_required, false)));
-    RETURN jsonb_build_object('AnnouncementID', v_id::text, 'EventID', trim(p_event_id), 'Sent', true);
+    RETURN jsonb_build_object('AnnouncementID', v_id::text, 'EventID', trim(p_event_id), 'Sent', true, 'Idempotent', false);
 END; $$;
 
 CREATE OR REPLACE FUNCTION public.exos_v2_participant_announcements(p_session_token text)
@@ -458,7 +501,7 @@ REVOKE ALL ON FUNCTION public.exos_v2_configure_live_location(text,boolean,text,
     public.exos_v2_live_location_operator_map(text), public.exos_v2_live_location_history(text,uuid,integer),
     public.exos_v2_upsert_live_location_checkpoint(text,text,text,numeric,numeric,numeric,boolean,text),
     public.exos_v2_cleanup_live_location(text,text),
-    public.exos_v2_send_event_announcement(text,text,jsonb,text,text,text,timestamptz,boolean,text,boolean),
+    public.exos_v2_send_event_announcement(text,text,jsonb,text,text,text,timestamptz,boolean,text,text,boolean),
     public.exos_v2_event_announcements(text)
 FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.exos_v2_set_live_location_consent(text,boolean),
@@ -475,7 +518,7 @@ GRANT EXECUTE ON FUNCTION public.exos_v2_configure_live_location(text,boolean,te
     public.exos_v2_live_location_operator_map(text), public.exos_v2_live_location_history(text,uuid,integer),
     public.exos_v2_upsert_live_location_checkpoint(text,text,text,numeric,numeric,numeric,boolean,text),
     public.exos_v2_cleanup_live_location(text,text),
-    public.exos_v2_send_event_announcement(text,text,jsonb,text,text,text,timestamptz,boolean,text,boolean),
+    public.exos_v2_send_event_announcement(text,text,jsonb,text,text,text,timestamptz,boolean,text,text,boolean),
     public.exos_v2_event_announcements(text)
 TO service_role;
 

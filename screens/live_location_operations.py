@@ -1,6 +1,8 @@
 """Reusable Mission Control surface for Core Live Location + Announcements V1."""
 from __future__ import annotations
 
+import uuid
+
 import pandas as pd
 import streamlit as st
 
@@ -73,16 +75,21 @@ def render_live_location_and_announcements(db, event_id: str) -> None:
     confirm_all_urgent = target_type == "ALL" and severity == "URGENT" and st.checkbox(
         "Confirm ALL + URGENT announcement", key=f"announcement_confirm_all_urgent_{event_id}",
     )
+    idempotency_state_key = f"announcement_idempotency_{event_id}"
+    if idempotency_state_key not in st.session_state:
+        st.session_state[idempotency_state_key] = uuid.uuid4().hex
     if st.button("SEND", type="primary", width="stretch", key=f"announcement_send_{event_id}"):
         try:
             db.runtime.send_event_announcement(
                 event_id, target_type=target_type, target_ids=target_ids, severity=severity,
                 title=title, message=message, expires_at=None, acknowledgement_required=acknowledgement,
-                actor=actor, confirm_all_urgent=confirm_all_urgent,
+                actor=actor, idempotency_key=st.session_state[idempotency_state_key],
+                confirm_all_urgent=confirm_all_urgent,
             )
         except RuntimeDatabaseError as error:
             st.error(str(error))
         else:
+            st.session_state[idempotency_state_key] = uuid.uuid4().hex
             st.success("Announcement sent and audited.")
             st.rerun()
     if announcements:

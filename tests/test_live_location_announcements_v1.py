@@ -33,6 +33,8 @@ def test_core_migration_is_additive_scoped_rls_protected_and_uses_canonical_oper
     assert "p_session_token" in migration and "p_event_id" in migration
     assert "SET search_path = ''" in migration
     assert "ALL + URGENT announcements require explicit confirmation" in migration
+    assert "idempotency_key" in migration and "Idempotent" in migration
+    assert "UNIQUE (event_id, idempotency_key)" in migration
     assert "Live location consent is required" in migration
     assert "LIVE_LOCATION_UPDATED" in migration
     assert "AwardsMissionScore" not in migration
@@ -53,6 +55,7 @@ def test_participant_and_mission_control_surfaces_use_only_the_adapter_and_in_ap
     assert "get_participant_announcements(session_token)" in watcher
     assert "ALL + URGENT announcement" in control and "get_live_location_operator_map" in control
     assert "exos_v2_submit_live_location" in adapter and "exos_v2_send_event_announcement" in adapter
+    assert "idempotency_key" in adapter and "uuid.uuid4" in control
 
 
 def test_aia_integration_is_explicit_and_never_uses_gps_for_score():
