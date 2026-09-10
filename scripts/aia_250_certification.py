@@ -25,10 +25,15 @@ REQUIRED_OPERATIONS = [
 RANDOM_REGISTRATION_ASSERTIONS = [
     "250 canonical participant IDs from the fixed AIA random-registration endpoint",
     "25 teams balanced at 10 with no overfill or dual-team membership",
-    "same-device retry returns the same ParticipantID and TeamID idempotently",
+    "same-tab refresh returns the same ParticipantID and TeamID without another registration",
+    "close-tab/reopen on the same browser restores the canonical participant from its opaque event-scoped browser binding",
+    "close-browser/reopen restores the canonical participant whenever browser storage persists",
+    "same-device retry returns the same ParticipantID and TeamID idempotently with no new RANDOM_ASSIGN",
     "duplicate/similar display names remain separate canonical identities",
     "one canonical PRESENT attendance write per first registration",
-    "same-device reconnect restores identity, team, attendance, and Captain authority",
+    "same-device reconnect performs no second PRESENT attendance write or team assignment",
+    "different-browser/device is a separate identity unless an approved facilitator recovery is used",
+    "Captain reconnect restores authority only through the approved Core recovery path",
 ]
 
 

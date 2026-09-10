@@ -11,23 +11,35 @@
     bytes.forEach(function(value) { binary += String.fromCharCode(value); });
     return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   }
-  function credentialFor(eventId) {
-    const storageKey = "exos.team-formation.v1.enrollment." + eventId;
+  function storedOrGenerated(storageKey) {
     let value = "";
     try { value = window.localStorage.getItem(storageKey) || ""; } catch (_) {}
-    if (!/^[A-Za-z0-9_-]{43}$/.test(value)) {
+    const existed = /^[A-Za-z0-9_-]{43}$/.test(value);
+    if (!existed) {
       const bytes = new Uint8Array(32);
       window.crypto.getRandomValues(bytes);
       value = base64url(bytes);
       try { window.localStorage.setItem(storageKey, value); } catch (_) {}
     }
-    return value;
+    return {value: value, existed: existed};
+  }
+  function bindingFor(eventId) {
+    const credential = storedOrGenerated("exos.team-formation.v1.enrollment." + eventId);
+    const device = storedOrGenerated("exos.team-formation.v1.device." + eventId);
+    return {
+      Credential: credential.value,
+      DeviceID: device.value,
+      // A legacy AIA registration may have a credential but no stored device.
+      // It remains recoverable with a newly persisted device binding.
+      HasStoredCredential: credential.existed,
+      Ready: true
+    };
   }
   window.addEventListener("message", function(event) {
     const message = event.data || {};
     if (message.type !== "streamlit:render") return;
     const eventId = String((message.args || {}).event_id || "").trim();
-    if (eventId) post("streamlit:setComponentValue", {value: {Credential: credentialFor(eventId)}, dataType: "json"});
+    if (eventId) post("streamlit:setComponentValue", {value: bindingFor(eventId), dataType: "json"});
     post("streamlit:setFrameHeight", {height: 0});
   });
   post("streamlit:componentReady", {apiVersion: 1});
