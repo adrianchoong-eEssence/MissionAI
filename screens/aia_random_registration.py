@@ -10,6 +10,10 @@ from data.runtime_database import RuntimeDatabaseError
 from data.standard_core_v2_adapter import get_standard_database
 from screens.participant import normalise_join_name, restore_participant_identity
 from screens.aia_participant_experience import render_aia_theme_park_participant
+from services.live_location_participant import (
+    render_live_location_participant,
+    render_participant_announcements,
+)
 from services.aia_random_registration_event import aia_random_registration_event
 from services.maxis_live_state import watch_maxis_live_state
 
@@ -138,6 +142,10 @@ def render_aia_random_registration() -> None:
     if _valid(player, event_id):
         _persist_session(player, event_id)
         watch_maxis_live_state(runtime, player["SessionToken"])
+        render_participant_announcements(runtime, session_token=player["SessionToken"])
+        render_live_location_participant(
+            runtime, session_token=player["SessionToken"], device_id=device_id,
+        )
         try:
             workspace = runtime.theme_park_race_participant_workspace(player["SessionToken"])
         except RuntimeDatabaseError:

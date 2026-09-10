@@ -37,6 +37,10 @@ _V2_TABLES = {
     "score_transactions_v2", "credit_transactions_v2", "audit_log_v2",
     "projector_state_v2", "marketplace_items_v2", "marketplace_transactions_v2",
     "team_access_sessions_v2",
+    "event_location_configurations_v2", "participant_location_consents_v2",
+    "participant_location_updates_v2", "event_location_checkpoints_v2",
+    "event_announcements_v2", "event_announcement_targets_v2",
+    "participant_announcement_acknowledgements_v2",
 }
 _KNOWN_PRODUCTION_HOSTS = {"bqsbkdfzqyiodivhyxnq.supabase.co"}
 
@@ -612,6 +616,92 @@ class StandardCoreV2Adapter:
         return self._rpc("exos_v2_attendance_summary", {
             "p_event_id": str(event_id or "").strip(),
         })
+
+    # Live Location + Announcements V1 -----------------------------------
+    # All identity-bound calls use a participant session token. Operator/Kai
+    # calls remain service-only Core RPCs and always require an EventID.
+    def configure_live_location(self, event_id, *, enabled, tracking_mode, starts_at,
+                                ends_at, cadence_seconds=20, stale_after_seconds=90,
+                                retention_hours=24, maximum_accuracy_meters=1000,
+                                separation_threshold_meters=250, actor=""):
+        return self._rpc("exos_v2_configure_live_location", {
+            "p_event_id": str(event_id or "").strip(), "p_enabled": bool(enabled),
+            "p_tracking_mode": str(tracking_mode or "INDIVIDUAL").upper(),
+            "p_tracking_starts_at": starts_at, "p_tracking_ends_at": ends_at,
+            "p_cadence_seconds": int(cadence_seconds), "p_stale_after_seconds": int(stale_after_seconds),
+            "p_retention_hours": int(retention_hours), "p_maximum_accuracy_meters": float(maximum_accuracy_meters),
+            "p_separation_threshold_meters": float(separation_threshold_meters), "p_actor": str(actor or "").strip(),
+        })
+
+    def get_live_location_participant_state(self, session_token):
+        return self._rpc("exos_v2_live_location_participant_state", {
+            "p_session_token": str(session_token or "").strip(),
+        }, admin=False)
+
+    def set_live_location_consent(self, session_token, enabled):
+        return self._rpc("exos_v2_set_live_location_consent", {
+            "p_session_token": str(session_token or "").strip(), "p_enabled": bool(enabled),
+        }, admin=False)
+
+    def submit_live_location(self, session_token, device_id, location):
+        payload = dict(location or {})
+        return self._rpc("exos_v2_submit_live_location", {
+            "p_session_token": str(session_token or "").strip(), "p_device_id": str(device_id or "").strip(),
+            "p_latitude": float(payload["latitude"]), "p_longitude": float(payload["longitude"]),
+            "p_accuracy_meters": payload.get("accuracy_meters"), "p_heading_degrees": payload.get("heading_degrees"),
+            "p_speed_mps": payload.get("speed_mps"), "p_captured_at": payload.get("captured_at"),
+        }, admin=False)
+
+    def get_live_location_operator_map(self, event_id):
+        return self._rpc("exos_v2_live_location_operator_map", {"p_event_id": str(event_id or "").strip()})
+
+    def get_live_location_history(self, event_id, participant_id, limit=20):
+        return self._rpc("exos_v2_live_location_history", {
+            "p_event_id": str(event_id or "").strip(), "p_participant_id": str(participant_id or "").strip(),
+            "p_limit": max(1, min(int(limit), 100)),
+        })
+
+    def save_live_location_checkpoint(self, event_id, checkpoint_id, name, latitude, longitude,
+                                      radius_meters, active, actor):
+        return self._rpc("exos_v2_upsert_live_location_checkpoint", {
+            "p_event_id": str(event_id or "").strip(), "p_checkpoint_id": str(checkpoint_id or "").strip(),
+            "p_name": str(name or "").strip(), "p_latitude": float(latitude), "p_longitude": float(longitude),
+            "p_radius_meters": float(radius_meters), "p_active": bool(active), "p_actor": str(actor or "").strip(),
+        })
+
+    def get_live_location_checkpoint_proximity(self, session_token):
+        return self._rpc("exos_v2_live_location_checkpoint_proximity", {
+            "p_session_token": str(session_token or "").strip(),
+        }, admin=False)
+
+    def cleanup_live_location(self, event_id, actor):
+        return self._rpc("exos_v2_cleanup_live_location", {
+            "p_event_id": str(event_id or "").strip(), "p_actor": str(actor or "").strip(),
+        })
+
+    def send_event_announcement(self, event_id, *, target_type, target_ids, severity,
+                                title, message, expires_at, acknowledgement_required,
+                                actor, confirm_all_urgent=False):
+        return self._rpc("exos_v2_send_event_announcement", {
+            "p_event_id": str(event_id or "").strip(), "p_target_type": str(target_type or "").upper(),
+            "p_target_ids": list(target_ids or []), "p_severity": str(severity or "").upper(),
+            "p_title": str(title or "").strip(), "p_message": str(message or "").strip(),
+            "p_expires_at": expires_at, "p_acknowledgement_required": bool(acknowledgement_required),
+            "p_actor": str(actor or "").strip(), "p_confirm_all_urgent": bool(confirm_all_urgent),
+        })
+
+    def get_participant_announcements(self, session_token):
+        return self._rpc("exos_v2_participant_announcements", {
+            "p_session_token": str(session_token or "").strip(),
+        }, admin=False)
+
+    def acknowledge_event_announcement(self, session_token, announcement_id):
+        return self._rpc("exos_v2_acknowledge_event_announcement", {
+            "p_session_token": str(session_token or "").strip(), "p_announcement_id": str(announcement_id or "").strip(),
+        }, admin=False)
+
+    def get_event_announcements(self, event_id):
+        return self._rpc("exos_v2_event_announcements", {"p_event_id": str(event_id or "").strip()})
 
     def get_attendance_roster(self, event_id):
         return self._rpc("exos_v2_attendance_roster", {

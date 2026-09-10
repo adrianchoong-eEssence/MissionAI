@@ -51,6 +51,15 @@ def workspace_live_signature(workspace: dict) -> tuple:
     )
 
 
+def announcement_live_signature(rows) -> tuple:
+    """A stable in-app announcement signature for the existing polling path."""
+    return tuple(sorted(
+        (str(row.get("AnnouncementID", "")), str(row.get("Severity", "")),
+         str(row.get("AcknowledgedAt", "")), str(row.get("ExpiresAt", "")))
+        for row in list(rows or []) if isinstance(row, dict)
+    ))
+
+
 def _canonical_team_score(runtime, workspace: dict) -> float:
     """Read the existing ledger projection only for the live watcher."""
     try:
@@ -89,7 +98,13 @@ def watch_maxis_live_state(runtime, session_token: str) -> None:
     # without changing the broadly reused workspace adapter contract.
     workspace = dict(workspace)
     workspace["TeamScore"] = _canonical_team_score(runtime, workspace)
-    signature = workspace_live_signature(workspace)
+    try:
+        announcements = runtime.get_participant_announcements(session_token)
+    except (AttributeError, RuntimeDatabaseError):
+        announcements = None
+    if isinstance(announcements, list):
+        st.session_state["exos_participant_announcements"] = announcements
+    signature = workspace_live_signature(workspace) + (announcement_live_signature(announcements),)
     previous = st.session_state.get(_SIGNATURE_KEY)
     st.session_state[_SIGNATURE_KEY] = signature
     if previous is not None and previous != signature:

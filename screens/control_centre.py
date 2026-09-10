@@ -30,6 +30,7 @@ from screens.projector_broadcast import (
     DEFAULT_BROADCAST,
     render_broadcast_controller,
 )
+from screens.live_location_operations import render_live_location_and_announcements
 from screens.team_identity import resolve_leaderboard_rows
 
 
@@ -893,6 +894,7 @@ def show_control_centre(db=None):
     else:
         _render_stage_widgets(db, control, event_id, stage_family(stage))
     _render_live_performance(db, event_id)
+    render_live_location_and_announcements(db, event_id)
     st.divider()
     audit_actor = _render_team_management(db, control, event_id)
 
