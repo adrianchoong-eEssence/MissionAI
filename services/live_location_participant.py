@@ -19,6 +19,14 @@ def _time(value) -> str:
         return str(value)
 
 
+def _recovery_guidance(status: str) -> str:
+    if status == "STALE":
+        return "No recent GPS reading. Keep this page open, check permission, GPS and network, then move briefly to refresh."
+    if status == "UNAVAILABLE":
+        return "Location is unavailable. Check browser permission, device location services and network; reopen this page to resume."
+    return "Keep this page open while sharing. Browser background and screen-lock GPS behaviour depends on your device and browser."
+
+
 def render_live_location_participant(runtime, *, session_token: str, device_id: str) -> None:
     """Render only an event's explicitly configured tracking capability."""
     try:
@@ -47,7 +55,9 @@ def render_live_location_participant(runtime, *, session_token: str, device_id: 
                 st.rerun()
         return
     st.success("📍 LIVE LOCATION ON" if status == "CURRENT" else "📍 LIVE LOCATION ON — waiting for a current GPS reading")
-    st.caption(f"Last update: {_time(state.get('LastUpdate'))} · status: {status}")
+    st.markdown(f"**LOCATION STATUS**  \\n+{status}")
+    st.caption(f"LAST UPDATE: {_time(state.get('LastUpdate'))} · ACCURACY: {state.get('AccuracyMeters') if state.get('AccuracyMeters') is not None else '—'} m")
+    st.caption(_recovery_guidance(status))
     reading = participant_live_location(cadence_seconds=state.get("CadenceSeconds", 20), key=f"live_location_{event_id}")
     if not isinstance(reading, dict):
         return

@@ -51,6 +51,12 @@ def test_dedicated_entrypoints_keep_event_identity_server_owned():
     assert "join_code" not in participant.casefold().replace("join_code=george_town_walk_hunt_event()[1]", "")
 
 
+def test_human_gps_entrypoints_pin_the_clean_disposable_event():
+    source = (ROOT / "services" / "george_town_walk_hunt_event.py").read_text(encoding="utf-8")
+    assert '"GEORGE-TOWN-WALK-HUMAN-UAT"' in source
+    assert '"GTHUMAN"' in source
+
+
 def test_harness_is_honest_about_non_execution_and_nera_fixture():
     harness = plan()
     assert harness["Executed"] is False

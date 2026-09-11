@@ -4,8 +4,10 @@ from __future__ import annotations
 from services.hunt_event import configured_hunt_event
 
 
-DEFAULT_EVENT_ID = "GEORGE-TOWN-WALK-20261024-UAT"
-DEFAULT_JOIN_CODE = "GTWALKUAT"
+# Deliberately separate from the populated server-certification fixture.  These
+# fixed entrypoints are for Adrian's clean, real-device GPS UAT only.
+DEFAULT_EVENT_ID = "GEORGE-TOWN-WALK-HUMAN-UAT"
+DEFAULT_JOIN_CODE = "GTHUMAN"
 
 
 def george_town_walk_hunt_event() -> tuple[str, str]:
