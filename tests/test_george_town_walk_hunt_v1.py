@@ -36,6 +36,12 @@ def test_projector_is_explicitly_enabled_and_never_selects_location_data():
         assert forbidden not in projection
 
 
+def test_unreleased_secret_mission_details_are_not_in_participant_workspace():
+    sql = (ROOT / "supabase/051_exos_core_v2_hunt_engine_v1.sql").read_text(encoding="utf-8")
+    workspace = sql.split("CREATE OR REPLACE FUNCTION public.exos_v2_hunt_participant_workspace", 1)[1]
+    assert "AND (NOT m.is_secret OR coalesce(r.is_released, false))" in workspace
+
+
 def test_dedicated_entrypoints_keep_event_identity_server_owned():
     participant = (ROOT / "GeorgeTown_Participant.py").read_text(encoding="utf-8")
     projector = (ROOT / "GeorgeTown_Projector.py").read_text(encoding="utf-8")

@@ -370,13 +370,14 @@ BEGIN
         'EvidenceType', m.evidence_type, 'ScoringMode', m.scoring_mode, 'MaximumScore', m.maximum_score,
         'Instructions', m.participant_instruction, 'Rubric', m.rubric, 'Secret', m.is_secret,
         'MissionState', coalesce(r.mission_state, 'AVAILABLE'),
-        'Visible', (NOT m.is_secret OR coalesce(r.is_released, false)))
+        'Visible', true)
         ORDER BY coalesce(route.route_position, 2147483647), m.mission_id), '[]'::jsonb)
       INTO v_missions FROM public.event_hunt_missions_v2 m LEFT JOIN public.hunt_team_mission_runtime_v2 r
         ON r.event_id = m.event_id AND r.team_id = v_participant.team_id AND r.mission_id = m.mission_id
       LEFT JOIN public.hunt_team_checkpoint_routes_v2 route ON route.event_id = m.event_id AND route.team_id = v_participant.team_id
         AND route.checkpoint_id = m.checkpoint_id
-     WHERE m.event_id = v_session.event_id AND m.is_active;
+     WHERE m.event_id = v_session.event_id AND m.is_active
+       AND (NOT m.is_secret OR coalesce(r.is_released, false));
     SELECT jsonb_build_object('Completed', count(*) FILTER (WHERE mission_state = 'COMPLETED'),
         'PendingReview', count(*) FILTER (WHERE mission_state = 'PENDING_REVIEW'),
         'Total', count(*)) INTO v_progress FROM public.hunt_team_mission_runtime_v2
