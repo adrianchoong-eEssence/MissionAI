@@ -21,3 +21,14 @@
 
 ## Post-merge
 - Run `verification/exos_core_v2_rollback_verify.sql` immediately after non-destructive rollback drills.
+
+## Prepared Hunt Engine V1 chain — owner authorisation required
+
+1. Verify the dedicated target's installed 036, 042–044, and 048 foundation
+   state. Do not infer it from this repository.
+2. Run `supabase/051_exos_core_v2_hunt_engine_v1.sql` only after explicit owner
+   authorisation. It is an additive forward migration.
+3. Run `supabase/verification/exos_v2_hunt_engine_v1_verify.sql` as a read-only
+   postflight check, then use fresh George Town and Nera fixtures for isolation.
+4. `051_exos_core_v2_hunt_engine_v1_rollback.sql` is a guarded rollback. It
+   refuses to delete Hunt data; use it only after an approved empty-target gate.

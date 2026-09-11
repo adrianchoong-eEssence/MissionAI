@@ -190,3 +190,22 @@ Formula R.A.C.E. has a separate Core-v2 staging adapter and product lifecycle.
 Read `docs/RACE_HANDOVER.md` before touching it. Standard Core v2 supplies
 shared platform constraints, not a replacement R.A.C.E. identity, checkpoint,
 wallet, judging, or championship model.
+
+## Hunt Engine V1 — additive configured engine
+
+Hunt is an event-scoped Core-v2 capability selected only by
+`event_hunt_configurations_v2` with `EngineKind = HUNT`. It has reusable
+`WALK` and reserved `ROAD` modes; this branch implements only `WALK`.
+`event_hunt_missions_v2` maps authored Core activities to Hunt mission
+metadata, while Hunt runtime, review snapshots, and adjustments are all
+EventID/TeamID scoped.  048 remains the sole live-location/checkpoint
+authority: its proximity output is never a scoring input.
+
+`OPEN_HUNT` leaves active missions freely selectable. `CONFIGURED_ROUTE` uses
+event/team-scoped checkpoint route rows, so future traffic-spreading routes can
+vary by team without a universal event route or a separate ROAD data model.
+
+Dedicated participant, Mission Control, and public-projector entrypoints use
+a server-owned fixed EventID. The public projection must be explicitly enabled
+per event and exposes team rank, score, completion, and operational state only;
+it contains no participant, location, trail, evidence, or service-key field.

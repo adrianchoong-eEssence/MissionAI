@@ -1,0 +1,48 @@
+{
+  "PackID": "GEORGE_TOWN_WALK_HUNT_UAT_V1",
+  "Purpose": "Disposable functional UAT fixture only. No checkpoint is an approved George Town venue or final route.",
+  "Event": {
+    "EventID": "GEORGE-TOWN-WALK-20261024-UAT",
+    "EventName": "George Town — Mission AI Walk Hunt (UAT)",
+    "EventDate": "2026-10-24",
+    "JoinCode": "GTWALKUAT"
+  },
+  "HuntConfiguration": {
+    "SchemaVersion": 1,
+    "EngineKind": "HUNT",
+    "HuntMode": "WALK",
+    "RouteMode": "OPEN_HUNT",
+    "OperationalState": "READY",
+    "StartWindowOpensAt": "2026-10-24T08:00:00+08:00",
+    "StartWindowClosesAt": "2026-10-24T09:30:00+08:00",
+    "ReturnWindowOpensAt": "2026-10-24T11:30:00+08:00",
+    "ReturnWindowClosesAt": "2026-10-24T12:30:00+08:00"
+  },
+  "TeamFormation": {
+    "Mode": "RANDOM_ASSIGN",
+    "FixtureOnly": true,
+    "Teams": ["Orbit", "Compass", "Lantern", "Mosaic", "Harbour", "Kite"],
+    "CapacityPerTeam": 6
+  },
+  "Location": {
+    "TrackingMode": "INDIVIDUAL",
+    "CadenceSeconds": 20,
+    "StaleAfterSeconds": 90,
+    "RetentionHours": 24,
+    "SeparationThresholdMeters": 250
+  },
+  "Checkpoints": [
+    {"CheckpointID": "GT-UAT-ALPHA", "Name": "Checkpoint Alpha — UAT synthetic point", "Latitude": 5.4141, "Longitude": 100.3372, "RadiusMeters": 90, "Active": true, "UATOnly": true},
+    {"CheckpointID": "GT-UAT-BETA", "Name": "Checkpoint Beta — UAT synthetic point", "Latitude": 5.4150, "Longitude": 100.3381, "RadiusMeters": 90, "Active": true, "UATOnly": true},
+    {"CheckpointID": "GT-UAT-GAMMA", "Name": "Checkpoint Gamma — UAT synthetic point", "Latitude": 5.4134, "Longitude": 100.3390, "RadiusMeters": 90, "Active": true, "UATOnly": true}
+  ],
+  "Missions": [
+    {"MissionID": "GT-M01", "ActivityID": "GT-M01", "Name": "CHECKPOINT ALPHA", "MissionType": "CHECKPOINT", "CheckpointID": "GT-UAT-ALPHA", "EvidenceType": "TEXT", "Scoring": {"Mode": "TEAM_FULL", "Maximum": 20}, "Instructions": "Find the UAT-only synthetic checkpoint and submit the agreed team observation."},
+    {"MissionID": "GT-M02", "ActivityID": "GT-M02", "Name": "STREET DETAIL", "MissionType": "OBSERVATION", "CheckpointID": "GT-UAT-BETA", "EvidenceType": "TEXT", "Scoring": {"Mode": "TEAM_FULL", "Maximum": 20}, "Instructions": "Observe a permitted detail and answer the facilitator-provided UAT prompt."},
+    {"MissionID": "GT-M03", "ActivityID": "GT-M03", "Name": "HUMAN STORY", "MissionType": "PHOTO", "EvidenceType": "PHOTO", "Scoring": {"Mode": "FACILITATOR_RUBRIC", "Maximum": 30, "Rubric": [{"ID": "story", "Maximum": 15}, {"ID": "teamwork", "Maximum": 15}]}, "Instructions": "Capture a team photo that tells a story. Obtain consent from everyone pictured."},
+    {"MissionID": "GT-M04", "ActivityID": "GT-M04", "Name": "AI EYE", "MissionType": "AI", "EvidenceType": "PHOTO", "Scoring": {"Mode": "TEAM_FULL", "Maximum": 20}, "Instructions": "Take a photo, then ask Mission AI what it notices. Mission AI does not verify completion."},
+    {"MissionID": "GT-M05", "ActivityID": "GT-M05", "Name": "FREEZE GEORGE TOWN", "MissionType": "CREATIVE", "EvidenceType": "PHOTO_OR_VIDEO", "Scoring": {"Mode": "FACILITATOR_RUBRIC", "Maximum": 30, "Rubric": [{"ID": "creativity", "Maximum": 15}, {"ID": "clarity", "Maximum": 15}]}, "Instructions": "Create a short team photo or 5–10 second video. Video is limited to 50 MB."},
+    {"MissionID": "GT-M06", "ActivityID": "GT-M06", "Name": "CONNECT", "MissionType": "COLLABORATION", "EvidenceType": "PHOTO", "Scoring": {"Mode": "PARTICIPATION_PRORATED", "Maximum": 30}, "Instructions": "Complete a permitted collaboration with another team. Your Captain selects only PRESENT teammates who took part."},
+    {"MissionID": "GT-M07", "ActivityID": "GT-M07", "Name": "SECRET SIGNAL", "MissionType": "SECRET", "EvidenceType": "TEXT", "Scoring": {"Mode": "TEAM_FULL", "Maximum": 20}, "Secret": true, "Instructions": "This UAT mission is released only by canonical Mission Control state."}
+  ]
+}

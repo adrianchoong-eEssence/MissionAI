@@ -168,3 +168,13 @@ No secret values belong in Git or documentation. Runtime reads:
 - It is not a 250-concurrent-participant readiness or load certification.
 - Formula R.A.C.E. has its own staging adapter, migrations, operational model,
   and UAT gate. Read `docs/RACE_HANDOVER.md`.
+
+## Prepared Hunt migration — not installed
+
+`051_exos_core_v2_hunt_engine_v1.sql` is an additive, prepared migration on
+the George Town branch. It depends on the certified 036 Team Formation, 042
+attendance, 043 participation/rubric scoring concepts, 044 Captain operations,
+and 048 Live Location + Announcements foundation. Repository evidence does
+**not** prove 051 is installed anywhere. Its guarded rollback companion and
+read-only verification script are prepared, but installation requires explicit
+owner authorisation against the dedicated target.

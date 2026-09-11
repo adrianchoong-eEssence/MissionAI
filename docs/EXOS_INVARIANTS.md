@@ -145,3 +145,19 @@ are outside that journey and must never become a fallback for it.
    only verified installation status and query the target before applying SQL.
 3. The frozen Standard baseline is not production certification and is not a
    250-concurrent-participant load certification.
+
+## Hunt Engine V1
+
+1. Hunt selection is explicit configuration, never an EventID/name/client/venue
+   heuristic. Every Hunt read and write supplies the owning EventID.
+2. WALK registration uses the Team Formation opaque credential. A display name
+   is not a recovery or merge key. First successful Hunt registration marks the
+   canonical participant PRESENT atomically only when attendance is configured.
+3. Only an effective Captain with an active Captain session submits Hunt
+   evidence or selects PRESENT participants for participation-prorated scoring.
+4. Checkpoint proximity, GPS, consent, cadence, trail, and separation state are
+   non-scoring operational facts. Evidence/review and the canonical score ledger
+   remain the only Hunt score authority.
+5. `RETURN_NOW` and `HOLD` never mutate scores. `CLOSED` is terminal. A public
+   projector is explicit, fixed-event, read-only, and must never expose a map,
+   individual, trail, private evidence, or operator capability.

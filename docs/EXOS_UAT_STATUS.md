@@ -127,3 +127,12 @@ is needed.
   proof that a deployment/database is live or correctly installed.
 - Mobile polish and journey redesign are not part of the frozen Standard
   runtime contract.
+
+## George Town WALK Hunt V1 candidate
+
+The branch contains source implementation, disposable fixtures, focused source
+tests, a guarded migration/rollback/verification set, and a non-executed load
+harness plan. It has **no** database-installation, deployed, load, iPhone,
+Android, background, screen-lock, network-recovery, or human-UAT PASS claim.
+Nera concurrent-event isolation is represented by source contracts and a
+disposable harness fixture; it must be executed against two authorised events.

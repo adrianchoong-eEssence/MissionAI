@@ -182,3 +182,18 @@ new event or runtime model.
 **Scope:** Local 040 source replaces only the Theme Park runtime-phase and
 open-board operational-control RPCs. It creates no table and does not modify
 035–039, Team Formation V1 semantics, or Formula R.A.C.E.
+
+## 15. Hunt Engine is a configured Core-v2 extension, not an AIA feature
+
+**Decision:** The George Town implementation introduces an additive Hunt
+Engine configuration and mission/runtime contract, with WALK implemented and
+ROAD reserved. It uses the existing Team Formation, attendance, Captain,
+location, announcement, Core submission/review, and score-ledger boundaries.
+
+**Reason:** A single event-specific AIA implementation would make simultaneous
+events and future MAHB Road Rally reuse unsafe. Explicit EventID ownership,
+public-projector opt-in, and a non-scoring GPS boundary preserve isolation.
+
+**Scope:** `051` is prepared only; it is not installed. The George Town UAT
+pack contains synthetic checkpoint coordinates and must not be presented as
+approved real-world route content.

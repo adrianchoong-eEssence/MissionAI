@@ -41,6 +41,10 @@ _V2_TABLES = {
     "participant_location_updates_v2", "event_location_checkpoints_v2",
     "event_announcements_v2", "event_announcement_targets_v2",
     "participant_announcement_acknowledgements_v2",
+    "event_hunt_configurations_v2", "event_hunt_missions_v2",
+    "hunt_team_checkpoint_routes_v2",
+    "hunt_team_mission_runtime_v2", "hunt_scoring_snapshots_v2",
+    "hunt_score_adjustments_v2",
 }
 _KNOWN_PRODUCTION_HOSTS = {"bqsbkdfzqyiodivhyxnq.supabase.co"}
 
@@ -703,6 +707,117 @@ class StandardCoreV2Adapter:
 
     def get_event_announcements(self, event_id):
         return self._rpc("exos_v2_event_announcements", {"p_event_id": str(event_id or "").strip()})
+
+    # Hunt Engine V1 ------------------------------------------------------
+    # The Hunt boundary is generic: no method selects an event by title,
+    # location, client, or calendar date.  WALK is the currently implemented
+    # product mode; ROAD configuration remains reserved for a later engine.
+    def configure_hunt(self, event_id, *, hunt_mode, route_mode,
+                       start_window_opens_at=None, start_window_closes_at=None,
+                       return_window_opens_at=None, return_window_closes_at=None,
+                       actor=""):
+        return self._rpc("exos_v2_configure_hunt", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_hunt_mode": str(hunt_mode or "").upper(),
+            "p_route_mode": str(route_mode or "").upper(),
+            "p_start_window_opens_at": start_window_opens_at,
+            "p_start_window_closes_at": start_window_closes_at,
+            "p_return_window_opens_at": return_window_opens_at,
+            "p_return_window_closes_at": return_window_closes_at,
+            "p_actor": str(actor or "").strip(),
+        })
+
+    def set_hunt_operational_state(self, event_id, operational_state, actor):
+        return self._rpc("exos_v2_set_hunt_operational_state", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_operational_state": str(operational_state or "").upper(),
+            "p_actor": str(actor or "").strip(),
+        })
+
+    def set_hunt_projector_visibility(self, event_id, enabled, actor):
+        return self._rpc("exos_v2_set_hunt_projector_visibility", {
+            "p_event_id": str(event_id or "").strip(), "p_enabled": bool(enabled),
+            "p_actor": str(actor or "").strip(),
+        })
+
+    def save_hunt_checkpoint(self, event_id, checkpoint_id, name, latitude, longitude,
+                             radius_meters, active, actor):
+        return self._rpc("exos_v2_upsert_hunt_checkpoint", {
+            "p_event_id": str(event_id or "").strip(), "p_checkpoint_id": str(checkpoint_id or "").strip(),
+            "p_name": str(name or "").strip(), "p_latitude": float(latitude), "p_longitude": float(longitude),
+            "p_radius_meters": float(radius_meters), "p_active": bool(active), "p_actor": str(actor or "").strip(),
+        })
+
+    def save_hunt_mission(self, event_id, mission, actor):
+        row = dict(mission or {})
+        scoring = dict(row.get("Scoring") or {})
+        return self._rpc("exos_v2_upsert_hunt_mission", {
+            "p_event_id": str(event_id or "").strip(), "p_mission_id": str(row.get("MissionID") or "").strip(),
+            "p_activity_id": str(row.get("ActivityID") or "").strip(), "p_mission_name": str(row.get("Name") or "").strip(),
+            "p_mission_type": str(row.get("MissionType") or "").upper(), "p_checkpoint_id": str(row.get("CheckpointID") or "").strip(),
+            "p_evidence_type": str(row.get("EvidenceType") or "NONE").upper(),
+            "p_scoring_mode": str(scoring.get("Mode") or row.get("ScoringMode") or "TEAM_FULL").upper(),
+            "p_maximum_score": float(scoring.get("Maximum", row.get("MaximumScore", 0)) or 0),
+            "p_participant_instruction": str(row.get("Instructions") or ""),
+            "p_rubric": list(scoring.get("Rubric") or row.get("Rubric") or []),
+            "p_is_secret": bool(row.get("Secret") or row.get("is_secret")),
+            "p_is_active": bool(row.get("Active", row.get("is_active", True))),
+            "p_mission_payload": dict(row.get("Payload") or row.get("mission_payload") or {}),
+            "p_actor": str(actor or "").strip(),
+        })
+
+    def set_hunt_mission_availability(self, event_id, team_id, mission_id, *, released,
+                                      mission_state="AVAILABLE", actor=""):
+        return self._rpc("exos_v2_set_hunt_mission_availability", {
+            "p_event_id": str(event_id or "").strip(), "p_team_id": str(team_id or "").strip(),
+            "p_mission_id": str(mission_id or "").strip(), "p_released": bool(released),
+            "p_mission_state": str(mission_state or "AVAILABLE").upper(), "p_actor": str(actor or "").strip(),
+        })
+
+    def register_hunt_random_participant(self, join_code, display_name, device_id, enrollment_credential):
+        """First-arrival RANDOM_ASSIGN plus atomic PRESENT attendance for a configured WALK Hunt."""
+        return self._identity(self._rpc("exos_v2_hunt_register_random", {
+            "p_join_code": str(join_code or "").strip(), "p_display_name": str(display_name or "").strip(),
+            "p_device_id": str(device_id or "").strip(), "p_enrollment_credential": str(enrollment_credential or ""),
+        }, admin=False))
+
+    def save_hunt_team_route(self, event_id, team_id, checkpoint_ids, actor):
+        return self._rpc("exos_v2_save_hunt_team_route", {
+            "p_event_id": str(event_id or "").strip(), "p_team_id": str(team_id or "").strip(),
+            "p_checkpoint_ids": list(checkpoint_ids or []), "p_actor": str(actor or "").strip(),
+        })
+
+    def hunt_participant_workspace(self, session_token):
+        return self._rpc("exos_v2_hunt_participant_workspace", {
+            "p_session_token": str(session_token or "").strip(),
+        }, admin=False)
+
+    def submit_hunt_mission(self, session_token, mission_id, submission_payload=None, evidence=None,
+                            completing_participant_ids=None):
+        return self._rpc("exos_v2_hunt_submit_mission", {
+            "p_session_token": str(session_token or "").strip(), "p_mission_id": str(mission_id or "").strip(),
+            "p_submission_payload": dict(submission_payload or {}), "p_evidence": dict(evidence or {}),
+            "p_completing_participant_ids": list(completing_participant_ids or []),
+        }, admin=False)
+
+    def review_hunt_submission(self, submission_id, expected_submitted_at, decision, *, rubric_scores=None,
+                               actor="", reason="", idempotency_key=""):
+        return self._rpc("exos_v2_hunt_review_submission", {
+            "p_submission_id": str(submission_id or "").strip(), "p_expected_submitted_at": expected_submitted_at,
+            "p_decision": str(decision or "").upper(), "p_rubric_scores": dict(rubric_scores or {}),
+            "p_actor": str(actor or "").strip(), "p_reason": str(reason or ""),
+            "p_idempotency_key": str(idempotency_key or "").strip(),
+        })
+
+    def adjust_hunt_score(self, event_id, team_id, score_delta, reason, actor, idempotency_key):
+        return self._rpc("exos_v2_hunt_adjust_score", {
+            "p_event_id": str(event_id or "").strip(), "p_team_id": str(team_id or "").strip(),
+            "p_score_delta": float(score_delta), "p_reason": str(reason or "").strip(),
+            "p_actor": str(actor or "").strip(), "p_idempotency_key": str(idempotency_key or "").strip(),
+        })
+
+    def get_hunt_operator_snapshot(self, event_id):
+        return self._rpc("exos_v2_hunt_operator_snapshot", {"p_event_id": str(event_id or "").strip()})
 
     def get_attendance_roster(self, event_id):
         return self._rpc("exos_v2_attendance_roster", {
