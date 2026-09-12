@@ -57,6 +57,17 @@ def test_human_gps_entrypoints_pin_the_clean_disposable_event():
     assert '"GTHUMAN"' in source
 
 
+def test_mission_control_live_map_is_facilitator_facing():
+    source = (ROOT / "screens" / "hunt_mission_control.py").read_text(encoding="utf-8")
+    for label in (
+        "LIVE", "LAST SEEN / STALE", "LOCATION UNAVAILABLE", "Checkpoint Proximity",
+        "TOGETHER", "SEPARATED", "PARTIAL REPORTING", "NO LIVE LOCATION",
+        "Not near checkpoint", "Near checkpoint", "Arrived",
+    ):
+        assert label in source
+    assert 'st.json(configuration)' not in source
+
+
 def test_harness_is_honest_about_non_execution_and_nera_fixture():
     harness = plan()
     assert harness["Executed"] is False
