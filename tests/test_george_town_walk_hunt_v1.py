@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from content_packs.george_town_walk_hunt_v1.materialize import candidate_plan, load_pack
+from data.standard_core_v2_adapter import StandardCoreV2Adapter
 from scripts.george_town_hunt_load_harness import plan
 
 
@@ -66,6 +67,17 @@ def test_mission_control_live_map_is_facilitator_facing():
     ):
         assert label in source
     assert 'st.json(configuration)' not in source
+
+
+def test_live_location_history_keeps_the_full_movement_trail():
+    class FakeAdapter:
+        def _request(self, method, path, payload, *, admin=True):
+            assert (method, path, admin) == ("POST", "rpc/exos_v2_live_location_history", True)
+            assert payload["p_limit"] == 20
+            return [{"Latitude": 5.1}, {"Latitude": 5.2}]
+
+    trail = StandardCoreV2Adapter.get_live_location_history(FakeAdapter(), "GEORGE-TOWN-WALK-HUMAN-UAT", "participant", 20)
+    assert trail == [{"Latitude": 5.1}, {"Latitude": 5.2}]
 
 
 def test_harness_is_honest_about_non_execution_and_nera_fixture():

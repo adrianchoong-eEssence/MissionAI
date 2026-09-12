@@ -660,10 +660,14 @@ class StandardCoreV2Adapter:
         return self._rpc("exos_v2_live_location_operator_map", {"p_event_id": str(event_id or "").strip()})
 
     def get_live_location_history(self, event_id, participant_id, limit=20):
-        return self._rpc("exos_v2_live_location_history", {
+        # Unlike state RPCs, history is an ordered collection.  Do not use
+        # _rpc() here: its single-row convenience behaviour would collapse a
+        # real movement trail to its newest point.
+        result = self._request("POST", "rpc/exos_v2_live_location_history", {
             "p_event_id": str(event_id or "").strip(), "p_participant_id": str(participant_id or "").strip(),
             "p_limit": max(1, min(int(limit), 100)),
         })
+        return result if isinstance(result, list) else ([] if not result else [result])
 
     def save_live_location_checkpoint(self, event_id, checkpoint_id, name, latitude, longitude,
                                       radius_meters, active, actor):

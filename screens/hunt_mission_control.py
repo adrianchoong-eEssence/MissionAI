@@ -302,13 +302,22 @@ def _live_map(runtime, event_id: str, snapshot: dict) -> None:
         if row:
             st.dataframe([participant_card(row)], hide_index=True, width="stretch")
             try:
-                trail = list(runtime.get_live_location_history(event_id, row.get("ParticipantID"), 20) or [])
+                history = runtime.get_live_location_history(event_id, row.get("ParticipantID"), 20)
             except RuntimeDatabaseError:
                 st.warning("Movement trail is temporarily unavailable. Refresh in a moment.")
-                trail = []
+                history = []
+            if isinstance(history, dict):
+                history = history.get("History") or history.get("Locations") or [history]
+            trail = [dict(point) for point in list(history or []) if isinstance(point, dict)]
             if trail:
-                trail_map = pd.DataFrame([{"lat": point["Latitude"], "lon": point["Longitude"]} for point in trail])
-                st.map(trail_map, latitude="lat", longitude="lon", size=30)
+                trail_points = [
+                    {"lat": point.get("Latitude", point.get("latitude")), "lon": point.get("Longitude", point.get("longitude"))}
+                    for point in trail
+                    if point.get("Latitude", point.get("latitude")) is not None
+                    and point.get("Longitude", point.get("longitude")) is not None
+                ]
+                if trail_points:
+                    st.map(pd.DataFrame(trail_points), latitude="lat", longitude="lon", size=30)
                 st.dataframe([
                     {"Recorded": _age(point.get("ReceivedAt") or point.get("CapturedAt")),
                      "Accuracy": f"±{float(point['AccuracyMeters']):.0f} m" if point.get("AccuracyMeters") is not None else "—"}
