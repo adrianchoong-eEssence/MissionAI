@@ -115,6 +115,48 @@ def _operator() -> str:
     return str(st.session_state.get("hunt_control_actor", "") or "").strip()
 
 
+def _hybrid_capacity_overview(runtime, event_id: str) -> None:
+    """Show ENCA's capacity, anchor check-in, and country distribution safely."""
+    try:
+        hybrid = runtime.get_hybrid_anchored_operator_roster(event_id)
+        teams = [dict(row) for row in runtime.get_teams(event_id)]
+    except RuntimeDatabaseError:
+        return
+    participants = [dict(row) for row in list(hybrid.get("Participants") or [])]
+    if not participants or not teams:
+        return
+    capacity = sum(int(team.get("Capacity") or 0) for team in teams)
+    present = sum(str(row.get("AttendanceState") or "").upper() == "PRESENT" for row in participants)
+    absent = sum(str(row.get("AttendanceState") or "").upper() == "ABSENT" for row in participants)
+    anchors = [row for row in participants if str(row.get("AssignmentRole") or "").upper() == "HOD_ANCHOR"]
+    checked_in = sum(str(row.get("AttendanceState") or "").upper() == "PRESENT" for row in anchors)
+    st.markdown("#### ENCA UAT CAPACITY")
+    metrics = st.columns(6)
+    metrics[0].metric("Capacity", capacity)
+    metrics[1].metric("Registered", len(participants))
+    metrics[2].metric("Present", present)
+    metrics[3].metric("Absent", absent)
+    metrics[4].metric("HOD expected", len(anchors))
+    metrics[5].metric("HOD checked in", checked_in)
+    rows = []
+    for team in teams:
+        team_id = str(team.get("TeamID") or "")
+        members = [row for row in participants if str(row.get("TeamID") or "") == team_id]
+        anchor = next((row for row in members if str(row.get("AssignmentRole") or "").upper() == "HOD_ANCHOR"), {})
+        captain = next((row for row in members if row.get("IsCaptain")), {})
+        rows.append({
+            "Country": f"{team.get('Flag') or ''} {team.get('Country') or team.get('TeamName') or 'Country'}".strip(),
+            "Capacity": int(team.get("Capacity") or 0),
+            "Registered": len(members),
+            "Present": sum(str(row.get("AttendanceState") or "").upper() == "PRESENT" for row in members),
+            "HOD": anchor.get("DisplayName") or "—",
+            "HOD check-in": "Present" if str(anchor.get("AttendanceState") or "").upper() == "PRESENT" else "Not checked in",
+            "Captain": captain.get("DisplayName") or "Not assigned",
+        })
+    _render_facilitator_table(rows)
+    st.caption("Country identities, route references, Hunt missions, stage rules, and points are UAT-only placeholders pending ENCA owner approval.")
+
+
 def _overview(runtime, event_id: str, snapshot: dict) -> None:
     configuration = dict(snapshot.get("Configuration") or {})
     st.subheader("OVERVIEW")
@@ -132,6 +174,7 @@ def _overview(runtime, event_id: str, snapshot: dict) -> None:
         present = int(attendance.get("Present", 0) or 0)
         expected = int(attendance.get("Registered", attendance.get("Expected", 0)) or 0)
         st.metric("Attendance", f"{present} / {expected}" if expected else str(present))
+    _hybrid_capacity_overview(runtime, event_id)
     actor = _operator()
     choices = list(state_labels)
     selected_label = st.selectbox(

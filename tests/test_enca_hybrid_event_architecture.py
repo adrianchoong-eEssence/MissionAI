@@ -94,6 +94,16 @@ def test_entrypoints_and_operator_surfaces_pin_the_enca_event_without_displaying
     assert "derive_personal_key_credential" in screen
     for tab in ("HOD ANCHORS", "STAGES", "LIVE MAP", "BONUS / ADJUSTMENT"):
         assert tab in mission_control
+    assert "ENCA UAT CAPACITY" in mission_control
+    for entrypoint in ("ENCA_Participant.py", "ENCA_MissionControl.py", "ENCA_Projector.py"):
+        assert (ROOT / entrypoint).is_file()
+
+
+def test_enca_kai_operations_stay_event_scoped_and_offer_required_operator_reads():
+    source = (ROOT / "services" / "hunt_kai_operations.py").read_text(encoding="utf-8")
+    for intent in ("STATUS", "HYBRID_ROSTER", "DISTRIBUTION", "CAPTAINS", "STAGE_STATUS", "LEADERBOARD", "PENDING_REVIEWS", "ANNOUNCE", "ADJUST_SCORE"):
+        assert f'"{intent}"' in source
+    assert "get_hybrid_anchored_operator_roster(event_id)" in source
 
 
 def test_public_projector_normalisation_strips_all_but_safe_cumulative_contract():

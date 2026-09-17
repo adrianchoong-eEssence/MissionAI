@@ -45,8 +45,8 @@ def _frame(client: EncaPublicProjectorClient) -> None:
     )
     current = _safe(event["CurrentStage"] or "AWAITING NEXT STAGE")
     st.markdown(
-        '<main class="enca-projector"><div class="enca-kicker">GEORGE TOWN · PENANG</div>'
-        '<div class="enca-title">ENCA TEAM CHALLENGE</div>'
+        '<main class="enca-projector"><div class="enca-kicker">ENCA GROUP · GEORGE TOWN · PENANG</div>'
+        '<div class="enca-title">TEAM CHALLENGE</div>'
         f'<div class="enca-stage">CURRENT STAGE · {current}</div><div class="enca-state">{_safe(event["State"])}</div>'
         f'<section class="enca-grid">{cards}</section></main>', unsafe_allow_html=True,
     )

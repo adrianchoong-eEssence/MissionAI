@@ -306,7 +306,7 @@ class StandardCoreV2Adapter:
             if isinstance(item, dict) and item.get("TeamID")
         }
         rows = self._rows("teams_v2", {
-            "event_id": f"eq.{event_id}", "select": "team_id,team_name,country,team_flag,is_active,created_at",
+            "event_id": f"eq.{event_id}", "select": "team_id,team_name,country,team_flag,team_capacity,is_active,created_at",
             "order": "team_id.asc",
         })
         output = []
@@ -324,6 +324,7 @@ class StandardCoreV2Adapter:
                 "Icon": str(extra.get("Icon", "") or ""),
                 "Emoji": str(extra.get("Emoji", "") or ""),
                 "Image": str(extra.get("Image", "") or ""),
+                "Capacity": int(row.get("team_capacity") or 0),
                 "Status": "Active" if row.get("is_active", True) else "Inactive",
             })
         return output

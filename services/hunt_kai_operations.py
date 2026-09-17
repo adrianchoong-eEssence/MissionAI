@@ -27,6 +27,30 @@ def hunt_checkpoint_lookup(runtime, event_id: str, *, checkpoint_id: str = "") -
     return {"EventID": str(event_id), "Checkpoints": checkpoints}
 
 
+def _hybrid_distribution(runtime, event_id: str) -> dict:
+    """Return the event-scoped formation distribution for an operator intent."""
+    roster = runtime.get_hybrid_anchored_operator_roster(event_id)
+    teams = {str(row.get("TeamID")): dict(row) for row in runtime.get_teams(event_id)}
+    participants = [dict(row) for row in list(roster.get("Participants") or [])]
+    distribution = []
+    for team_id, team in teams.items():
+        members = [row for row in participants if str(row.get("TeamID")) == team_id]
+        distribution.append({
+            "Team": str(team.get("TeamName") or "Team"),
+            "Country": str(team.get("Country") or ""),
+            "Capacity": int(team.get("Capacity") or 0),
+            "Registered": len(members),
+            "Present": sum(str(row.get("AttendanceState") or "").upper() == "PRESENT" for row in members),
+            "HODCheckIn": sum(
+                str(row.get("AssignmentRole") or "").upper() == "HOD_ANCHOR"
+                and str(row.get("AttendanceState") or "").upper() == "PRESENT"
+                for row in members
+            ),
+            "Captain": next((str(row.get("DisplayName") or "") for row in members if row.get("IsCaptain")), ""),
+        })
+    return {"EventID": str(event_id), "Distribution": distribution}
+
+
 def hunt_operation(runtime, event_id: str, intent: str, **payload) -> dict:
     """Route Kai to the same adapter operations as Mission Control."""
     action = str(intent or "").upper().strip()
@@ -41,8 +65,19 @@ def hunt_operation(runtime, event_id: str, intent: str, **payload) -> dict:
                                          payload.get("reason"), payload.get("actor"), payload.get("idempotency_key"))
     if action == "HYBRID_ROSTER":
         return runtime.get_hybrid_anchored_operator_roster(event_id)
+    if action == "DISTRIBUTION":
+        return _hybrid_distribution(runtime, event_id)
+    if action == "CAPTAINS":
+        roster = runtime.get_hybrid_anchored_operator_roster(event_id)
+        return {"EventID": str(event_id), "Captains": [
+            row for row in list(roster.get("Participants") or []) if row.get("IsCaptain")
+        ]}
     if action == "STAGE_STATUS":
         return runtime.get_competition_stage_snapshot(event_id)
+    if action == "LEADERBOARD":
+        return runtime.get_competition_stage_snapshot(event_id)
+    if action == "PENDING_REVIEWS":
+        return {"EventID": str(event_id), "PendingReviews": list(runtime.get_hunt_operator_snapshot(event_id).get("PendingReviews") or [])}
     if action == "SET_STAGE_STATE":
         return runtime.set_competition_stage_state(event_id, payload.get("stage_id"), payload.get("stage_state"),
                                                   payload.get("actor"))

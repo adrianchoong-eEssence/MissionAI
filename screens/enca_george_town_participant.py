@@ -27,7 +27,8 @@ def render_enca_george_town_participant(*, event_id: str, join_code: str) -> Non
     runtime = get_standard_database()
     binding = participant_device_binding(event_id, key=f"enca_hybrid_binding_{event_id}")
     if binding is None:
-        st.title("ENCA TEAM BUILDING 2026")
+        st.title("ENCA GROUP")
+        st.caption("MISSION AI · GEORGE TOWN UAT")
         st.info("Restoring this device securely…")
         return
     credential, device_id = binding["Credential"], binding["DeviceID"]
@@ -54,8 +55,8 @@ def render_enca_george_town_participant(*, event_id: str, join_code: str) -> Non
     if not event or str(event.get("EventID") or "") != event_id:
         st.error("This ENCA Mission AI event is not available yet.")
         return
-    st.title("ENCA TEAM BUILDING 2026")
-    st.caption("GEORGE TOWN · MISSION AI")
+    st.title("ENCA GROUP")
+    st.caption("MISSION AI · GEORGE TOWN UAT")
     st.info("Enter your name once. Mission AI will assign a country team automatically and reconnect this device safely.")
     with st.form("enca_general_registration", clear_on_submit=False):
         first_name = st.text_input("FIRST / GIVEN NAME", autocomplete="given-name")
