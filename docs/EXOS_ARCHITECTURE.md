@@ -209,3 +209,26 @@ Dedicated participant, Mission Control, and public-projector entrypoints use
 a server-owned fixed EventID. The public projection must be explicitly enabled
 per event and exposes team rank, score, completion, and operational state only;
 it contains no participant, location, trail, evidence, or service-key field.
+
+## ENCA Hybrid Anchored formation and competition stages — prepared extension
+
+`053_enca_hybrid_event_architecture.sql` is an additive, prepared-only Core
+extension for events that explicitly configure
+`TeamFormation.Mode = HYBRID_ANCHORED`. It composes rather than replaces Team
+Formation V1: HOD anchors are canonical pre-assigned participants identified by
+event-scoped opaque Personal-Key-derived credential hashes, and the general
+path is server-randomized across least-occupied below-capacity teams. Both
+claim/register paths are device-bound and idempotent; names and requested teams
+are not recovery or allocation credentials. HOD anchor status is separate from
+the existing single-Captain lifecycle and HOD claim does not create a Captain.
+
+The extension stores ordered scored stages in
+`event_competition_stages_v2` while using the existing immutable
+`score_transactions_v2` ledger for every cumulative result. A Hunt submission
+is server-blocked until the configured Hunt stage is active. Its public
+projector is a separate, explicitly enabled safe projection of country/flag,
+rank, cumulative score, and current stage; it carries no participant/location/
+evidence payload. Participant live-location sharing remains opt-in and
+defaults `OFF`; the optional `TEAM_LEADERS` projection can return only other
+teams' effective Captain locations. It does not alter facilitator individual
+location authority or decide own-team display.

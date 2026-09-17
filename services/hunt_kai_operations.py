@@ -39,4 +39,16 @@ def hunt_operation(runtime, event_id: str, intent: str, **payload) -> dict:
     if action == "ADJUST_SCORE":
         return runtime.adjust_hunt_score(event_id, payload.get("team_id"), payload.get("score_delta"),
                                          payload.get("reason"), payload.get("actor"), payload.get("idempotency_key"))
+    if action == "HYBRID_ROSTER":
+        return runtime.get_hybrid_anchored_operator_roster(event_id)
+    if action == "STAGE_STATUS":
+        return runtime.get_competition_stage_snapshot(event_id)
+    if action == "SET_STAGE_STATE":
+        return runtime.set_competition_stage_state(event_id, payload.get("stage_id"), payload.get("stage_state"),
+                                                  payload.get("actor"))
+    if action == "RECORD_STAGE_SCORE":
+        return runtime.record_competition_stage_score(
+            event_id, payload.get("stage_id"), payload.get("team_id"), payload.get("score_delta"),
+            payload.get("reason"), payload.get("actor"), payload.get("idempotency_key"),
+        )
     raise ValueError("Unsupported canonical Hunt operation")

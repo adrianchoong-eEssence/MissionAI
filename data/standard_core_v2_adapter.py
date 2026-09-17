@@ -45,6 +45,7 @@ _V2_TABLES = {
     "hunt_team_checkpoint_routes_v2",
     "hunt_team_mission_runtime_v2", "hunt_scoring_snapshots_v2",
     "hunt_score_adjustments_v2",
+    "event_competition_stages_v2",
 }
 _KNOWN_PRODUCTION_HOSTS = {"bqsbkdfzqyiodivhyxnq.supabase.co"}
 
@@ -499,6 +500,46 @@ class StandardCoreV2Adapter:
             raise RuntimeDatabaseError("Team Formation is not open for this event.")
         return self._identity(self._rpc(rpc, payload, admin=False))
 
+    # Hybrid anchored formation is an additive composition over Team Formation
+    # V1. Its HOD identity and general RANDOM_ASSIGN paths stay distinct at
+    # the Core boundary; callers never supply a requested team ID.
+    def configure_hybrid_anchored_team_formation(self, event_id, team_capacities,
+                                                  hod_anchor_roster, actor):
+        return self._rpc("exos_v2_configure_hybrid_anchored_team_formation", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_team_capacities": dict(team_capacities or {}),
+            "p_hod_anchor_roster": list(hod_anchor_roster or []),
+            "p_actor": str(actor or "").strip(),
+        })
+
+    def open_hybrid_anchored_team_formation(self, event_id, actor):
+        return self._rpc("exos_v2_open_hybrid_anchored_team_formation", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_actor": str(actor or "").strip(),
+        })
+
+    def register_hybrid_anchored_random_participant(self, join_code, display_name,
+                                                     device_id, enrollment_credential):
+        return self._identity(self._rpc("exos_v2_hybrid_anchored_register_random", {
+            "p_join_code": str(join_code or "").strip(),
+            "p_display_name": str(display_name or "").strip(),
+            "p_device_id": str(device_id or "").strip(),
+            "p_enrollment_credential": str(enrollment_credential or ""),
+        }, admin=False))
+
+    def claim_hybrid_anchored_hod_personal_key(self, join_code, enrollment_credential,
+                                                device_id):
+        return self._identity(self._rpc("exos_v2_hybrid_anchored_claim_personal_key", {
+            "p_join_code": str(join_code or "").strip(),
+            "p_enrollment_credential": str(enrollment_credential or ""),
+            "p_device_id": str(device_id or "").strip(),
+        }, admin=False))
+
+    def get_hybrid_anchored_operator_roster(self, event_id):
+        return self._rpc("exos_v2_hybrid_anchored_operator_roster", {
+            "p_event_id": str(event_id or "").strip(),
+        })
+
     def register_aia_random_participant(self, display_name, device_id, enrollment_credential):
         """AIA's fixed-event wrapper: Core RANDOM_ASSIGN plus first-arrival P0-A."""
         return self._identity(self._rpc("exos_v2_aia_tech_register_random", {
@@ -621,6 +662,48 @@ class StandardCoreV2Adapter:
             "p_event_id": str(event_id or "").strip(),
         })
 
+    # Competition stages share the existing score_transactions_v2 ledger.
+    # The adapter never totals, ranks, or rewrites scores locally.
+    def save_competition_stage(self, event_id, stage, actor):
+        row = dict(stage or {})
+        return self._rpc("exos_v2_upsert_competition_stage", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_stage_id": str(row.get("StageID") or "").strip(),
+            "p_stage_no": int(row.get("StageNo") or 0),
+            "p_stage_name": str(row.get("StageName") or "").strip(),
+            "p_stage_kind": str(row.get("StageKind") or "STANDARD").upper(),
+            "p_is_scored": bool(row.get("Scored", True)),
+            "p_stage_state": str(row.get("State") or "LOCKED").upper(),
+            "p_hidden_until_available": bool(row.get("HiddenUntilAvailable", True)),
+            "p_stage_payload": dict(row.get("Payload") or {}),
+            "p_actor": str(actor or "").strip(),
+        })
+
+    def set_competition_stage_state(self, event_id, stage_id, stage_state, actor):
+        return self._rpc("exos_v2_set_competition_stage_state", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_stage_id": str(stage_id or "").strip(),
+            "p_stage_state": str(stage_state or "").upper(),
+            "p_actor": str(actor or "").strip(),
+        })
+
+    def record_competition_stage_score(self, event_id, stage_id, team_id, score_delta,
+                                       reason, actor, idempotency_key):
+        return self._rpc("exos_v2_record_competition_stage_score", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_stage_id": str(stage_id or "").strip(),
+            "p_team_id": str(team_id or "").strip(),
+            "p_score_delta": float(score_delta),
+            "p_reason": str(reason or "").strip(),
+            "p_actor": str(actor or "").strip(),
+            "p_idempotency_key": str(idempotency_key or "").strip(),
+        })
+
+    def get_competition_stage_snapshot(self, event_id):
+        return self._rpc("exos_v2_competition_stage_snapshot", {
+            "p_event_id": str(event_id or "").strip(),
+        })
+
     # Live Location + Announcements V1 -----------------------------------
     # All identity-bound calls use a participant session token. Operator/Kai
     # calls remain service-only Core RPCs and always require an EventID.
@@ -639,6 +722,18 @@ class StandardCoreV2Adapter:
 
     def get_live_location_participant_state(self, session_token):
         return self._rpc("exos_v2_live_location_participant_state", {
+            "p_session_token": str(session_token or "").strip(),
+        }, admin=False)
+
+    def set_participant_location_visibility(self, event_id, visibility_mode, actor):
+        return self._rpc("exos_v2_set_participant_location_visibility", {
+            "p_event_id": str(event_id or "").strip(),
+            "p_visibility_mode": str(visibility_mode or "OFF").upper(),
+            "p_actor": str(actor or "").strip(),
+        })
+
+    def get_other_team_leader_locations(self, session_token):
+        return self._rpc("exos_v2_other_team_leader_locations", {
             "p_session_token": str(session_token or "").strip(),
         }, admin=False)
 
@@ -793,6 +888,11 @@ class StandardCoreV2Adapter:
 
     def hunt_participant_workspace(self, session_token):
         return self._rpc("exos_v2_hunt_participant_workspace", {
+            "p_session_token": str(session_token or "").strip(),
+        }, admin=False)
+
+    def hybrid_anchored_hunt_workspace(self, session_token):
+        return self._rpc("exos_v2_hybrid_anchored_hunt_workspace", {
             "p_session_token": str(session_token or "").strip(),
         }, admin=False)
 

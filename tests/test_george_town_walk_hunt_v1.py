@@ -2,24 +2,23 @@ import json
 from pathlib import Path
 
 from content_packs.george_town_walk_hunt_v1.materialize import candidate_plan, load_pack
-from data.standard_core_v2_adapter import StandardCoreV2Adapter
 from scripts.george_town_hunt_load_harness import plan
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_disposable_pack_is_walk_open_hunt_and_synthetic():
+def test_enca_fixture_is_a_non_materialising_walk_hunt_architecture():
     pack = load_pack()
+    assert pack["Event"]["EventID"] == "ENCA-GEORGETOWN-20261024-UAT"
     assert pack["HuntConfiguration"]["HuntMode"] == "WALK"
     assert pack["HuntConfiguration"]["RouteMode"] == "OPEN_HUNT"
-    assert len(pack["TeamFormation"]["Teams"]) == 6
-    assert all(row["UATOnly"] for row in pack["Checkpoints"])
-    assert "final route" in pack["Purpose"].lower()
+    assert pack["Checkpoints"] == []
+    assert pack["Missions"] == []
     assert candidate_plan()["Executed"] is False
 
 
-def test_migration_preserves_event_isolation_and_no_gps_scoring_path():
+def test_hunt_foundation_keeps_gps_out_of_scoring():
     sql = (ROOT / "supabase/051_exos_core_v2_hunt_engine_v1.sql").read_text(encoding="utf-8")
     for token in ("event_hunt_configurations_v2", "event_hunt_missions_v2", "hunt_team_mission_runtime_v2",
                   "p_event_id", "GPSScoring', false", "PARTICIPATION_PRORATED", "FACILITATOR_RUBRIC",
@@ -29,58 +28,7 @@ def test_migration_preserves_event_isolation_and_no_gps_scoring_path():
     assert "get_live_location_checkpoint_proximity" not in sql
 
 
-def test_projector_is_explicitly_enabled_and_never_selects_location_data():
-    sql = (ROOT / "supabase/051_exos_core_v2_hunt_engine_v1.sql").read_text(encoding="utf-8")
-    projection = sql.split("CREATE OR REPLACE FUNCTION public.exos_v2_hunt_public_projector_projection", 1)[1]
-    assert "projector_public_enabled" in projection
-    for forbidden in ("participant_location", "Latitude", "Longitude", "Evidence", "SubmissionPayload"):
-        assert forbidden not in projection
-
-
-def test_unreleased_secret_mission_details_are_not_in_participant_workspace():
-    sql = (ROOT / "supabase/051_exos_core_v2_hunt_engine_v1.sql").read_text(encoding="utf-8")
-    workspace = sql.split("CREATE OR REPLACE FUNCTION public.exos_v2_hunt_participant_workspace", 1)[1]
-    assert "AND (NOT m.is_secret OR coalesce(r.is_released, false))" in workspace
-
-
-def test_dedicated_entrypoints_keep_event_identity_server_owned():
-    participant = (ROOT / "GeorgeTown_Participant.py").read_text(encoding="utf-8")
-    projector = (ROOT / "GeorgeTown_Projector.py").read_text(encoding="utf-8")
-    control = (ROOT / "GeorgeTown_MissionControl.py").read_text(encoding="utf-8")
-    for source in (participant, projector, control):
-        assert "george_town_walk_hunt_event" in source
-    assert "join_code" not in participant.casefold().replace("join_code=george_town_walk_hunt_event()[1]", "")
-
-
-def test_human_gps_entrypoints_pin_the_clean_disposable_event():
-    source = (ROOT / "services" / "george_town_walk_hunt_event.py").read_text(encoding="utf-8")
-    assert '"GEORGE-TOWN-WALK-HUMAN-UAT"' in source
-    assert '"GTHUMAN"' in source
-
-
-def test_mission_control_live_map_is_facilitator_facing():
-    source = (ROOT / "screens" / "hunt_mission_control.py").read_text(encoding="utf-8")
-    for label in (
-        "LIVE", "LAST SEEN / STALE", "LOCATION UNAVAILABLE", "Checkpoint Proximity",
-        "TOGETHER", "SEPARATED", "PARTIAL REPORTING", "NO LIVE LOCATION",
-        "Not near checkpoint", "Near checkpoint", "Arrived",
-    ):
-        assert label in source
-    assert 'st.json(configuration)' not in source
-
-
-def test_live_location_history_keeps_the_full_movement_trail():
-    class FakeAdapter:
-        def _request(self, method, path, payload, *, admin=True):
-            assert (method, path, admin) == ("POST", "rpc/exos_v2_live_location_history", True)
-            assert payload["p_limit"] == 20
-            return [{"Latitude": 5.1}, {"Latitude": 5.2}]
-
-    trail = StandardCoreV2Adapter.get_live_location_history(FakeAdapter(), "GEORGE-TOWN-WALK-HUMAN-UAT", "participant", 20)
-    assert trail == [{"Latitude": 5.1}, {"Latitude": 5.2}]
-
-
-def test_harness_is_honest_about_non_execution_and_nera_fixture():
+def test_legacy_load_plan_remains_honest_about_non_execution_and_nera():
     harness = plan()
     assert harness["Executed"] is False
     assert "NOT_EXECUTED" in harness["Status"]

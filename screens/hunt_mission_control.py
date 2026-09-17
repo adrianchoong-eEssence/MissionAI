@@ -124,6 +124,14 @@ def _overview(runtime, event_id: str, snapshot: dict) -> None:
         "RETURN_NOW": "Return now", "CLOSED": "Closed",
     }
     st.caption(f"Hunt status: {state_labels.get(current_state, 'Ready to start')}")
+    try:
+        attendance = runtime.get_attendance_summary(event_id)
+    except RuntimeDatabaseError:
+        attendance = {}
+    if attendance:
+        present = int(attendance.get("Present", 0) or 0)
+        expected = int(attendance.get("Registered", attendance.get("Expected", 0)) or 0)
+        st.metric("Attendance", f"{present} / {expected}" if expected else str(present))
     actor = _operator()
     choices = list(state_labels)
     selected_label = st.selectbox(
@@ -180,7 +188,16 @@ def _attendance(runtime, event_id: str) -> None:
 
 def _captains(runtime, event_id: str) -> None:
     st.subheader("CAPTAINS")
-    rows = runtime.get_players(event_id)
+    try:
+        hybrid_roster = runtime.get_hybrid_anchored_operator_roster(event_id)
+        rows = [{
+            "ParticipantID": row.get("ParticipantID"), "EventID": event_id,
+            "TeamID": row.get("TeamID"), "Name": row.get("DisplayName"),
+            "AssignmentRole": row.get("AssignmentRole"), "AttendanceState": row.get("AttendanceState"),
+            "IsCaptain": "Yes" if row.get("IsCaptain") else "No",
+        } for row in list(hybrid_roster.get("Participants") or [])]
+    except RuntimeDatabaseError:
+        rows = runtime.get_players(event_id)
     team_names = {str(row.get("TeamID")): str(row.get("TeamName") or "") for row in runtime.get_teams(event_id)}
     _render_facilitator_table(rows, team_names=team_names)
     teams = runtime.get_teams(event_id)
@@ -192,7 +209,10 @@ def _captains(runtime, event_id: str) -> None:
     actor = _operator()
     reason = st.text_input("Transfer / clear reason", key="hunt_captain_reason")
     if members:
-        names = {str(row.get("Name") or "Participant"): row for row in members}
+        names = {
+            f"{row.get('Name') or 'Participant'} · {position}": row
+            for position, row in enumerate(members, start=1)
+        }
         target = names[st.selectbox("Transfer Captain to", list(names), key="hunt_captain_target")]
         if st.button("TRANSFER CAPTAIN", disabled=not actor or not reason, key="hunt_captain_transfer"):
             try:
@@ -212,8 +232,100 @@ def _captains(runtime, event_id: str) -> None:
             st.rerun()
 
 
+def _hod_anchors(runtime, event_id: str) -> None:
+    """Show HOD status without exposing their Personal Keys or credential hashes."""
+    st.subheader("HOD ANCHORS")
+    try:
+        roster = runtime.get_hybrid_anchored_operator_roster(event_id)
+    except RuntimeDatabaseError:
+        st.info("HOD anchor status is unavailable until the hybrid formation architecture is configured.")
+        return
+    anchors = [dict(row) for row in list(roster.get("Participants") or [])
+               if str(row.get("AssignmentRole") or "").upper() == "HOD_ANCHOR"]
+    if not anchors:
+        st.info("No HOD anchors are provisioned yet.")
+        return
+    teams = {str(row.get("TeamID")): str(row.get("TeamName") or "Team") for row in runtime.get_teams(event_id)}
+    _render_facilitator_table([
+        {
+            "HOD": row.get("DisplayName") or "HOD",
+            "Team": teams.get(str(row.get("TeamID")), "Team"),
+            "Attendance": row.get("AttendanceState") or "PRE-ASSIGNED",
+            "Captain": "Yes" if row.get("IsCaptain") else "No",
+        }
+        for row in anchors
+    ])
+    st.caption("Each anchor is pre-assigned to one country team. HOD access is distinct from the Captain role.")
+
+
+def _stages(runtime, event_id: str) -> None:
+    """Operate the three scored stages through the immutable shared ledger."""
+    st.subheader("STAGES")
+    try:
+        snapshot = runtime.get_competition_stage_snapshot(event_id)
+    except RuntimeDatabaseError:
+        st.info("Competition stages are unavailable until the prepared architecture migration is installed and configured.")
+        return
+    stages = [dict(row) for row in list(snapshot.get("Stages") or [])]
+    teams = [dict(row) for row in list(snapshot.get("Teams") or [])]
+    _render_facilitator_table(stages)
+    if not stages:
+        st.info("No competition stages are configured yet.")
+        return
+    actor = _operator()
+    stage_labels = {f"{row.get('StageNo', '—')} · {row.get('StageName') or row.get('StageID')}": row for row in stages}
+    selected = stage_labels[st.selectbox("Stage", list(stage_labels), key="hunt_competition_stage")]
+    states = ["LOCKED", "AVAILABLE", "ACTIVE", "COMPLETED"]
+    state = st.selectbox("Stage state", states,
+                         index=states.index(str(selected.get("State") or "LOCKED").upper())
+                         if str(selected.get("State") or "LOCKED").upper() in states else 0,
+                         key="hunt_competition_stage_state")
+    if st.button("SAVE STAGE STATE", disabled=not actor, key="hunt_competition_stage_save"):
+        try:
+            runtime.set_competition_stage_state(event_id, selected["StageID"], state, actor)
+        except RuntimeDatabaseError as error:
+            st.warning(str(error) or "Stage state could not be saved.")
+        else:
+            st.success("Competition stage state updated and audited.")
+            st.rerun()
+    if not bool(selected.get("Scored", True)) or not teams:
+        return
+    st.divider()
+    st.caption("Score entries are immutable cumulative ledger transactions. Stage rules and point values remain owner-controlled.")
+    team_labels = {str(row.get("TeamName") or row.get("TeamID")): row for row in teams}
+    team = team_labels[st.selectbox("Team", list(team_labels), key="hunt_competition_score_team")]
+    delta = st.number_input("Stage points (+/−)", min_value=-1000.0, max_value=1000.0, value=0.0,
+                            step=1.0, key="hunt_competition_score_delta")
+    reason = st.text_input("Score rationale", key="hunt_competition_score_reason")
+    key_state = "hunt_competition_score_key"
+    if key_state not in st.session_state:
+        st.session_state[key_state] = uuid.uuid4().hex
+    if st.button("RECORD STAGE SCORE", type="primary", disabled=not actor or not reason or not delta,
+                 key="hunt_competition_score_save"):
+        try:
+            runtime.record_competition_stage_score(event_id, selected["StageID"], team["TeamID"], delta, reason,
+                                                   actor, st.session_state[key_state])
+        except RuntimeDatabaseError as error:
+            st.warning(str(error) or "Stage score could not be saved.")
+        else:
+            st.session_state[key_state] = uuid.uuid4().hex
+            st.success("Cumulative stage score recorded and audited.")
+            st.rerun()
+
+
 def _live_map(runtime, event_id: str, snapshot: dict) -> None:
     st.subheader("LIVE MAP")
+    actor = _operator()
+    visibility = st.selectbox("Participant map visibility", ["OFF", "TEAM_LEADERS"], key="hunt_location_visibility")
+    st.caption("Facilitators retain individual map access. Participant sharing is OFF by default; TEAM LEADERS shares only other teams' effective Captain locations.")
+    if st.button("SAVE PARTICIPANT MAP VISIBILITY", disabled=not actor, key="hunt_location_visibility_save"):
+        try:
+            runtime.set_participant_location_visibility(event_id, visibility, actor)
+        except RuntimeDatabaseError as error:
+            st.warning(str(error) or "Participant map visibility could not be saved.")
+        else:
+            st.success("Participant map visibility updated and audited.")
+            st.rerun()
     try:
         location = runtime.get_live_location_operator_map(event_id)
     except RuntimeDatabaseError:
@@ -410,8 +522,16 @@ def _announcements(runtime, event_id: str) -> None:
         st.info("Announcements are temporarily unavailable.")
 
 
-def _leaderboard(snapshot: dict) -> None:
+def _leaderboard(runtime, event_id: str, snapshot: dict) -> None:
     st.subheader("LEADERBOARD")
+    try:
+        competition = runtime.get_competition_stage_snapshot(event_id)
+    except RuntimeDatabaseError:
+        competition = {}
+    if competition.get("Teams"):
+        st.caption("Cumulative score across every configured scored stage.")
+        _render_facilitator_table(list(competition.get("Teams") or []))
+        return
     _render_facilitator_table(list(snapshot.get("Teams") or []))
 
 
@@ -438,23 +558,25 @@ def _adjustment(runtime, event_id: str, snapshot: dict) -> None:
             st.rerun()
 
 
-def render_hunt_mission_control(event_id: str) -> None:
+def render_hunt_mission_control(event_id: str, event_title: str = "GEORGE TOWN · WALK HUNT MISSION CONTROL") -> None:
     st.set_page_config(page_title="George Town Hunt — Mission Control", layout="wide")
-    st.title("GEORGE TOWN · WALK HUNT MISSION CONTROL")
-    st.caption("This Mission Control is dedicated to the George Town Walk Hunt.")
+    st.title(event_title)
+    st.caption("This Mission Control is dedicated to the configured George Town event.")
     st.sidebar.text_input("Authorised operator", key="hunt_control_actor")
     runtime = get_standard_database()
     snapshot = _snapshot(runtime, event_id)
     if snapshot is None:
         return
-    tabs = st.tabs(["OVERVIEW", "ATTENDANCE", "CAPTAINS", "LIVE MAP", "CHECKPOINTS", "MISSIONS", "PENDING REVIEW", "ANNOUNCEMENTS", "LEADERBOARD", "BONUS / ADJUSTMENT"])
+    tabs = st.tabs(["OVERVIEW", "ATTENDANCE", "HOD ANCHORS", "CAPTAINS", "STAGES", "LIVE MAP", "CHECKPOINTS", "MISSIONS", "PENDING REVIEW", "ANNOUNCEMENTS", "LEADERBOARD", "BONUS / ADJUSTMENT"])
     with tabs[0]: _overview(runtime, event_id, snapshot)
     with tabs[1]: _attendance(runtime, event_id)
-    with tabs[2]: _captains(runtime, event_id)
-    with tabs[3]: _live_map(runtime, event_id, snapshot)
-    with tabs[4]: _checkpoints(snapshot)
-    with tabs[5]: _missions(snapshot)
-    with tabs[6]: _pending_review(runtime, event_id, snapshot)
-    with tabs[7]: _announcements(runtime, event_id)
-    with tabs[8]: _leaderboard(snapshot)
-    with tabs[9]: _adjustment(runtime, event_id, snapshot)
+    with tabs[2]: _hod_anchors(runtime, event_id)
+    with tabs[3]: _captains(runtime, event_id)
+    with tabs[4]: _stages(runtime, event_id)
+    with tabs[5]: _live_map(runtime, event_id, snapshot)
+    with tabs[6]: _checkpoints(snapshot)
+    with tabs[7]: _missions(snapshot)
+    with tabs[8]: _pending_review(runtime, event_id, snapshot)
+    with tabs[9]: _announcements(runtime, event_id)
+    with tabs[10]: _leaderboard(runtime, event_id, snapshot)
+    with tabs[11]: _adjustment(runtime, event_id, snapshot)

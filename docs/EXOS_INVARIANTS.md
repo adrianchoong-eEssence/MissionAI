@@ -161,3 +161,33 @@ are outside that journey and must never become a fallback for it.
 5. `RETURN_NOW` and `HOLD` never mutate scores. `CLOSED` is terminal. A public
    projector is explicit, fixed-event, read-only, and must never expose a map,
    individual, trail, private evidence, or operator capability.
+
+## Hybrid Anchored formation and stages — prepared extension
+
+1. `HYBRID_ANCHORED` is a configuration-gated additive Team Formation mode.
+   It must not change a non-hybrid event, Formula R.A.C.E. access, or the
+   canonical participant/team/session entities.
+2. Every hybrid HOD anchor is one pre-assigned canonical participant for one
+   configured team. Only an event-scoped opaque credential hash is stored; raw
+   Personal Keys must never be written to Git, browser query state, audit
+   payloads, logs, or database rows. Successful HOD claim may transition
+   `PREASSIGNED` attendance to `PRESENT`, but must never automatically make an
+   HOD Captain.
+3. General hybrid registration accepts no requested team. It must use the
+   event/credential transactional identity gate and choose only a
+   below-capacity, least-occupied eligible team. Same-device retry returns the
+   existing participant/team; it never creates a second participant or changes
+   membership.
+4. Event capacity includes the pre-assigned anchors. ENCA's prepared fixture
+   is exactly ten anchors plus 124 general people, across four 14-person and
+   six 13-person teams.
+5. A competition stage lifecycle is canonical `LOCKED`, `AVAILABLE`, `ACTIVE`,
+   `COMPLETED`; completed stages are terminal and later stages cannot become
+   active until prior stages are complete. All stage score writes are immutable,
+   idempotent `score_transactions_v2` entries. GPS/proximity, energizers, and
+   Rollercoaster activity must not become score inputs.
+6. Participant map visibility defaults `OFF`. `TEAM_LEADERS` may expose only
+   a current/stale effective Captain location from other teams during an active
+   configured tracking window. It must never expose participant names,
+   non-leader locations, own-team location by implication, evidence, or an
+   operator map.

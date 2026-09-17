@@ -1,48 +1,77 @@
 {
-  "PackID": "GEORGE_TOWN_WALK_HUNT_UAT_V1",
-  "Purpose": "Disposable functional UAT fixture only. No checkpoint is an approved George Town venue or final route.",
+  "PackID": "ENCA_GEORGETOWN_EVENT_ARCHITECTURE_UAT_V1",
+  "Purpose": "Disposable ENCA George Town architecture UAT fixture. It creates no production event, approved country list, route, checkpoint, mission rule, or points.",
   "Event": {
-    "EventID": "GEORGE-TOWN-WALK-20261024-UAT",
-    "EventName": "George Town — Mission AI Walk Hunt (UAT)",
+    "EventID": "ENCA-GEORGETOWN-20261024-UAT",
+    "EventName": "ENCA Group Team Building 2026 — George Town Mission AI (UAT)",
+    "Client": "ENCA Group of Companies",
     "EventDate": "2026-10-24",
-    "JoinCode": "GTWALKUAT"
+    "Venue": "George Town, Penang",
+    "JoinCode": "ENCAUAT",
+    "Capacity": 134,
+    "ProgrammeWindow": "2026-10-24T13:30:00+08:00/2026-10-24T16:30:00+08:00"
   },
+  "TeamFormation": {
+    "SchemaVersion": 1,
+    "Mode": "HYBRID_ANCHORED",
+    "FixtureOnly": true,
+    "ExpectedCapacity": 134,
+    "GeneralParticipantCapacity": 124,
+    "HODAnchorCapacity": 10,
+    "PersonalKeys": "HOD-only; generated and distributed outside this repository. The fixture stores no raw Personal Key.",
+    "Teams": [
+      {"TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-01", "TeamIdentity": "COUNTRY SLOT 01", "Country": "COUNTRY SLOT 01", "Flag": "🌐", "Capacity": 14},
+      {"TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-02", "TeamIdentity": "COUNTRY SLOT 02", "Country": "COUNTRY SLOT 02", "Flag": "🌐", "Capacity": 14},
+      {"TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-03", "TeamIdentity": "COUNTRY SLOT 03", "Country": "COUNTRY SLOT 03", "Flag": "🌐", "Capacity": 14},
+      {"TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-04", "TeamIdentity": "COUNTRY SLOT 04", "Country": "COUNTRY SLOT 04", "Flag": "🌐", "Capacity": 14},
+      {"TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-05", "TeamIdentity": "COUNTRY SLOT 05", "Country": "COUNTRY SLOT 05", "Flag": "🌐", "Capacity": 13},
+      {"TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-06", "TeamIdentity": "COUNTRY SLOT 06", "Country": "COUNTRY SLOT 06", "Flag": "🌐", "Capacity": 13},
+      {"TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-07", "TeamIdentity": "COUNTRY SLOT 07", "Country": "COUNTRY SLOT 07", "Flag": "🌐", "Capacity": 13},
+      {"TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-08", "TeamIdentity": "COUNTRY SLOT 08", "Country": "COUNTRY SLOT 08", "Flag": "🌐", "Capacity": 13},
+      {"TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-09", "TeamIdentity": "COUNTRY SLOT 09", "Country": "COUNTRY SLOT 09", "Flag": "🌐", "Capacity": 13},
+      {"TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-10", "TeamIdentity": "COUNTRY SLOT 10", "Country": "COUNTRY SLOT 10", "Flag": "🌐", "Capacity": 13}
+    ],
+    "HODAnchors": [
+      {"DisplayName": "Mr Chen Yee Chieng", "TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-01", "AssignmentRole": "HOD_ANCHOR", "PersonalKeyStatus": "GENERATE_EXTERNALLY"},
+      {"DisplayName": "Mr Andrew Kwan", "TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-02", "AssignmentRole": "HOD_ANCHOR", "PersonalKeyStatus": "GENERATE_EXTERNALLY"},
+      {"DisplayName": "Ms Mun Yee", "TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-03", "AssignmentRole": "HOD_ANCHOR", "PersonalKeyStatus": "GENERATE_EXTERNALLY"},
+      {"DisplayName": "Mr Huang", "TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-04", "AssignmentRole": "HOD_ANCHOR", "PersonalKeyStatus": "GENERATE_EXTERNALLY"},
+      {"DisplayName": "Mr Teoh", "TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-05", "AssignmentRole": "HOD_ANCHOR", "PersonalKeyStatus": "GENERATE_EXTERNALLY"},
+      {"DisplayName": "Mr Lee Tian Qi", "TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-06", "AssignmentRole": "HOD_ANCHOR", "PersonalKeyStatus": "GENERATE_EXTERNALLY"},
+      {"DisplayName": "Mr Yeow", "TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-07", "AssignmentRole": "HOD_ANCHOR", "PersonalKeyStatus": "GENERATE_EXTERNALLY"},
+      {"DisplayName": "Mr Adam Chan", "TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-08", "AssignmentRole": "HOD_ANCHOR", "PersonalKeyStatus": "GENERATE_EXTERNALLY"},
+      {"DisplayName": "Mr Bagus", "TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-09", "AssignmentRole": "HOD_ANCHOR", "PersonalKeyStatus": "GENERATE_EXTERNALLY"},
+      {"DisplayName": "Mr Zairie", "TeamID": "ENCA-GEORGETOWN-20261024-UAT-TEAM-10", "AssignmentRole": "HOD_ANCHOR", "PersonalKeyStatus": "GENERATE_EXTERNALLY"}
+    ]
+  },
+  "CompetitionStages": [
+    {"StageID": "VISION_TOWER", "StageNo": 1, "StageName": "VISION TOWER", "StageKind": "STANDARD", "Scored": true, "State": "LOCKED", "HiddenUntilAvailable": true, "Rules": "PENDING OWNER CONTENT", "Points": "PENDING"},
+    {"StageID": "CROSSING_THE_BLACK_SEA", "StageNo": 2, "StageName": "CROSSING THE BLACK SEA", "StageKind": "STANDARD", "Scored": true, "State": "LOCKED", "HiddenUntilAvailable": true, "Rules": "PENDING OWNER CONTENT", "Points": "PENDING"},
+    {"StageID": "GEORGE_TOWN_HUNT", "StageNo": 3, "StageName": "GEORGE TOWN MISSION AI HUNT", "StageKind": "HUNT", "Scored": true, "State": "LOCKED", "HiddenUntilAvailable": true, "HuntMode": "WALK", "RouteMode": "OPEN_HUNT", "Rules": "PENDING OWNER DESIGN", "Points": "PENDING"}
+  ],
+  "NonScoredActivities": [
+    {"Name": "ENERGIZERS", "Scored": false},
+    {"Name": "ROLLERCOASTER CHALLENGE", "Scored": false, "ProgrammeDate": "2026-10-25"}
+  ],
   "HuntConfiguration": {
     "SchemaVersion": 1,
     "EngineKind": "HUNT",
     "HuntMode": "WALK",
     "RouteMode": "OPEN_HUNT",
     "OperationalState": "READY",
-    "StartWindowOpensAt": "2026-10-24T08:00:00+08:00",
-    "StartWindowClosesAt": "2026-10-24T09:30:00+08:00",
-    "ReturnWindowOpensAt": "2026-10-24T11:30:00+08:00",
-    "ReturnWindowClosesAt": "2026-10-24T12:30:00+08:00"
-  },
-  "TeamFormation": {
-    "Mode": "RANDOM_ASSIGN",
-    "FixtureOnly": true,
-    "Teams": ["Orbit", "Compass", "Lantern", "Mosaic", "Harbour", "Kite"],
-    "CapacityPerTeam": 6
+    "FinalRoute": "PENDING OWNER DESIGN",
+    "FinalCheckpoints": "PENDING OWNER DESIGN",
+    "FinalMissions": "PENDING OWNER DESIGN"
   },
   "Location": {
     "TrackingMode": "INDIVIDUAL",
-    "CadenceSeconds": 20,
-    "StaleAfterSeconds": 90,
-    "RetentionHours": 24,
-    "SeparationThresholdMeters": 250
+    "Enabled": false,
+    "ParticipantVisibilityMode": "OFF",
+    "AllowedParticipantVisibilityModes": ["OFF", "TEAM_LEADERS"],
+    "OwnTeamLocationSeparate": true,
+    "FacilitatorIndividualVisibility": true,
+    "TrackingWindow": "PENDING OWNER / UAT DECISION"
   },
-  "Checkpoints": [
-    {"CheckpointID": "GT-UAT-ALPHA", "Name": "Checkpoint Alpha — UAT synthetic point", "Latitude": 5.4141, "Longitude": 100.3372, "RadiusMeters": 90, "Active": true, "UATOnly": true},
-    {"CheckpointID": "GT-UAT-BETA", "Name": "Checkpoint Beta — UAT synthetic point", "Latitude": 5.4150, "Longitude": 100.3381, "RadiusMeters": 90, "Active": true, "UATOnly": true},
-    {"CheckpointID": "GT-UAT-GAMMA", "Name": "Checkpoint Gamma — UAT synthetic point", "Latitude": 5.4134, "Longitude": 100.3390, "RadiusMeters": 90, "Active": true, "UATOnly": true}
-  ],
-  "Missions": [
-    {"MissionID": "GT-M01", "ActivityID": "GT-M01", "Name": "CHECKPOINT ALPHA", "MissionType": "CHECKPOINT", "CheckpointID": "GT-UAT-ALPHA", "EvidenceType": "TEXT", "Scoring": {"Mode": "TEAM_FULL", "Maximum": 20}, "Instructions": "Find the UAT-only synthetic checkpoint and submit the agreed team observation."},
-    {"MissionID": "GT-M02", "ActivityID": "GT-M02", "Name": "STREET DETAIL", "MissionType": "OBSERVATION", "CheckpointID": "GT-UAT-BETA", "EvidenceType": "TEXT", "Scoring": {"Mode": "TEAM_FULL", "Maximum": 20}, "Instructions": "Observe a permitted detail and answer the facilitator-provided UAT prompt."},
-    {"MissionID": "GT-M03", "ActivityID": "GT-M03", "Name": "HUMAN STORY", "MissionType": "PHOTO", "EvidenceType": "PHOTO", "Scoring": {"Mode": "FACILITATOR_RUBRIC", "Maximum": 30, "Rubric": [{"ID": "story", "Maximum": 15}, {"ID": "teamwork", "Maximum": 15}]}, "Instructions": "Capture a team photo that tells a story. Obtain consent from everyone pictured."},
-    {"MissionID": "GT-M04", "ActivityID": "GT-M04", "Name": "AI EYE", "MissionType": "AI", "EvidenceType": "PHOTO", "Scoring": {"Mode": "TEAM_FULL", "Maximum": 20}, "Instructions": "Take a photo, then ask Mission AI what it notices. Mission AI does not verify completion."},
-    {"MissionID": "GT-M05", "ActivityID": "GT-M05", "Name": "FREEZE GEORGE TOWN", "MissionType": "CREATIVE", "EvidenceType": "PHOTO_OR_VIDEO", "Scoring": {"Mode": "FACILITATOR_RUBRIC", "Maximum": 30, "Rubric": [{"ID": "creativity", "Maximum": 15}, {"ID": "clarity", "Maximum": 15}]}, "Instructions": "Create a short team photo or 5–10 second video. Video is limited to 50 MB."},
-    {"MissionID": "GT-M06", "ActivityID": "GT-M06", "Name": "CONNECT", "MissionType": "COLLABORATION", "EvidenceType": "PHOTO", "Scoring": {"Mode": "PARTICIPATION_PRORATED", "Maximum": 30}, "Instructions": "Complete a permitted collaboration with another team. Your Captain selects only PRESENT teammates who took part."},
-    {"MissionID": "GT-M07", "ActivityID": "GT-M07", "Name": "SECRET SIGNAL", "MissionType": "SECRET", "EvidenceType": "TEXT", "Scoring": {"Mode": "TEAM_FULL", "Maximum": 20}, "Secret": true, "Instructions": "This UAT mission is released only by canonical Mission Control state."}
-  ]
+  "Checkpoints": [],
+  "Missions": []
 }

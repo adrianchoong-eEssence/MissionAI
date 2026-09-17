@@ -85,6 +85,37 @@ def render_live_location_participant(runtime, *, session_token: str, device_id: 
     st.caption(f"📍 LIVE LOCATION ON · Last update: {_time(accepted.get('CapturedAt'))}")
 
 
+def render_other_team_leader_locations(runtime, *, session_token: str) -> None:
+    """Render only the explicit participant-safe other-team leader projection.
+
+    Own-team location remains a separate product decision. This surface never
+    requests raw operator-map data and never renders a participant name or a
+    non-leader location for another team.
+    """
+    try:
+        projection = runtime.get_other_team_leader_locations(session_token)
+    except RuntimeDatabaseError:
+        return
+    if str(projection.get("VisibilityMode") or "OFF").upper() != "TEAM_LEADERS":
+        return
+    locations = [dict(row) for row in list(projection.get("Locations") or [])]
+    st.divider()
+    st.subheader("🧭 OTHER TEAM LEADERS")
+    st.caption("Only an effective Captain location may appear here. Individual participant locations are not shared.")
+    rows = [{
+        "Team": str(row.get("Country") or row.get("TeamName") or "Team"),
+        "Flag": str(row.get("Flag") or ""),
+        "Location status": str(row.get("Status") or "UNAVAILABLE").replace("_", " "),
+        "Last update": _time(row.get("LastUpdate")),
+    } for row in locations]
+    if rows:
+        st.dataframe(rows, hide_index=True, width="stretch")
+    points = [row for row in locations if row.get("Status") == "CURRENT"
+              and row.get("Latitude") is not None and row.get("Longitude") is not None]
+    if points:
+        st.map({"lat": [row["Latitude"] for row in points], "lon": [row["Longitude"] for row in points]})
+
+
 def render_participant_announcements(runtime, *, session_token: str) -> None:
     """Show only canonical, event-targeted in-app announcements."""
     rows = st.session_state.get("exos_participant_announcements")

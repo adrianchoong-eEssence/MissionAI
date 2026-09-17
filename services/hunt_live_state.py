@@ -26,11 +26,11 @@ def hunt_live_signature(workspace: dict, announcements: list[dict] | None) -> tu
 
 
 @st.fragment(run_every=f"{POLL_INTERVAL_SECONDS}s")
-def watch_hunt_live_state(runtime, session_token: str) -> None:
+def watch_hunt_live_state(runtime, session_token: str, workspace_loader=None) -> None:
     if not str(session_token or "").strip():
         return
     try:
-        workspace = runtime.hunt_participant_workspace(session_token)
+        workspace = (workspace_loader or runtime.hunt_participant_workspace)(session_token)
         announcements = runtime.get_participant_announcements(session_token)
     except RuntimeDatabaseError:
         return

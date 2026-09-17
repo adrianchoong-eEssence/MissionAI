@@ -14,7 +14,11 @@ from screens.participant import normalise_join_name, restore_participant_identit
 from services.hunt_evidence import upload_hunt_evidence
 from services.hunt_live_state import watch_hunt_live_state
 from services.hunt_mission_ai import ask_hunt_mission_ai
-from services.live_location_participant import render_live_location_participant, render_participant_announcements
+from services.live_location_participant import (
+    render_live_location_participant,
+    render_other_team_leader_locations,
+    render_participant_announcements,
+)
 
 
 def _query_value(name: str) -> str:
@@ -60,10 +64,19 @@ def _team_reveal(workspace: dict) -> None:
     st.markdown(f"## YOU ARE {team}")
     st.info("Find your people. Captain selection opens when Mission Control moves the event forward.")
     if members:
-        st.dataframe([{
-            "Team member": member.get("DisplayName", "Team member"),
-            "Attendance": member.get("AttendanceState", "UNMARKED"),
-        } for member in members], hide_index=True, width="stretch")
+        rows = []
+        for member in members:
+            labels = []
+            if member.get("IsYou") or str(member.get("ParticipantID")) == str(workspace.get("ParticipantID")):
+                labels.append("YOU")
+            if member.get("IsHODAnchor"):
+                labels.append("HOD")
+            rows.append({
+                "Team member": member.get("DisplayName", "Team member"),
+                "Role": " · ".join(labels) or "Member",
+                "Attendance": member.get("AttendanceState", "UNMARKED"),
+            })
+        st.dataframe(rows, hide_index=True, width="stretch")
 
 
 def _captain_controls(runtime, workspace: dict, device_id: str, *, join_code: str = "", credential: str = "") -> bool:
@@ -195,13 +208,15 @@ def _render_mission_ai(workspace: dict) -> None:
         st.info(answer)
 
 
-def _dashboard(runtime, player: dict, device_id: str, *, join_code: str, credential: str) -> None:
+def _dashboard(runtime, player: dict, device_id: str, *, join_code: str, credential: str,
+               workspace_loader=None) -> None:
     token = str(player.get("SessionToken") or "")
-    watch_hunt_live_state(runtime, token)
+    watch_hunt_live_state(runtime, token, workspace_loader=workspace_loader)
     render_participant_announcements(runtime, session_token=token)
     render_live_location_participant(runtime, session_token=token, device_id=device_id)
+    render_other_team_leader_locations(runtime, session_token=token)
     try:
-        workspace = runtime.hunt_participant_workspace(token)
+        workspace = (workspace_loader or runtime.hunt_participant_workspace)(token)
     except RuntimeDatabaseError:
         st.warning("Mission AI is reconnecting. Your canonical team state could not be refreshed yet.")
         return

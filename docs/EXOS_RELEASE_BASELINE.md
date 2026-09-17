@@ -178,3 +178,14 @@ and 048 Live Location + Announcements foundation. Repository evidence does
 **not** prove 051 is installed anywhere. Its guarded rollback companion and
 read-only verification script are prepared, but installation requires explicit
 owner authorisation against the dedicated target.
+
+## Prepared ENCA hybrid architecture — not installed
+
+`053_enca_hybrid_event_architecture.sql` is a prepared additive companion to
+051 for the `ENCA-GEORGETOWN-20261024-UAT` architecture. It adds a hybrid HOD
+anchor/common-QR formation contract, competition-stage state, cumulative
+ledger projection, and optional participant Team-Leader location projection.
+It contains no event fixture or raw Personal Key. Repository evidence does
+**not** prove 053 is installed anywhere. Its guarded rollback and read-only
+verification script are prepared only; owner authorisation and target catalog
+verification are required before any installation or event configuration.

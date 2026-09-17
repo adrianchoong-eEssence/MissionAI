@@ -136,3 +136,19 @@ harness plan. It has **no** database-installation, deployed, load, iPhone,
 Android, background, screen-lock, network-recovery, or human-UAT PASS claim.
 Nera concurrent-event isolation is represented by source contracts and a
 disposable harness fixture; it must be executed against two authorised events.
+
+## ENCA George Town hybrid architecture candidate
+
+`053_enca_hybrid_event_architecture.sql`, its guarded rollback, read-only
+verifier, fixed ENCA entrypoints, and local hybrid certification harness are
+present in source. The fixture EventID is `ENCA-GEORGETOWN-20261024-UAT`; it
+does not create an event or retain HOD Personal Keys. The local harness reports
+134 canonical simulated registrations (10 anchors plus a 124-way general
+burst), four 14-person and six 13-person teams, no duplicate identity or
+attendance, same-device idempotency, independent Captain claim, stage-ledger
+shape, participant visibility modes, and Nera EventID isolation.
+
+This is **local source-contract evidence only**. Migration installation is
+**NOT INSTALLED from repository evidence**; no target catalog check, database
+concurrency run, staging/deployed journey, projector observation, location
+permission journey, or human UAT has been executed or claimed.

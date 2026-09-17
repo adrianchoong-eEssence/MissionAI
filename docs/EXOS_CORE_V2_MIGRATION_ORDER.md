@@ -32,3 +32,17 @@
    postflight check, then use fresh George Town and Nera fixtures for isolation.
 4. `051_exos_core_v2_hunt_engine_v1_rollback.sql` is a guarded rollback. It
    refuses to delete Hunt data; use it only after an approved empty-target gate.
+
+## Prepared ENCA hybrid architecture chain — owner authorisation required
+
+1. First verify the target's installed 036/036a Team Formation, 042 attendance,
+   044 Captain operations, 048/050 location/announcement, and 051 Hunt
+   foundations. Repository files are not installation evidence.
+2. Run `supabase/053_enca_hybrid_event_architecture.sql` only after explicit
+   owner authorisation. It is additive and creates no event fixture, Personal
+   Key, country list, route, checkpoint, mission, or score data.
+3. Run `supabase/verification/exos_v2_enca_hybrid_event_architecture_verify.sql`
+   read-only. Only then, and only with a separately authorised disposable
+   target, use the redacted ENCA plan to configure the EventID.
+4. `053_enca_hybrid_event_architecture_rollback.sql` refuses to remove hybrid
+   or stage data. Use it only after a verified empty-target gate.

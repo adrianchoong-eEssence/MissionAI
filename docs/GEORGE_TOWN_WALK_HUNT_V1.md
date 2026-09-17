@@ -1,34 +1,58 @@
-# George Town WALK Hunt V1 — UAT Candidate
+# ENCA George Town Mission AI — Architecture UAT Candidate
 
-The disposable UAT event is `GEORGE-TOWN-WALK-20261024-UAT`. Its six teams of
-six, experiential names, dates, identifiers, missions, and synthetic
-coordinates are fixtures only. They are not a final roster, published route,
-or approved George Town venue claim.
+The source-only fixture is `ENCA-GEORGETOWN-20261024-UAT` for ENCA Group Team
+Building 2026 on 24 October 2026 in George Town, Penang. It is an architecture
+candidate, not a deployed event, approved country list, route, checkpoint,
+mission rule, or scoring schedule.
 
-## Source scope
+## Fixed architecture
 
-- Dedicated `GeorgeTown_Participant.py`, `GeorgeTown_MissionControl.py`, and
-  `GeorgeTown_Projector.py` entrypoints.
-- One common QR path: first/last name → opaque browser credential →
-  `RANDOM_ASSIGN` → atomic first-arrival `PRESENT` attendance → team reveal.
-  Reconnect uses the persisted credential/device binding, never a name merge.
-- Explicit individual live-location consent, 20-second default cadence,
-  90-second stale threshold, bounded trails/retention, separated-team guard,
-  non-scoring checkpoint proximity, announcements, and event-scoped Kai reads.
-- WALK mission board, private photo/video evidence (50 MB video ceiling),
-  Captain participant selection, authoritative review/ledger scoring, and a
-  read-only public leaderboard with no GPS or evidence.
+- Capacity is exactly **134**: ten distinct temporary country slots, four with
+  capacity 14 and six with capacity 13.
+- The ten named HOD anchors are pre-assigned one per country slot. Their
+  Personal Keys are generated and distributed externally; Git stores no raw
+  Personal Key. An HOD's first successful key claim marks canonical attendance
+  `PRESENT` but never grants Captain authority.
+- The remaining **124** people use one common QR: first/last name → opaque
+  browser credential → server-randomized least-occupied eligible team →
+  automatic `PRESENT`. Same-device retry is idempotent; a new device needs the
+  applicable canonical recovery path and never causes re-assignment.
+- Captain selection remains an explicit Team Formation lifecycle decision.
+  HOD membership and Captain authority are separate.
 
-## Migration and deployment state
+## Competition, privacy, and surfaces
 
-`051_exos_core_v2_hunt_engine_v1.sql` is **prepared, not installed**. Do not
-install it until an owner authorises the dedicated target after migration
-history verification. No deployment has been attempted.
+- VISION TOWER, CROSSING THE BLACK SEA, and GEORGE TOWN MISSION AI HUNT are
+  ordered, scored stages sharing `score_transactions_v2` and one cumulative
+  leaderboard. Stage content and point values are owner-pending.
+- Energizers and the 25 October Rollercoaster Challenge are explicitly
+  non-scored. The Walk Hunt is `OPEN_HUNT`, but no route, checkpoint, mission,
+  or final rule is created by this fixture.
+- Facilitators can use individual live-location views when separately enabled
+  and consented. Participant sharing defaults to `OFF`; `TEAM_LEADERS` may
+  reveal only another team's effective Captain location. Own-team display is a
+  separate decision. GPS and proximity are never scoring inputs.
+- The fixed participant, Mission Control, and public-projector entrypoints
+  contain the EventID/join code as deployment configuration, not participant
+  inputs. The projector receives current stage, country/flag, rank, and
+  cumulative score only.
 
-## Required human UAT after installation
+## Migration and UAT status
 
-Test iPhone/Android consent, permissions, screen lock/background pause,
-reopen, network loss/recovery, urban accuracy, photo/video retry, Captain
-recovery/transfer, return/hold/close transitions, public projector privacy,
-and a separate concurrent Nera fixture. The supplied load harness is explicitly
-non-executed and is not a PASS assertion.
+`051_exos_core_v2_hunt_engine_v1.sql` and
+`053_enca_hybrid_event_architecture.sql` are **prepared, not installed**.
+`053` has a guarded rollback and a read-only verifier, but must not be applied
+until an owner authorises a verified dedicated target. No deployment or event
+creation has been attempted.
+
+The local certification harness exercises 10 HOD claims, a concurrent 124-way
+general-registration burst, capacity distribution, same-device idempotency,
+automatic attendance, independent Captain selection, stage-ledger shape,
+participant visibility modes, and Nera EventID isolation. This is local source
+evidence only—not database concurrency certification, deployed/staging proof,
+or human UAT.
+
+After authorised installation, test iPhone/Android HOD and common-QR paths,
+key/device recovery, Captain transitions, score-stage lifecycle, projector
+privacy, opt-in live location, background/screen-lock/network recovery, final
+Hunt content, and a simultaneous Nera fixture.

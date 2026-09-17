@@ -197,3 +197,34 @@ public-projector opt-in, and a non-scoring GPS boundary preserve isolation.
 **Scope:** `051` is prepared only; it is not installed. The George Town UAT
 pack contains synthetic checkpoint coordinates and must not be presented as
 approved real-world route content.
+
+## 16. ENCA hybrid anchors compose Team Formation; they do not replace it
+
+**Decision:** The ENCA George Town architecture uses prepared
+`HYBRID_ANCHORED` Team Formation: ten HOD anchors, one per country team, use
+separately distributed Personal Keys while 124 other participants use the one
+common random-assignment QR path. HOD role, attendance, and Captain authority
+are separate; claim marks an HOD present but never auto-assigns Captain.
+
+**Reason:** The event needs guaranteed HOD representation in all ten teams
+without turning a named HOD roster into an allocation or recovery mechanism
+for every participant.
+
+**Scope:** 053 is an additive prepared migration. It uses existing canonical
+events, teams, participants, sessions, attendance, Captain state, audits, and
+score ledger. It creates no ENCA event, raw Personal Key, permanent country,
+route, checkpoint, mission, or points configuration.
+
+## 17. ENCA stages have one ledger-backed cumulative score
+
+**Decision:** VISION TOWER, CROSSING THE BLACK SEA, and the George Town Hunt
+are ordered scored stages that write idempotent entries to the existing score
+ledger. Energizers and the Rollercoaster Challenge are declared non-scored.
+
+**Reason:** One event-wide leaderboard is required without inventing a second
+score source or allowing provisional GPS/route mechanics to award points.
+
+**Scope:** Each stage is explicitly lifecycle-gated. The public projector is
+limited to current stage and country/flag/rank/cumulative score. Participant
+location visibility is `OFF` by default and optional Team Leaders display is
+limited to other teams' effective Captains.
