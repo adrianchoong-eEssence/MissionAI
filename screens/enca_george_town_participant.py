@@ -47,18 +47,6 @@ def _has_resume_token() -> bool:
     return bool(str(token or "").strip())
 
 
-def _event_is_available(runtime, event_id: str, join_code: str) -> bool:
-    try:
-        event = runtime.get_event_by_join_code(join_code)
-    except RuntimeDatabaseError:
-        st.error(_CONNECTION_MESSAGE)
-        return False
-    if event and str(event.get("EventID") or "") == event_id:
-        return True
-    st.error("This ENCA Mission AI event is not available yet. Please retry shortly or contact Mission Control.")
-    return False
-
-
 def _complete_identity(player: dict | None, event_id: str, *, hod_credential: str = "") -> bool:
     if not _valid(player, event_id):
         return False
@@ -125,7 +113,7 @@ def render_enca_george_town_participant(*, event_id: str, join_code: str) -> Non
             st.error("Enter both your first / given and last / family name.")
         else:
             runtime = _runtime_or_none()
-            if runtime is not None and _event_is_available(runtime, event_id, join_code):
+            if runtime is not None:
                 binding = _session_binding(event_id)
                 credential, device_id = binding["Credential"], binding["DeviceID"]
                 st.session_state["participant_device_id"] = device_id
@@ -148,7 +136,7 @@ def render_enca_george_town_participant(*, event_id: str, join_code: str) -> Non
             st.error("Enter your Personal Key to continue.")
         else:
             runtime = _runtime_or_none()
-            if runtime is not None and _event_is_available(runtime, event_id, join_code):
+            if runtime is not None:
                 binding = _session_binding(event_id)
                 device_id = binding["DeviceID"]
                 st.session_state["participant_device_id"] = device_id

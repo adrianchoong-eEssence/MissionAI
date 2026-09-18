@@ -100,7 +100,9 @@ def test_entrypoints_and_operator_surfaces_pin_the_enca_event_without_displaying
     assert "participant_device_binding" not in screen
     assert "secrets.token_urlsafe(32)" in screen
     assert "str(error)" not in screen
+    assert "get_event_by_join_code" not in screen
     assert "apply_branding" not in participant
+    assert "Mission AI cannot start this participant session yet." in participant
     for tab in ("HOD ANCHORS", "STAGES", "LIVE MAP", "BONUS / ADJUSTMENT"):
         assert tab in mission_control
     assert "ENCA UAT CAPACITY" in mission_control
