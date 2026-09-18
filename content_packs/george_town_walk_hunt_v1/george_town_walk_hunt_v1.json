@@ -63,6 +63,73 @@
     "FinalCheckpoints": "PENDING OWNER DESIGN",
     "FinalMissions": "PENDING OWNER DESIGN"
   },
+  "HuntContentFoundation": {
+    "SchemaVersion": 1,
+    "MissionBoardMode": "OPTIONAL_BALANCED_SUBSETS",
+    "TargetMasterMissionPool": 20,
+    "FinalMissionPoolSize": "PENDING OWNER CONTENT",
+    "MissionClasses": ["COMMON", "RANDOM", "SECRET"],
+    "MissionCategories": [
+      "OBSERVATION",
+      "PHOTO",
+      "VIDEO",
+      "AI",
+      "CREATIVE",
+      "COLLABORATION",
+      "HERITAGE",
+      "FOOD_CULTURE",
+      "CHECKPOINT"
+    ],
+    "AllocationPolicy": {
+      "SubsetAssignment": "BALANCED_RANDOM",
+      "SameMissionBoardForEveryTeam": false,
+      "ForcedLinearRoute": false,
+      "GeographicBalancing": true,
+      "CategoryBalancing": true,
+      "CongestionReduction": true,
+      "CompletionExpectation": "OPTIONAL_NOT_ALL_MISSIONS_REQUIRED",
+      "FinalSubsetSizes": "PENDING OWNER CONTENT"
+    },
+    "Arena": {
+      "Mode": "COMPACT_MISSION_ARENA",
+      "Coverage": "CENTRAL_SOUTHERN_GEORGE_TOWN_HERITAGE_AREA",
+      "CandidateZones": [
+        {"ZoneID": "HIN_BUS_DEPOT", "Name": "Hin Bus Depot", "Status": "CANDIDATE", "Role": "HIGH_VALUE_OUTER_MISSION_OR_CHECKPOINT", "Coordinates": "OWNER_PENDING"},
+        {"ZoneID": "KENG_KWEE_PENANG_ROAD_CHENDUL", "Name": "Keng Kwee / Penang Road Chendul area", "Status": "CANDIDATE", "Role": "PENDING_OWNER_CONTENT", "Coordinates": "OWNER_PENDING"},
+        {"ZoneID": "CAMPBELL_CARNARVON", "Name": "Campbell / Carnarvon area", "Status": "CANDIDATE", "Role": "PENDING_OWNER_CONTENT", "Coordinates": "OWNER_PENDING"},
+        {"ZoneID": "ARMENIAN_STREET", "Name": "Armenian Street", "Status": "CANDIDATE", "Role": "PENDING_OWNER_CONTENT", "Coordinates": "OWNER_PENDING"},
+        {"ZoneID": "CANNON_STREET", "Name": "Cannon Street", "Status": "CANDIDATE", "Role": "PENDING_OWNER_CONTENT", "Coordinates": "OWNER_PENDING"},
+        {"ZoneID": "KHOO_KONGSI", "Name": "Khoo Kongsi", "Status": "CANDIDATE", "Role": "PENDING_OWNER_CONTENT", "Coordinates": "OWNER_PENDING"},
+        {"ZoneID": "ACHEH_STREET", "Name": "Acheh Street", "Status": "CANDIDATE", "Role": "PENDING_OWNER_CONTENT", "Coordinates": "OWNER_PENDING"},
+        {"ZoneID": "LITTLE_INDIA_HARMONY", "Name": "Little India / Harmony area", "Status": "CANDIDATE", "Role": "PENDING_OWNER_CONTENT", "Coordinates": "OWNER_PENDING"},
+        {"ZoneID": "AH_QUEE_STREET", "Name": "Ah Quee Street", "Status": "CANDIDATE", "Role": "PENDING_OWNER_CONTENT", "Coordinates": "OWNER_PENDING"},
+        {"ZoneID": "BEACH_STREET", "Name": "Beach Street", "Status": "CANDIDATE", "Role": "PENDING_OWNER_CONTENT", "Coordinates": "OWNER_PENDING"},
+        {"ZoneID": "CHEW_JETTY_CLAN_JETTIES", "Name": "Chew / Clan Jetties", "Status": "CANDIDATE", "Role": "PENDING_OWNER_CONTENT", "Coordinates": "OWNER_PENDING"}
+      ],
+      "ExcludedZones": [
+        {"ZoneID": "FORT_CORNWALLIS", "Name": "Fort Cornwallis", "Status": "EXCLUDED", "Reason": "OWNER_DIRECTION"}
+      ],
+      "FinalCoordinates": "OWNER_PENDING",
+      "FinalMissionCheckpointLinks": "OWNER_PENDING"
+    },
+    "Map": {
+      "ParticipantYouLocation": true,
+      "MissionCheckpointPins": "WHEN_FINAL_COORDINATES_APPROVED",
+      "ReturnToBasePin": "ALWAYS_CONFIGURED_WHEN_COORDINATES_APPROVED",
+      "ParticipantOtherTeamVisibility": "OFF",
+      "AllowedOtherTeamVisibilityModes": ["OFF", "TEAM_LEADERS"],
+      "FacilitatorVisibility": "ALL_CONSENTED_PARTICIPANTS_WITH_TRAILS"
+    },
+    "ReturnToBase": {
+      "PinID": "RETURN_TO_BASE",
+      "Persistent": true,
+      "Scored": false,
+      "Coordinates": "OWNER_PENDING",
+      "HumanGuidance": "OWNER_PENDING",
+      "DistanceToBase": "ENABLE_AFTER_COORDINATES_APPROVED",
+      "Announcements": ["30 MINUTES REMAINING", "RETURN TO BASE NOW"]
+    }
+  },
   "Location": {
     "TrackingMode": "INDIVIDUAL",
     "Enabled": false,

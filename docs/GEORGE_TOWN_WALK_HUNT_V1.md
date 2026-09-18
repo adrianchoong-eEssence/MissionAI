@@ -37,6 +37,30 @@ mission rule, or scoring schedule.
   inputs. The projector receives current stage, country/flag, rank, and
   cumulative score only.
 
+## Hunt content foundation — not final mission content
+
+- The Walk Hunt uses a compact central/southern George Town heritage arena and
+  an owner-pending target pool of about 20 missions. Mission classes are
+  `COMMON`, `RANDOM`, and `SECRET`; categories are observation, photo, video,
+  AI, creative, collaboration, heritage, food/culture, and checkpoint.
+- Teams will receive balanced random optional subsets, rather than the same
+  board or a forced linear route. The final subset sizes, individual missions,
+  release logic, rules, evidence requirements, and points remain owner-pending.
+- Candidate zones are Hin Bus Depot; Keng Kwee/Penang Road Chendul;
+  Campbell/Carnarvon; Armenian; Cannon; Khoo Kongsi; Acheh; Little
+  India/Harmony; Ah Quee; Beach Street; and Chew/Clan Jetties. They are
+  configuration labels only, with no coordinates, clues, route, or checkpoint
+  content. Hin Bus Depot remains available as a high-value outer candidate.
+  Fort Cornwallis is excluded.
+- The participant map can show the consented **You** location and, only after
+  owner-approved coordinates, mission/checkpoint and Return-to-Base pins.
+  Other-team visibility defaults to `OFF`; `TEAM_LEADERS` is the only optional
+  participant setting. Facilitators retain consented individual/trail views.
+- Return to Base is a permanent non-scored operational pin. Its exact location,
+  human-facing guidance, and distance calculation are owner-pending. The
+  supported announcement states are **30 minutes remaining** and **Return to
+  Base now**.
+
 ## Migration and UAT status
 
 `051_exos_core_v2_hunt_engine_v1.sql` and

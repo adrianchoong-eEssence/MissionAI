@@ -1,7 +1,12 @@
 import json
+from copy import deepcopy
 from pathlib import Path
 
-from content_packs.george_town_walk_hunt_v1.materialize import candidate_plan, load_pack
+from content_packs.george_town_walk_hunt_v1.materialize import (
+    _architecture_errors,
+    candidate_plan,
+    load_pack,
+)
 from scripts.george_town_hunt_load_harness import plan
 
 
@@ -16,6 +21,41 @@ def test_enca_fixture_is_a_non_materialising_walk_hunt_architecture():
     assert pack["Checkpoints"] == []
     assert pack["Missions"] == []
     assert candidate_plan()["Executed"] is False
+
+
+def test_content_foundation_is_compact_optional_and_owner_pending():
+    pack = load_pack()
+    foundation = pack["HuntContentFoundation"]
+    arena = foundation["Arena"]
+
+    assert foundation["TargetMasterMissionPool"] == 20
+    assert foundation["MissionBoardMode"] == "OPTIONAL_BALANCED_SUBSETS"
+    assert set(foundation["MissionClasses"]) == {"COMMON", "RANDOM", "SECRET"}
+    assert foundation["AllocationPolicy"]["SameMissionBoardForEveryTeam"] is False
+    assert foundation["AllocationPolicy"]["ForcedLinearRoute"] is False
+    assert {zone["ZoneID"] for zone in arena["CandidateZones"]} >= {
+        "HIN_BUS_DEPOT",
+        "ARMENIAN_STREET",
+        "CHEW_JETTY_CLAN_JETTIES",
+    }
+    assert all(zone["Coordinates"] == "OWNER_PENDING" for zone in arena["CandidateZones"])
+    assert any(zone["ZoneID"] == "FORT_CORNWALLIS" for zone in arena["ExcludedZones"])
+    assert foundation["ReturnToBase"] == {
+        "PinID": "RETURN_TO_BASE",
+        "Persistent": True,
+        "Scored": False,
+        "Coordinates": "OWNER_PENDING",
+        "HumanGuidance": "OWNER_PENDING",
+        "DistanceToBase": "ENABLE_AFTER_COORDINATES_APPROVED",
+        "Announcements": ["30 MINUTES REMAINING", "RETURN TO BASE NOW"],
+    }
+    assert candidate_plan()["HuntContentFoundation"] == foundation
+
+
+def test_content_foundation_rejects_final_coordinates_before_owner_authorisation():
+    pack = deepcopy(load_pack())
+    pack["HuntContentFoundation"]["Arena"]["CandidateZones"][0]["Coordinates"] = "5.4100,100.3320"
+    assert "ENCA Hunt candidate zones must not contain final coordinates." in _architecture_errors(pack)
 
 
 def test_hunt_foundation_keeps_gps_out_of_scoring():
