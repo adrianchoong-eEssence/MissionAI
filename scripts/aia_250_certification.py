@@ -20,7 +20,8 @@ REQUIRED_OPERATIONS = [
     "RANDOM_ASSIGN self-registration and recovery", "automatic PRESENT attendance writes", "workspace/reconnect reads",
     "Captain claim, transfer and recovery contention", "open-board selection", "participation roster selection",
     "photo/video submission contract", "facilitator review and participation/rubric score", "audited bonus adjustment",
-    "projector projection and Mission Control/operator reads", "EventID isolation and fixture cleanup",
+    "projector projection and Mission Control/operator reads", "GPS consent/location load and operator reads",
+    "ALL/TEAM/PARTICIPANT announcement delivery and acknowledgement", "EventID isolation and fixture cleanup",
 ]
 RANDOM_REGISTRATION_ASSERTIONS = [
     "250 canonical participant IDs from the fixed AIA random-registration endpoint",
@@ -35,6 +36,13 @@ RANDOM_REGISTRATION_ASSERTIONS = [
     "different-browser/device is a separate identity unless an approved facilitator recovery is used",
     "Captain reconnect restores authority only through the approved Core recovery path",
 ]
+LOCATION_ANNOUNCEMENT_ASSERTIONS = [
+    "250 participants use INDIVIDUAL consented location only; no update is accepted before consent, after stop, outside the bounded window, or from another device",
+    "20-second nominal cadence, CURRENT/STALE/UNAVAILABLE state, bounded event-scoped history, and separated-team projection are measured",
+    "operator and projector reads remain EventID-scoped; the public projector contains no location, participant identity, or evidence",
+    "ALL, TEAM, and PARTICIPANT announcements deliver only in the target event; INFO, IMPORTANT, URGENT, acknowledgement, unread state, and idempotent retry are measured",
+    "location and announcement fixtures are removed with zero residue after the run",
+]
 
 
 def plan() -> dict:
@@ -42,6 +50,8 @@ def plan() -> dict:
             "Distribution": "25 teams × 10 participants; RANDOM_ASSIGN", "RequiredOperations": REQUIRED_OPERATIONS,
             "AiaRandomRegistration": {"RPC": "exos_v2_aia_tech_register_random", "Assertions": RANDOM_REGISTRATION_ASSERTIONS,
                                       "ExecutionNote": "The installed fixed-event wrapper must be exercised against an empty disposable AIA UAT fixture under separately authorised load credentials; this launcher never reports that wrapper as PASS without that run."},
+            "LocationAnnouncements": {"Assertions": LOCATION_ANNOUNCEMENT_ASSERTIONS,
+                                      "ExecutionNote": "Run only against a fresh disposable fixture with a bounded test tracking window. This plan never treats browser/mobile GPS as passed without real device runners."},
             "Runner": str(RUNNER.relative_to(ROOT)), "Execute": "EXOS_ENV=staging, CERT_TF_EXPECTED_HOST, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, SUPABASE_SECRET_KEY, POSTGRES_TEST_DSN, CERT_TF_CONFIRM=RUN_DISPOSABLE_CERT_TF, then --execute",
             "Safety": "No AIA, Maxis, historical, or live EventID may be supplied or used as a fixture."}
 

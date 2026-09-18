@@ -15,10 +15,11 @@ def _materializer():
     return module
 
 
-def test_aia_candidate_is_random_assign_configurable_open_board_for_250_people():
+def test_aia_candidate_has_199_expected_live_pax_and_retains_250_client_certification_headroom():
     content = _materializer().materialize_aia_techquest_content("AIA-TECH-20261023-UAT")
     package = content["Package"]
     assert package["LocalOnly"] is True
+    assert package["EventBlueprint"]["ExpectedParticipants"] == 199
     assert package["EventBlueprint"]["TeamFormationConfiguration"]["Mode"] == "RANDOM_ASSIGN"
     assert content["RaceConfiguration"]["StrategyMode"] == "OPEN_MISSION_BOARD"
     assert len(content["TeamTemplates"]) == 25
@@ -53,7 +54,9 @@ def test_aia_setup_sql_is_an_empty_random_assign_fixture_without_credentials():
     assert "exos_v2_configure_attendance" in sql
     assert '"AIHelpEnabled":true' in sql
     assert "RANDOM_ASSIGN" in sql
-    assert "250" in sql
+    assert '"ExpectedParticipants":199' in sql
+    assert '"LoadCertificationTarget":250' in sql
+    assert '"FinalTeamConfiguration":"OWNER_PENDING"' in sql
     assert "EnrollmentCredentialHash" not in sql
     assert "Personal Key" not in sql
     assert "participants_v2 where event_id='AIA-TECH-20261023-UAT' and not is_archived)<>0" in sql
@@ -85,3 +88,24 @@ def test_aia_participant_experience_uses_random_identity_and_read_only_advisory_
     assert "aia_random_registration_event" in source
     assert "render_maxis_theme_park_participant" in source
     assert "Ask Mission AI" in (ROOT / "screens" / "maxis_participant_experience.py").read_text()
+
+
+def test_aia_250_harness_keeps_load_headroom_and_includes_location_and_announcement_gates():
+    source = (ROOT / "scripts" / "aia_250_certification.py").read_text()
+    assert '"Participants": 250' in source
+    assert "GPS consent/location load and operator reads" in source
+    assert "ALL/TEAM/PARTICIPANT announcement delivery and acknowledgement" in source
+    assert "LocationAnnouncements" in source
+
+
+def test_aia_production_hardening_migration_is_metadata_only_and_runbook_leaves_final_event_owner_controlled():
+    migration = (ROOT / "supabase" / "054_aia_tech_expected_live_pax.sql").read_text()
+    runbook = (ROOT / "docs" / "AIA_TECHQUEST_20261023_PRODUCTION_CANDIDATE.md").read_text()
+    assert "AIA-TECH-20261023-UAT" in migration
+    assert "{ExpectedParticipants}', '199'::jsonb" in migration
+    assert "LoadCertificationTarget}', '250'" in migration
+    assert "activity_runtime_v2" in migration and "submissions_v2" in migration and "score_transactions_v2" in migration
+    assert "UPDATE public.teams_v2" not in migration and "participants_v2" not in migration
+    assert "final event" in runbook.casefold()
+    assert "250-client disposable certification" in runbook
+    assert "50 MB ceiling" in runbook

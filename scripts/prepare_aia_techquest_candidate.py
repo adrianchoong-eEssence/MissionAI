@@ -30,6 +30,7 @@ def build_setup_sql(event_id: str = DEFAULT_CERT_EVENT_ID, join_code: str = DEFA
     content = materialize_aia_techquest_content(event_id)
     teams, missions = content["TeamTemplates"], content["Missions"]
     capacities = content["TeamCapacities"]
+    expected_live_participants = int(content["EventBlueprint"]["ExpectedParticipants"])
     mission_rows = []
     programme_id, module_id = f"{event_id}-PROGRAMME", f"{event_id}-MISSION-BOARD"
     for mission in missions:
@@ -46,7 +47,8 @@ def build_setup_sql(event_id: str = DEFAULT_CERT_EVENT_ID, join_code: str = DEFA
             str(mission["DisplayOrder"]), "0", _json({"race_station": station}), "true")) + ")")
     mission_values = ",\n".join(mission_rows)
     team_rows = [{"team_id": team["TeamID"], "team_name": team["TeamName"], "country": "", "team_flag": ""} for team in teams]
-    metadata = {"Client": "AIA Tech", "Venue": "Genting SkyWorlds / GICC", "EventDate": "2026-10-23", "ExpectedParticipants": 250,
+    metadata = {"Client": "AIA Tech", "Venue": "Genting SkyWorlds / GICC", "EventDate": "2026-10-23", "ExpectedParticipants": expected_live_participants,
+                "LoadCertificationTarget": 250, "FinalTeamConfiguration": "OWNER_PENDING",
                 "UAT": True, "SyntheticRoster": False, "SyntheticTeamWarning": "UAT ONLY — 25 teams × 10 is a technical RANDOM_ASSIGN capacity fixture, not the final AIA grouping decision.",
                 "RegistrationExperience": {"SchemaVersion": 1, "Mode": "RANDOM_ASSIGN", "CommonEntry": True, "JoinCodeHidden": True, "DeviceBoundReconnect": True, "AutomaticAttendance": "PRESENT"},
                 "TeamIdentityConfig": {"ThemeType": "CONFIGURABLE", "Identities": teams}}

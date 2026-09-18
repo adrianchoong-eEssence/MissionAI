@@ -2,12 +2,12 @@
   "PackageSchemaVersion": 1,
   "PackageKind": "EXOS_AIA_TECHQUEST_CONTENT",
   "PackageID": "AIA_TECHQUEST_20261023_V1",
-  "PackageVersion": "1.2.0-locked-content-uat",
+  "PackageVersion": "1.3.0-production-candidate",
   "LocalOnly": true,
   "ActivationStatus": "DISPOSABLE_UAT_CONTENT_PENDING_ADRIAN_APPROVAL",
   "Notes": [
     "This package is configuration only. It never creates an event, sends traffic, or deploys an app.",
-    "The synthetic 250-person roster is disposable certification data. Replace it with the authoritative roster before the event is created.",
+    "Expected live participation is 199. The 250-client synthetic distribution remains disposable engineering certification data and must not determine final team design.",
     "Ride references are limited to attractions already verified in the proven Genting mission library; UAT availability remains an operator control.",
     "The announced return deadline is an EventState/operator value; it is not hard-coded into participant content."
   ],
@@ -21,7 +21,7 @@
     "Client": "AIA Tech",
     "EventName": "TechQuest: Thrills without Frills",
     "EventDate": "2026-10-23",
-    "ExpectedParticipants": 250,
+    "ExpectedParticipants": 199,
     "TeamStructure": {
       "FormationMode": "RANDOM_ASSIGN",
       "TeamCount": "CONFIGURABLE_BEFORE_ROSTER_FREEZE",
