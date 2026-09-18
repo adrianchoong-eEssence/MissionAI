@@ -1,8 +1,8 @@
 """Dedicated ENCA George Town hybrid participant entrypoint."""
-from branding import apply_branding, configure_page
+import streamlit as st
+
 from screens.enca_george_town_participant import render_enca_george_town_participant
 from services.enca_george_town_event import enca_george_town_event
 
-configure_page(layout="centered")
-apply_branding(participant_pwa=True)
+st.set_page_config(page_title="ENCA GROUP · MISSION AI", layout="centered")
 render_enca_george_town_participant(event_id=enca_george_town_event()[0], join_code=enca_george_town_event()[1])

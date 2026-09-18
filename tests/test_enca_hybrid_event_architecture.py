@@ -89,9 +89,18 @@ def test_entrypoints_and_operator_surfaces_pin_the_enca_event_without_displaying
     assert '"ENCA-GEORGETOWN-20261024-UAT"' in event_source
     assert '"ENCAUAT"' in event_source
     assert 'st.text_input("JOIN CODE")' not in screen
+    assert "GENERAL PARTICIPANT" in screen
+    assert "HOD / PRE-REGISTERED" in screen
+    assert '"First / Given Name"' in screen
+    assert '"Last / Family Name"' in screen
+    assert '"Personal Key"' in screen
     assert "register_hybrid_anchored_random_participant" in screen
     assert "claim_hybrid_anchored_hod_personal_key" in screen
     assert "derive_personal_key_credential" in screen
+    assert "participant_device_binding" not in screen
+    assert "secrets.token_urlsafe(32)" in screen
+    assert "str(error)" not in screen
+    assert "apply_branding" not in participant
     for tab in ("HOD ANCHORS", "STAGES", "LIVE MAP", "BONUS / ADJUSTMENT"):
         assert tab in mission_control
     assert "ENCA UAT CAPACITY" in mission_control
