@@ -101,6 +101,9 @@ def test_entrypoints_and_operator_surfaces_pin_the_enca_event_without_displaying
     assert "secrets.token_urlsafe(32)" in screen
     assert "str(error)" not in screen
     assert "get_event_by_join_code" not in screen
+    assert "from screens.hunt_participant import _dashboard" in screen
+    assert screen.index('st.title("ENCA GROUP")') < screen.index("from screens.hunt_participant import _dashboard")
+    assert screen.count("from data.standard_core_v2_adapter import get_standard_database") == 1
     assert "apply_branding" not in participant
     assert "Mission AI cannot start this participant session yet." in participant
     for tab in ("HOD ANCHORS", "STAGES", "LIVE MAP", "BONUS / ADJUSTMENT"):

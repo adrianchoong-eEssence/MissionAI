@@ -5,10 +5,6 @@ import secrets
 
 import streamlit as st
 
-from data.runtime_database import RuntimeDatabaseError
-from data.standard_core_v2_adapter import get_standard_database
-from screens.hunt_participant import _dashboard, _persist_session, _restore, _valid
-from screens.participant import normalise_join_name, restore_participant_identity
 from services.personal_key_credentials import derive_personal_key_credential
 
 
@@ -47,12 +43,83 @@ def _has_resume_token() -> bool:
     return bool(str(token or "").strip())
 
 
+def _query_value(name: str) -> str:
+    value = st.query_params.get(name, "")
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    return str(value or "").strip()
+
+
+def _valid(player: dict | None, event_id: str) -> bool:
+    return bool(
+        player
+        and str(player.get("EventID", "")) == event_id
+        and player.get("ParticipantID")
+        and player.get("TeamID")
+        and player.get("SessionToken")
+    )
+
+
+def _normalise_join_name(first_name: str, last_name: str) -> str:
+    return " ".join(" ".join([str(first_name or ""), str(last_name or "")]).split())
+
+
+def _restore_participant_identity(player: dict) -> None:
+    """Persist only canonical identity returned by the public participant RPC."""
+    fields = {
+        "participant_id": player.get("ParticipantID", ""),
+        "participant_event_id": player.get("EventID", ""),
+        "participant_name": player.get("Name", ""),
+        "participant_team": player.get("Team", ""),
+        "participant_team_id": player.get("TeamID", ""),
+        "participant_country": player.get("Country", ""),
+        "participant_flag": player.get("Flag", ""),
+        "participant_is_leader": bool(player.get("IsLeader", False)),
+        "participant_points": player.get("Points", 0),
+        "participant_event_name": player.get("EventName", "EXOS Event"),
+        "participant_session_token": player.get("SessionToken", ""),
+    }
+    st.session_state.update(fields)
+
+
+def _persist_session(player: dict, event_id: str) -> None:
+    for name, value in {
+        "event_id": event_id,
+        "session_token": str(player.get("SessionToken") or ""),
+    }.items():
+        if value and _query_value(name) != value:
+            st.query_params[name] = value
+    for name in list(st.query_params):
+        if str(name).casefold() in {
+            "join_code",
+            "credential",
+            "enrollment_credential",
+            "device_id",
+            "participant_name",
+        }:
+            del st.query_params[name]
+
+
+def _restore(runtime, event_id: str) -> dict | None:
+    token = str(st.session_state.get("participant_session_token", "") or _query_value("session_token")).strip()
+    if not token:
+        return None
+    try:
+        player = runtime.get_player_by_token(token)
+    except Exception:
+        return None
+    if _valid(player, event_id):
+        _restore_participant_identity(player)
+        return player
+    return None
+
+
 def _complete_identity(player: dict | None, event_id: str, *, hod_credential: str = "") -> bool:
     if not _valid(player, event_id):
         return False
     if hod_credential:
         st.session_state["enca_hod_credential"] = hod_credential
-    restore_participant_identity(player)
+    _restore_participant_identity(player)
     _persist_session(player, event_id)
     st.rerun()
     return True
@@ -68,8 +135,12 @@ def _render_runtime_message() -> None:
 def _runtime_or_none():
     """Open the runtime only for an explicit participant action or resume."""
     try:
+        # Keep the cold landing page independent of the full runtime and its
+        # legacy participant-component import graph.
+        from data.standard_core_v2_adapter import get_standard_database
+
         return get_standard_database()
-    except RuntimeDatabaseError:
+    except Exception:
         _render_runtime_message()
         return None
 
@@ -94,6 +165,10 @@ def render_enca_george_town_participant(*, event_id: str, join_code: str) -> Non
         player = _restore(runtime, event_id)
         if _valid(player, event_id):
             _persist_session(player, event_id)
+            # The dashboard is intentionally lazy: the bare landing page must
+            # not load optional browser components before it can render.
+            from screens.hunt_participant import _dashboard
+
             _dashboard(
                 runtime, player, device_id,
                 join_code=join_code,
@@ -108,7 +183,7 @@ def render_enca_george_town_participant(*, event_id: str, join_code: str) -> Non
         last_name = st.text_input("Last / Family Name", autocomplete="family-name")
         entered = st.form_submit_button("ENTER MISSION AI", type="primary", width="stretch")
     if entered:
-        name = normalise_join_name(first_name, last_name)
+        name = _normalise_join_name(first_name, last_name)
         if not first_name.strip() or not last_name.strip():
             st.error("Enter both your first / given and last / family name.")
         else:
@@ -119,7 +194,7 @@ def render_enca_george_town_participant(*, event_id: str, join_code: str) -> Non
                 st.session_state["participant_device_id"] = device_id
                 try:
                     player = runtime.register_hybrid_anchored_random_participant(join_code, name, device_id, credential)
-                except RuntimeDatabaseError:
+                except Exception:
                     st.error(_CONNECTION_MESSAGE)
                 else:
                     if not _complete_identity(player, event_id):
@@ -145,7 +220,7 @@ def render_enca_george_town_participant(*, event_id: str, join_code: str) -> Non
                     player = runtime.claim_hybrid_anchored_hod_personal_key(join_code, hod_credential, device_id)
                 except ValueError:
                     st.error("Enter a valid Personal Key and try again.")
-                except RuntimeDatabaseError:
+                except Exception:
                     st.error("This Personal Key could not be used right now. Please retry shortly or contact Mission Control.")
                 else:
                     if not _complete_identity(player, event_id, hod_credential=hod_credential):
